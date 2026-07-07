@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}Health · {{ app_name }}{% endblock %}
+
+{% block content %}
+<main class="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center gap-6 px-6">
+  <div class="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
+    <div class="flex items-center justify-between">
+      <h1 class="text-lg font-semibold text-slate-900">{{ app_name }}</h1>
+      {% if db_ok %}
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-700">
+          <span class="h-2 w-2 rounded-full bg-emerald-500"></span> healthy
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700">
+          <span class="h-2 w-2 rounded-full bg-rose-500"></span> degraded
+        </span>
+      {% endif %}
+    </div>
+
+    <dl class="mt-6 divide-y divide-slate-100 text-sm">
+      <div class="flex justify-between py-2">
+        <dt class="text-slate-500">Environment</dt>
+        <dd class="font-medium text-slate-900">{{ environment }}</dd>
+      </div>
+      <div class="flex justify-between py-2">
+        <dt class="text-slate-500">Schema</dt>
+        <dd class="font-mono text-slate-900">{{ schema }}</dd>
+      </div>
+      <div class="flex justify-between py-2">
+        <dt class="text-slate-500">Database</dt>
+        <dd class="font-medium {% if db_ok %}text-emerald-700{% else %}text-rose-700{% endif %}">
+          {% if db_ok %}ok{% else %}unreachable{% endif %}
+        </dd>
+      </div>
+    </dl>
+  </div>
+  <p class="text-xs text-slate-400">MyNestra v2 · P0 scaffold</p>
+</main>
+{% endblock %}
