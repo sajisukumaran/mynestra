@@ -1,0 +1,8 @@
+/* MyNestra — Tailwind v4 CSS-first entry (compiled to static/css/tailwind.build.css).
+   The design-token system + cotton component layer land in P2; this is the minimal P0 pipeline. */
+
+@import "tailwindcss";
+
+/* Templates live outside this file's tree, so register them explicitly for class detection. */
+@source "../../templates";
+@source "../../apps/**/templates";

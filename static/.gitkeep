@@ -1,0 +1,1 @@
+# Tailwind compiles css/tailwind.build.css here (gitignored); nginx serves /static/ from this dir.
