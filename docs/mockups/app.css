@@ -377,30 +377,38 @@ img { max-width:100%; display:block; }
    App launcher tiles
    ===================================================================== */
 .launcher-wrap { min-height:calc(100vh - var(--topbar-h)); display:flex; flex-direction:column;
-  align-items:center; justify-content:center; padding:48px 24px 80px; }
-.launcher-inner { width:100%; max-width:880px; }
-.launcher-hi { text-align:center; margin-bottom:40px; }
-.launcher-hi h1 { font-size:var(--fs-4xl); font-weight:700; letter-spacing:-.025em; }
-.launcher-hi p { color:var(--text-muted); font-size:var(--fs-lg); margin-top:8px; }
-.tiles { display:grid; grid-template-columns:repeat(2,1fr); gap:22px; }
-.app-tile { display:flex; flex-direction:column; gap:16px; padding:26px; border-radius:var(--r-lg);
+  align-items:center; justify-content:center; padding:40px 24px 64px; }
+.launcher-inner { width:100%; max-width:1140px; }
+.launcher-hi { text-align:center; margin-bottom:26px; }
+.launcher-hi h1 { font-size:var(--fs-3xl); font-weight:700; letter-spacing:-.02em; }
+.launcher-hi p { color:var(--text-muted); font-size:var(--fs-md); margin-top:6px; }
+
+/* compact app "infolets" — small, dense, scale to many modules */
+.tiles { display:grid; grid-template-columns:repeat(auto-fill, minmax(236px,1fr)); gap:14px; }
+.app-tile { display:flex; flex-direction:column; gap:12px; padding:15px 16px; border-radius:var(--r-md);
   background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow-sm);
-  transition:transform .14s ease, box-shadow .14s ease, border-color .14s; position:relative; overflow:hidden; }
-.app-tile:hover { transform:translateY(-3px); box-shadow:var(--shadow-lg); border-color:var(--border-strong); text-decoration:none; }
-.app-tile .tile-glyph { width:56px; height:56px; border-radius:15px; display:grid; place-items:center; }
+  transition:transform .12s ease, box-shadow .12s ease, border-color .12s; position:relative; }
+.app-tile:hover { transform:translateY(-2px); box-shadow:var(--shadow); border-color:var(--border-strong); text-decoration:none; }
+.tile-head { display:flex; align-items:center; gap:11px; }
+.tile-glyph { width:40px; height:40px; border-radius:11px; flex:none; display:grid; place-items:center; }
 .tile-glyph.contacts { background:var(--accent-soft); color:var(--accent-soft-fg); }
 .tile-glyph.orgs { background:#dbeafe; color:#1d4ed8; }
 :root[data-theme="dark"] .tile-glyph.orgs { background:rgba(59,130,246,.18); color:#93c5fd; }
-.app-tile h3 { font-size:var(--fs-xl); font-weight:700; }
-.app-tile p { color:var(--text-muted); font-size:var(--fs-base); margin-top:3px; }
-.tile-stats { display:flex; gap:20px; margin-top:auto; padding-top:6px; }
-.tile-stat .n { font-size:var(--fs-2xl); font-weight:700; letter-spacing:-.02em; color:var(--text-strong); }
-.tile-stat .l { font-size:var(--fs-xs); color:var(--text-subtle); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
-.tile-go { position:absolute; top:26px; right:26px; color:var(--text-subtle); }
+.tile-glyph.soon { background:var(--surface-3); color:var(--text-subtle); }
+.app-tile h3 { font-size:var(--fs-md); font-weight:700; line-height:1.2; }
+.app-tile .tile-desc { color:var(--text-muted); font-size:var(--fs-xs); margin-top:2px;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tile-go { margin-left:auto; align-self:flex-start; color:var(--text-subtle); }
 .app-tile:hover .tile-go { color:var(--accent-text); }
-.tile-ghost { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
-  padding:26px; border-radius:var(--r-lg); border:1.5px dashed var(--border-strong); color:var(--text-subtle);
-  background:none; min-height:180px; }
+.tile-stats { display:flex; gap:16px; margin-top:auto; padding-top:11px; border-top:1px solid var(--border); }
+.tile-stat .n { font-size:var(--fs-lg); font-weight:700; letter-spacing:-.01em; color:var(--text-strong); line-height:1; }
+.tile-stat .l { font-size:var(--fs-xs); color:var(--text-subtle); text-transform:uppercase; letter-spacing:.04em; font-weight:600; margin-top:3px; }
+/* "coming soon" module tile */
+.app-tile.soon { box-shadow:none; border-style:dashed; }
+.app-tile.soon:hover { transform:none; box-shadow:none; }
+.app-tile.soon h3 { color:var(--text-muted); }
+.tile-ghost { display:flex; align-items:center; gap:11px; padding:15px 16px; border-radius:var(--r-md);
+  border:1.5px dashed var(--border-strong); color:var(--text-subtle); background:none; }
 
 /* =====================================================================
    Tables

@@ -284,7 +284,8 @@ applicable. Props/slots in parentheses.
 `button` (variant: primary/default/ghost/danger; size sm/md; icon-only; leading/trailing icon) ·
 `badge` (semantic + neutral + lock; soft style) · `chip` (category tint; removable) ·
 `filter-chip` (selectable, active, count) · `card` (head/title/actions/body/foot) ·
-`stat-tile` (icon tint, value, label, delta up/down) · `app-tile` (launcher; glyph, counts) ·
+`stat-tile` (icon tint, value, label, delta up/down) · `app-tile` (compact launcher infolet: glyph,
+name, description, metrics strip; "coming soon" variant) ·
 `avatar` (initials fallback, photo, sizes sm→xl, square variant, group + overflow) ·
 `page-header` (breadcrumb, title, subtitle, actions) · `field` (label, required, help, error) with
 inputs `text/select/textarea` · `partial-date-input` (day / month-select / year; XX/XXXX aware) ·
@@ -298,9 +299,11 @@ inputs `text/select/textarea` · `partial-date-input` (day / month-select / year
 
 ### 7.4 Layout & Gentelella-derived patterns
 
-- **Launcher** (`/t/<slug>/`): tablet-style home — a greeting + large **app tiles** (Contacts,
-  Organizations) with live counts, and a placeholder tile for future modules. Gear (Setup) in the
-  top bar for Owners.
+- **Launcher** (`/t/<slug>/`): tablet-style home — a greeting + **compact app "infolets"** on a
+  dense auto-fill grid (~4 per row) that **scales to many modules**. Each active tile shows a glyph,
+  name, one-line description, and a metrics strip of up to three live counts (e.g. Contacts →
+  People/Families/Birthdays). Modules not yet enabled render as muted **"coming soon"** tiles of the
+  same footprint. Gear (Setup) in the top bar for Owners.
 - **App shell:** sticky 57px **top bar** (brand · tenant switcher · global search · theme toggle ·
   gear (Owner) · notifications · user menu) + a **collapsible per-app sidebar** showing only that
   app's menu plus a small common section (⊞ All apps; Setup for Owners). Sidebar collapses to a
@@ -366,7 +369,8 @@ Members & invitations, **Appearance** (household palette; per-user theme), Recen
 
 - **One Django app per module.** A module registers metadata on its `AppConfig` (a small registry):
   `name`, `icon` (Lucide id), `accent-tint` (for its glyph), `count_callable` (live launcher count),
-  `url` (its dashboard). The launcher renders a tile per registered module the tenant has enabled.
+  `url` (its dashboard). The launcher renders a compact infolet per registered module the tenant has
+  enabled; modules known but not yet enabled render as muted "coming soon" tiles.
 - **Per-app sidebar spec:** an ordered menu (label, icon, url, optional count) + the shared common
   section (All apps; Setup for Owners). Collapse behavior is inherited from the shell.
 - **Dashboard pattern:** stat tiles + recents + upcoming, reusing the same components.
