@@ -1,0 +1,6 @@
+# Keep line endings deterministic across Windows/Linux so scripts run inside containers.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.woff2 binary

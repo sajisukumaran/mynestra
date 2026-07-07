@@ -1,0 +1,38 @@
+[project]
+name = "mynestra"
+version = "0.0.0"
+description = "MyNestra v2 — personal multi-tenant household application"
+requires-python = ">=3.12"
+dependencies = [
+    "Django>=5.2,<5.3",
+    "django-tenants>=3.10.2,<3.11",
+    "psycopg[binary]>=3.2.1,<3.3",
+    "django-environ>=0.12",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-django>=4.9",
+    "factory-boy>=3.3",
+    "ruff>=0.8",
+]
+
+# Deps-only ("virtual") project: uv installs dependencies into the environment but does not
+# package/install the app itself — the source is found on sys.path (via the mounted /app in Docker).
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["**/migrations/*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "DJ"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings.test"
+python_files = ["test_*.py", "tests.py"]
+testpaths = ["tests"]
+addopts = "-ra"
