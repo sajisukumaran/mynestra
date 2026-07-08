@@ -1,0 +1,12 @@
+<c-vars name="" value="slate" class="" />
+{% comment %}Category chip-tint picker (DESIGN §7.1 curated set). Reuses .swatches/.sw; a hidden
+input carries the chosen tint for form POST. Presentation-only Alpine (no business logic).{% endcomment %}
+<div class="swatches{% if class %} {{ class }}{% endif %}"
+     x-data="{ v: '{{ value }}', tints: ['teal','blue','violet','amber','rose','emerald','sky','slate','orange','fuchsia'] }"
+     {{ attrs }}>
+  <input type="hidden" name="{{ name }}" :value="v">
+  <template x-for="t in tints" :key="t">
+    <button type="button" class="sw" :class="['chip-'+t, { active: v===t }]" :title="t"
+            :aria-label="'Tint '+t" @click="v = t"></button>
+  </template>
+</div>

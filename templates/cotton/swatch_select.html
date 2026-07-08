@@ -1,0 +1,14 @@
+<c-vars name="palette" value="teal" class="" />
+{% comment %}Household palette picker (the 5 curated palettes, DESIGN §7.2). Clicking live-previews
+via the ui store (recolors immediately) AND sets the hidden input for form POST — so the owner
+sees the change before saving. Reuses .swatches/.sw; presentation-only.{% endcomment %}
+<div class="swatches{% if class %} {{ class }}{% endif %}"
+     x-data="{ v: '{{ value }}', pals: [['teal','#0f766e'],['indigo','#4f46e5'],['blue','#2563eb'],['violet','#7c3aed'],['graphite','#475569']] }"
+     {{ attrs }}>
+  <input type="hidden" name="{{ name }}" :value="v">
+  <template x-for="p in pals" :key="p[0]">
+    <button type="button" class="sw" :style="'background:'+p[1]" :title="p[0]"
+            :aria-label="'Palette '+p[0]" :class="{ active: v===p[0] }"
+            @click="v = p[0]; $store.ui.setPalette(p[0])"></button>
+  </template>
+</div>

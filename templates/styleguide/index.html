@@ -134,6 +134,18 @@
       </div>
     </c-card>
 
+    {# ---- Selectors ---- #}
+    <c-card title="Selectors (Setup)">
+      <div class="form-grid">
+        <c-field label="Category tint" help="Curated chip tints (DESIGN §7.1); independent of the accent.">
+          <c-tint-select name="color" value="violet" />
+        </c-field>
+        <c-field label="Household palette" help="The 5 curated palettes; clicking live-previews the accent.">
+          <c-swatch-select name="palette" value="teal" />
+        </c-field>
+      </div>
+    </c-card>
+
     {# ---- Data display ---- #}
     <span id="data"></span>
     <div class="stat-grid">
