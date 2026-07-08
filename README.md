@@ -61,6 +61,20 @@ then serves. The `tailwind` container compiles `static/css/tailwind.build.css` o
 
 `make <target>` mirrors these on POSIX shells.
 
+## UI system (P2)
+
+The design system is ported from the approved mockups (`docs/mockups/`, normative). Tokens live as
+CSS custom properties in `assets/css/app.css` (compiled by the Tailwind v4 watcher); light/dark +
+5 selectable accent palettes switch via `data-theme` / `data-palette` on `<html>`. Every UI pattern
+is a **django-cotton** component under `templates/cotton/` (`<c-button>`, `<c-card>`, `<c-app-tile>`,
+`<c-modal>`, …). Feature pages **compose components only** — no ad-hoc styling. Alpine 3 drives
+presentation (theme/palette toggle, sidebar collapse, overlays); Inter is self-hosted; Lucide ships
+as an inline SVG sprite (`<c-icon name="…">`).
+
+- **`/styleguide/`** (dev-only, DEBUG): every component/variant/state, with a theme toggle (top bar)
+  and palette switcher. This is the UI-gate review surface — compare it against
+  `docs/mockups/preview.html`.
+
 ## Layout
 
 ```
