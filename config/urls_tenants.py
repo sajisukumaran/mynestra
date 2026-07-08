@@ -12,6 +12,7 @@ from apps.core.views import health
 
 urlpatterns = [
     path("", account_views.tenant_home, name="tenant-home"),
+    path("contacts/", include("apps.contacts.urls")),
     path("setup/", include("apps.setup.urls")),
     # Legacy P1 invite route; invitations now live in Setup → Members (P3).
     path(

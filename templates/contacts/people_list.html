@@ -1,0 +1,86 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}People{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Contacts</span><c-icon name="chevron-right" /><span class="strong">People</span></c-breadcrumb>
+
+<c-page-header title="People" subtitle="{{ total }} {{ total|pluralize:'person,people' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}contacts/people/new/"><c-icon name="plus" /> New person</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by name, phone, email…"></label>
+    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+    {% if sort != 'name' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}contacts/people/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not category %} active{% endif %}" href="{% querystring category=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    {% for c in categories %}
+    <a class="fchip{% if category == c.id|stringformat:'s' %} active{% endif %}" href="{% querystring category=c.id page=None %}">{{ c.name }} <span class="cnt tnum">{{ c.n }}</span></a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if people %}
+    <c-table>
+      <thead><tr>
+        <c-th sortable {% if sort == 'name' or sort == '-name' %}sorted dir="{% if sort == 'name' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring sort=sort_name_next page=None %}">Name</a></c-th>
+        <c-th>Categories</c-th>
+        <c-th>Primary contact</c-th>
+        <c-th>Location</c-th>
+        <c-th sortable {% if sort == 'added' or sort == '-added' %}sorted dir="{% if sort == 'added' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring sort=sort_added_next page=None %}">Added</a></c-th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for p in people %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}contacts/people/{{ p.pk }}/">
+              {% if p.photo %}<c-avatar src="{{ p.photo.url }}" size="sm" alt="{{ p.display_name }}" />{% else %}<c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>{% endif %}
+              <div><div class="pc-name">{{ p.first_name }} {{ p.last_name }}</div>{% if p.list_subtitle %}<div class="pc-sub">{{ p.list_subtitle }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td>
+            {% for c in p.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip> {% endfor %}
+            {% if p.is_deceased %}<c-badge variant="lock"><c-icon name="info" /> Deceased</c-badge>{% endif %}
+          </td>
+          <td>
+            {% with ch=p.primary_channel %}
+            {% if ch %}<div class="row"><c-icon name="{{ ch.icon }}" size="sm" class="subtle" /><span{% if ch.type == 'phone' or ch.type == 'whatsapp' %} class="tnum"{% endif %}>{{ ch.value }}</span></div>
+            {% else %}<span class="subtle">No contact yet</span>{% endif %}
+            {% endwith %}
+          </td>
+          <td class="muted">{{ p.primary_city|default:"—" }}</td>
+          <td class="muted tnum">{{ p.created_at|date:"d M Y" }}</td>
+          <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}contacts/people/{{ p.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}
+        <a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>
+        {% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="user-round"
+      title="{% if q or category %}No people match{% else %}No people yet{% endif %}"
+      text="{% if q or category %}Try a different search or filter.{% else %}Add your first contact to get started.{% endif %}">
+      {% if not q and not category %}<c-button variant="primary" href="{{ ui_tenant_url }}contacts/people/new/"><c-icon name="plus" /> New person</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

@@ -137,6 +137,18 @@ class Person(SoftDeleteModel):
         return f"{start} – {end}"
 
     @property
+    def list_subtitle(self) -> str:
+        """Secondary line under the name in the People list (goes-by · age, or lifespan)."""
+        if self.is_deceased:
+            return self.lifespan
+        parts = []
+        if self.preferred_name:
+            parts.append(self.preferred_name)
+        if self.age is not None:
+            parts.append(str(self.age))
+        return " · ".join(parts)
+
+    @property
     def primary_channel(self):
         return self.channels.filter(is_primary=True).first() or self.channels.first()
 
