@@ -21,13 +21,32 @@ uv lock                     # generate/update uv.lock (first time only)
 ./dev.ps1 up
 ```
 
+Create a demo login + household, then open the app:
+
+```powershell
+./dev.ps1 manage bootstrap --email you@example.com --password "changeme123" --name "My Household" --slug home
+```
+
 Then open:
 
-- App (via nginx): <http://localhost:8080/health/>
-- Mailpit (email UI): <http://localhost:8025>
+- App (via nginx): <http://localhost:8080/> — sign in, land on your household
+- Health: <http://localhost:8080/health/>
+- Mailpit (email UI): <http://localhost:8026> (8025 by default; overridden here to avoid a clash)
 
 The `web` container waits for the DB, runs `migrate_schemas --shared`, ensures the public tenant,
 then serves. The `tailwind` container compiles `static/css/tailwind.build.css` on change.
+
+## Identity & tenancy
+
+- **Invite-only**: sign-up is disabled. `bootstrap` creates the first user + household; everyone
+  else joins via a tokened `/invite/<token>/` link (Owner sends it from `/t/<slug>/invite/`).
+- **Provisioning** (`bootstrap` / `create_tenant`) creates the tenant's PostgreSQL schema and seeds
+  the §6 system catalogs (categories + relationship types), then adds a founding OWNER membership.
+- **Routing** is path-based: each household lives under `/t/<slug>/`. Non-members get a 403.
+
+```powershell
+./dev.ps1 manage create_tenant --name "Second Home" --slug second --owner-email you@example.com
+```
 
 ## Common tasks
 
