@@ -1,28 +1,40 @@
 {% extends "base.html" %}
 {% block title %}{{ tenant.name }} · MyNestra{% endblock %}
-{% block content %}
-<div class="mx-auto max-w-3xl px-6 py-10">
-  <header class="flex items-center justify-between">
-    <div>
-      <p class="text-xs uppercase tracking-wide text-slate-400">Household</p>
-      <h1 class="text-2xl font-semibold text-slate-900">{{ tenant.name }}</h1>
-    </div>
-    <div class="flex items-center gap-4">
-      {# Public (un-prefixed) routes referenced by literal path: they aren't in the tenant urlconf. #}
-      <a class="text-sm text-slate-700 underline" href="/">Switch household</a>
-      <form method="post" action="/logout/">{% csrf_token %}
-        <button class="text-sm text-slate-500 underline" type="submit">Sign out</button>
-      </form>
-    </div>
-  </header>
 
-  <div class="mt-8 rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-    <p class="text-sm text-slate-500">
-      Welcome. The launcher and app shell arrive in P2 — this is the P1 identity landing.
-    </p>
-    {% if is_owner %}
-      <a class="mt-6 inline-block rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800" href="invite/">Invite someone</a>
-    {% endif %}
+{% block content %}
+<div class="app app--launcher" x-data>
+  <c-topbar tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+            user_initials="{{ ui_user_initials }}" show_search="true"
+            {% if is_owner %}show_setup="true" setup_url="setup/"{% endif %} home_url="." />
+
+  <div class="launcher-wrap">
+    <div class="launcher-inner">
+      <div class="launcher-hi">
+        <div class="eyebrow" style="margin-bottom:8px;">{{ tenant.name }}</div>
+        <h1>Welcome{% if request.user.full_name %}, {{ request.user.full_name }}{% endif %}</h1>
+        <p>Choose an app to get started.</p>
+      </div>
+
+      <div class="tiles">
+        <c-app-tile name="Contacts" description="People, families &amp; relationships" glyph="users" tint="contacts" href="contacts/">
+          <c-tile-stat n="0" label="People" />
+          <c-tile-stat n="0" label="Families" />
+          <c-tile-stat n="0" label="Birthdays" />
+        </c-app-tile>
+
+        <c-app-tile name="Organizations" description="Companies, branches &amp; key people" glyph="building-2" tint="orgs" href="organizations/">
+          <c-tile-stat n="0" label="Orgs" />
+          <c-tile-stat n="0" label="Branches" />
+        </c-app-tile>
+
+        <c-app-tile soon name="Banking" description="Accounts, cards &amp; bills" glyph="landmark" />
+        <c-app-tile soon name="Health" description="Records, visits &amp; medications" glyph="activity" />
+        <c-app-tile soon name="Documents" description="Files, IDs &amp; certificates" glyph="file-text" />
+        <c-app-tile soon name="Reminders" description="Tasks &amp; important dates" glyph="calendar-days" />
+        <c-app-tile soon name="Vehicles" description="Cars, service &amp; insurance" glyph="car" />
+        <c-app-tile soon name="Travel" description="Trips, bookings &amp; documents" glyph="plane" />
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}

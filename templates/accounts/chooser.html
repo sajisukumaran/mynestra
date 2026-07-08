@@ -1,28 +1,26 @@
 {% extends "base.html" %}
 {% block title %}Choose a household · MyNestra{% endblock %}
 {% block content %}
-<main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-6 px-6">
-  <div class="rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-    <div class="flex items-center justify-between">
-      <h1 class="text-lg font-semibold text-slate-900">Your households</h1>
+<main class="auth-wrap">
+  <c-card class="auth-card" title="Your households">
+    <c-slot name="actions">
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}
-        <button class="text-sm text-slate-500 underline" type="submit">Sign out</button>
+        <c-button type="submit" variant="ghost" size="sm">Sign out</c-button>
       </form>
-    </div>
+    </c-slot>
     {% if memberships %}
-      <ul class="mt-6 divide-y divide-slate-100">
+      <div class="stack">
         {% for m in memberships %}
-          <li>
-            <a class="flex items-center justify-between py-3 hover:bg-slate-50" href="/t/{{ m.tenant.slug }}/">
-              <span class="font-medium text-slate-900">{{ m.tenant.name }}</span>
-              <span class="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">{{ m.role }}</span>
-            </a>
-          </li>
+          <a class="nav-item" href="/t/{{ m.tenant.slug }}/">
+            <c-avatar tint="teal" size="sm">{{ m.tenant.name|slice:":2"|upper }}</c-avatar>
+            <span class="lbl strong">{{ m.tenant.name }}</span>
+            <c-badge>{{ m.role }}</c-badge>
+          </a>
         {% endfor %}
-      </ul>
+      </div>
     {% else %}
-      <p class="mt-6 text-sm text-slate-500">You don't belong to any households yet. Ask an owner to invite you.</p>
+      <c-empty-state icon="inbox" title="No households yet" text="Ask an owner to invite you to a household." />
     {% endif %}
-  </div>
+  </c-card>
 </main>
 {% endblock %}
