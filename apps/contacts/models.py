@@ -75,6 +75,11 @@ class Person(SoftDeleteModel):
     photo = models.ImageField(upload_to="person_photos/", null=True, blank=True)
     notes = models.TextField(blank=True)
 
+    categories = models.ManyToManyField(
+        "setup.Category", related_name="people", blank=True,
+        limit_choices_to={"kind": "PERSON"},
+    )
+
     history = HistoricalRecords()
 
     class Meta:
@@ -220,3 +225,27 @@ class Address(TimeStampedModel):
         city = f"{self.city}," if self.city and region_postal else self.city
         left = " ".join(p for p in [city, region_postal] if p)
         return f"{left} · {self.country}" if self.country and left else (left or self.country)
+
+
+class ImportantDate(TimeStampedModel):
+    """Extra dated events for a person (DESIGN §5). Birthday/anniversary live on Person; this holds
+    the rest (e.g. Retirement). Date is a PartialDate (any part may be blank)."""
+
+    person = models.ForeignKey(
+        "contacts.Person", on_delete=models.CASCADE, related_name="important_dates"
+    )
+    label = models.CharField(max_length=80)
+    date_year = models.SmallIntegerField(null=True, blank=True)
+    date_month = models.SmallIntegerField(null=True, blank=True)
+    date_day = models.SmallIntegerField(null=True, blank=True)
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["date_month", "date_day", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.label}: {self.date.display}"
+
+    @property
+    def date(self) -> PartialDate:
+        return PartialDate.from_instance(self, "date")
