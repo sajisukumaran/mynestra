@@ -32,9 +32,10 @@ ALLOW_HARD_DELETE = env("ALLOW_HARD_DELETE")
 # arrive in later phases.
 SHARED_APPS = [
     "django_tenants",          # must be first
-    "apps.tenants",            # Tenant + Domain (TENANT_MODEL / TENANT_DOMAIN_MODEL)
+    "apps.tenants",            # Tenant + Domain + Membership + Invitation
     "apps.users",              # custom AUTH_USER_MODEL (shared identity)
-    "apps.core",               # health + shared views (no models)
+    "apps.accounts",           # identity views: chooser, invitation accept/create (no models)
+    "apps.core",               # health + middleware + shared views (no models)
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -44,10 +45,9 @@ SHARED_APPS = [
 ]
 
 TENANT_APPS = [
-    # django-tenants requires at least one tenant app. `core` has no models but does serve a
-    # per-tenant route (/t/<slug>/health/), so it legitimately belongs here. Feature apps
-    # (contacts, organizations, relationships, families, setup) join this list in P3+.
-    "apps.core",
+    "apps.setup",              # Category catalogs (seeded §6)
+    "apps.relationships",      # P2P/P2O relationship-type catalogs (seeded §6)
+    # More feature apps (contacts, organizations, families) join this list in P4+.
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]
@@ -64,6 +64,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.middleware.MembershipMiddleware",  # after auth; enforces per-tenant access
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -109,6 +110,11 @@ DATABASE_ROUTERS = ["django_tenants.routers.TenantSyncRouter"]
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "users.User"
 
+# --- Auth flow ------------------------------------------------------------
+LOGIN_URL = "/login/"
+LOGIN_REDIRECT_URL = "/"          # tenant chooser
+LOGOUT_REDIRECT_URL = "/login/"
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -128,6 +134,10 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+
+# --- Media (tenant logos, later avatars) ---------------------------------
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
 
 # --- Email (Mailpit in dev) ----------------------------------------------
 EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
