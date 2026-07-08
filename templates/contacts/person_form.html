@@ -1,0 +1,126 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}{% if mode == 'create' %}New person{% else %}Edit person{% endif %}{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}contacts/people/">People</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/">{{ person.display_name }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New person{% else %}Edit person{% endif %}" subtitle="Fields marked * are required. Everything else is optional." />
+
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  <div class="stack stack-20">
+
+    {# Identity #}
+    <c-card title="Identity" icon="contact">
+      <div class="photo-row">
+        {% if person.photo %}<c-avatar src="{{ person.photo.url }}" size="lg" alt="{{ person.display_name }}" />
+        {% else %}<c-avatar size="lg" tint="{{ person.avatar_tint|default:'teal' }}">{{ person.initials }}</c-avatar>{% endif %}
+        <div class="stack">
+          <div class="row wrap">
+            <c-file name="photo" accept="image/*" />
+            {% if person.photo %}<label class="row"><input type="checkbox" name="photo-clear"> <span class="muted">Remove</span></label>{% endif %}
+          </div>
+          <span class="help">JPG or PNG. A coloured initials avatar is used until you add one.</span>
+        </div>
+      </div>
+      <div class="form-grid">
+        <c-field label="First name" required error="{{ form.first_name.errors.0 }}"><div class="control">{{ form.first_name }}</div></c-field>
+        <c-field label="Middle name" error="{{ form.middle_name.errors.0 }}"><div class="control">{{ form.middle_name }}</div></c-field>
+        <c-field label="Last name" required error="{{ form.last_name.errors.0 }}"><div class="control">{{ form.last_name }}</div></c-field>
+        <c-field label="Preferred name" help="Shown across the app instead of the full name." error="{{ form.preferred_name.errors.0 }}"><div class="control">{{ form.preferred_name }}</div></c-field>
+        <c-field label="Gender" error="{{ form.gender.errors.0 }}"><div class="control is-select">{{ form.gender }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
+        <c-field label="Pronouns" error="{{ form.pronouns.errors.0 }}"><div class="control">{{ form.pronouns }}</div></c-field>
+      </div>
+    </c-card>
+
+    {# Life events #}
+    <c-card title="Life events" icon="cake">
+      <div class="stack-16" x-data="{ deceased: {{ form.is_deceased.value|yesno:'true,false' }} }">
+        <div class="form-grid">
+          <c-field label="Date of birth" help="Leave any part blank if unknown — renders as XX / XXXX." error="{{ form.dob_day.errors.0 }}">
+            <c-partial-date prefix="dob" day="{{ form.dob_day.value|default:'' }}" month="{{ form.dob_month.value|default:'' }}" year="{{ form.dob_year.value|default:'' }}" />
+          </c-field>
+          <c-field label="Marital status" error="{{ form.marital_status.errors.0 }}"><div class="control is-select">{{ form.marital_status }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
+          <c-field label="Anniversary" error="{{ form.anniversary_day.errors.0 }}">
+            <c-partial-date prefix="anniversary" day="{{ form.anniversary_day.value|default:'' }}" month="{{ form.anniversary_month.value|default:'' }}" year="{{ form.anniversary_year.value|default:'' }}" />
+          </c-field>
+          <c-field label="Blood group" error="{{ form.blood_group.errors.0 }}"><div class="control is-select">{{ form.blood_group }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
+        </div>
+        <div class="switch-row">
+          <button type="button" role="switch" class="switch" :class="{ on: deceased }" :aria-checked="deceased" @click="deceased = !deceased"></button>
+          <input type="hidden" name="is_deceased" :value="deceased ? 'true' : 'false'">
+          <div class="sw-txt"><div class="t">Deceased</div><div class="d">Turn on to record a date of death.</div></div>
+        </div>
+        <div class="form-grid" x-show="deceased" x-cloak>
+          <c-field label="Date of death" error="{{ form.dod_day.errors.0 }}">
+            <c-partial-date prefix="dod" day="{{ form.dod_day.value|default:'' }}" month="{{ form.dod_month.value|default:'' }}" year="{{ form.dod_year.value|default:'' }}" />
+          </c-field>
+        </div>
+      </div>
+    </c-card>
+
+    {# Background #}
+    <c-card title="Background" icon="briefcase">
+      <div class="form-grid">
+        <c-field label="Occupation" error="{{ form.occupation.errors.0 }}"><div class="control">{{ form.occupation }}</div></c-field>
+        <c-field label="Education" error="{{ form.education.errors.0 }}"><div class="control">{{ form.education }}</div></c-field>
+        <c-field label="Dietary" error="{{ form.dietary.errors.0 }}"><div class="control">{{ form.dietary }}</div></c-field>
+        <c-field label="Languages" help="Comma-separated, e.g. Hindi, English." class="span-all" error="{{ form.languages.errors.0 }}"><div class="control">{{ form.languages }}</div></c-field>
+      </div>
+    </c-card>
+
+    {# Contact channels (inline, Alpine-managed array; parsed server-side) #}
+    <c-card title="Contact channels" icon="phone">
+      <div class="inline-repeater" x-data="{ rows: JSON.parse(document.getElementById('channels-data').textContent) }">
+        <div class="inline-head" x-show="rows.length"><span>Type</span><span>Value</span><span>Label</span><span>Primary</span><span></span></div>
+        <template x-for="(ch, i) in rows" :key="i">
+          <div class="inline-row">
+            <div class="control is-select">
+              <select name="channel_type" x-model="ch.type">
+                <option value="phone">Phone</option><option value="email">Email</option>
+                <option value="whatsapp">WhatsApp</option><option value="url">Website</option><option value="other">Other</option>
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+            <div class="control"><input name="channel_value" x-model="ch.value" placeholder="Value"></div>
+            <div class="control"><input name="channel_label" x-model="ch.label" placeholder="Optional label"></div>
+            <div class="prim">
+              <button type="button" role="switch" class="switch" :class="{ on: ch.primary }" :aria-checked="ch.primary" @click="ch.primary = !ch.primary"></button>
+              <input type="hidden" name="channel_primary" :value="ch.primary ? '1' : '0'">
+            </div>
+            <button type="button" class="rm" @click="rows.splice(i, 1)" title="Remove" aria-label="Remove"><c-icon name="trash-2" size="sm" /></button>
+          </div>
+        </template>
+        <c-button size="sm" class="inline-add" @click="rows.push({ type: 'phone', value: '', label: '', primary: false })"><c-icon name="plus" size="sm" /> Add channel</c-button>
+      </div>
+      {{ channels_data|json_script:"channels-data" }}
+    </c-card>
+
+    {# Categories & notes #}
+    <c-card title="Categories &amp; notes" icon="tag">
+      <div class="stack stack-16">
+        <c-field label="Categories" help="Multiple allowed. System categories (like Family) power other apps.">
+          <div class="row wrap">
+            {% for c in all_categories %}{% with sel=c.id|stringformat:'s' %}
+            <label class="fchip{% if sel in selected_category_ids %} active{% endif %}" x-data="{ on: {% if sel in selected_category_ids %}true{% else %}false{% endif %} }" :class="{ active: on }">
+              <input type="checkbox" name="categories" value="{{ c.id }}" x-model="on" hidden>{{ c.name }}
+            </label>
+            {% endwith %}{% endfor %}
+          </div>
+        </c-field>
+        <c-field label="Notes" error="{{ form.notes.errors.0 }}">
+          <textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea>
+        </c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if form.errors %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}contacts/people/{{ person.pk }}/{% else %}{{ ui_tenant_url }}contacts/people/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create person{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

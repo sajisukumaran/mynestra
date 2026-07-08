@@ -6,11 +6,16 @@ compose cotton components only; the Contacts shell/sidebar wraps every page.
 
 from django.core.paginator import Paginator
 from django.db.models import Count, Q
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.contacts.models import Person
+from apps.contacts.forms import PersonForm
+from apps.contacts.models import ContactChannel, Person
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
+
+
+def tenant_url(request, path=""):
+    return f"/t/{request.tenant.schema_name}/{path}"
 
 # Sort keys → order_by tuples for the People list column headers.
 SORTS = {
@@ -79,3 +84,53 @@ def people_list(request):
         total=total,
     )
     return render(request, "contacts/people_list.html", ctx)
+
+
+# --- Create / edit --------------------------------------------------------------------------
+
+def person_create(request):
+    return _person_form(request, Person(), "create")
+
+
+def person_edit(request, pk):
+    return _person_form(request, get_object_or_404(Person, pk=pk), "edit")
+
+
+def _save_channels(request, person):
+    """Rebuild channels from the Alpine-managed parallel arrays (empty-value rows are skipped)."""
+    types = request.POST.getlist("channel_type")
+    values = request.POST.getlist("channel_value")
+    labels = request.POST.getlist("channel_label")
+    primaries = request.POST.getlist("channel_primary")
+    person.channels.all().delete()
+    for ctype, value, label, primary in zip(types, values, labels, primaries, strict=False):
+        value = value.strip()
+        if value:
+            ContactChannel.objects.create(
+                person=person, type=ctype, value=value, label=label.strip(),
+                is_primary=(primary == "1"),
+            )
+
+
+def _person_form(request, person, mode):
+    form = PersonForm(request.POST or None, request.FILES or None, instance=person)
+    if request.method == "POST" and form.is_valid():
+        person = form.save()
+        _save_channels(request, person)
+        person.categories.set(request.POST.getlist("categories"))
+        return redirect(tenant_url(request, f"contacts/people/{person.pk}/"))
+
+    existing = person.channels.all() if person.pk else []
+    channels_data = [
+        {"type": c.type, "value": c.value, "label": c.label, "primary": c.is_primary}
+        for c in existing
+    ]
+    ctx = contacts_context(
+        request, "people",
+        form=form, person=person, mode=mode,
+        channels_data=channels_data,
+        all_categories=Category.objects.filter(kind=Category.Kind.PERSON),
+        selected_category_ids={str(i) for i in person.categories.values_list("id", flat=True)}
+        if person.pk else set(),
+    )
+    return render(request, "contacts/person_form.html", ctx)

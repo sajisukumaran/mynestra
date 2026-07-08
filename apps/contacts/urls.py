@@ -8,4 +8,6 @@ app_name = "contacts"
 
 urlpatterns = [
     path("people/", views.people_list, name="people"),
+    path("people/new/", views.person_create, name="person-create"),
+    path("people/<int:pk>/edit/", views.person_edit, name="person-edit"),
 ]
