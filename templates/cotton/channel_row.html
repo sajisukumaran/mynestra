@@ -1,0 +1,6 @@
+<c-vars icon="phone" value="" label="" class="" />
+<div class="chan{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <span class="chan-ic"><c-icon name="{{ icon }}" size="sm" /></span>
+  <div class="grow"><div class="c-val">{{ value }}</div>{% if label %}<div class="c-lbl">{{ label }}</div>{% endif %}</div>
+  {% if tail %}<div class="c-tail">{{ tail }}</div>{% endif %}
+</div>

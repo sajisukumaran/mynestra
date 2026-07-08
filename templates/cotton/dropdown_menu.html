@@ -1,0 +1,9 @@
+<c-vars align="left" class="" />
+<div class="dropdown" style="position:relative;" x-data="{ open: false }" @keydown.escape="open = false" {{ attrs }}>
+  <div @click="open = !open">{{ trigger }}</div>
+  <div x-show="open" x-cloak x-transition @click.outside="open = false"
+       class="menu{% if class %} {{ class }}{% endif %}"
+       style="position:absolute; z-index:40; margin-top:6px; {% if align == 'right' %}right:0;{% else %}left:0;{% endif %}">
+    {{ slot }}
+  </div>
+</div>

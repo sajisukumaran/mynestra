@@ -1,0 +1,2 @@
+<c-vars sortable="" sorted="" dir="up" class="" />
+<th class="{% if sortable %}sortable {% endif %}{% if sorted %}sorted{% endif %}{% if class %} {{ class }}{% endif %}" {{ attrs }}><span class="th-in">{{ slot }}{% if sorted %} <c-icon name="arrow-{{ dir }}" size="sm" />{% endif %}</span></th>

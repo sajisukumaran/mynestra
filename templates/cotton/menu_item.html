@@ -1,0 +1,6 @@
+<c-vars icon="" danger="" href="" class="" />
+{% if href %}
+<a class="menu-item{% if danger %} danger{% endif %}{% if class %} {{ class }}{% endif %}" href="{{ href }}" {{ attrs }}>{% if icon %}<c-icon name="{{ icon }}" />{% endif %}{{ slot }}</a>
+{% else %}
+<button type="button" class="menu-item{% if danger %} danger{% endif %}{% if class %} {{ class }}{% endif %}" {{ attrs }}>{% if icon %}<c-icon name="{{ icon }}" />{% endif %}{{ slot }}</button>
+{% endif %}

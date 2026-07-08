@@ -1,0 +1,8 @@
+<c-vars variant="" icon="clock" title="" meta="" class="" />
+<div class="tl-item{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <span class="tl-dot{% if variant %} {{ variant }}{% endif %}"><c-icon name="{{ icon }}" size="sm" /></span>
+  <div class="tl-body">
+    <div class="tl-title">{{ title }}{% if slot %} {{ slot }}{% endif %}</div>
+    {% if meta %}<div class="tl-meta">{{ meta }}</div>{% endif %}
+  </div>
+</div>

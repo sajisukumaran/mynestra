@@ -1,0 +1,6 @@
+<c-vars active="" count="" href="" class="" />
+{% if href %}
+<a class="tab{% if active %} active{% endif %}{% if class %} {{ class }}{% endif %}" href="{{ href }}" {{ attrs }}>{{ slot }}{% if count != "" %}<span class="tcount tnum">{{ count }}</span>{% endif %}</a>
+{% else %}
+<button type="button" class="tab{% if active %} active{% endif %}{% if class %} {{ class }}{% endif %}" {{ attrs }}>{{ slot }}{% if count != "" %}<span class="tcount tnum">{{ count }}</span>{% endif %}</button>
+{% endif %}

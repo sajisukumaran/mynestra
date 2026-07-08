@@ -1,0 +1,6 @@
+<c-vars name="" role="" class="" />
+<div class="rel{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if avatar %}{{ avatar }}{% endif %}
+  <div class="grow"><div class="r-name">{{ name }}</div>{% if role %}<div class="r-role">{{ role }}</div>{% endif %}</div>
+  {% if tail %}<div class="r-tail">{{ tail }}</div>{% endif %}
+</div>

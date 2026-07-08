@@ -1,0 +1,5 @@
+<c-vars note="" class="" />
+<div class="form-foot{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if note %}<span class="foot-note"><c-icon name="info" size="sm" /> {{ note }}</span>{% endif %}
+  {{ slot }}
+</div>

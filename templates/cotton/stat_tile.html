@@ -1,0 +1,6 @@
+<c-vars icon="" tint="teal" value="" label="" class="" />
+<div class="stat{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="stat-top"><span class="stat-ic {{ tint }}"><c-icon name="{{ icon }}" /></span><span class="stat-label">{{ label }}</span></div>
+  <div class="stat-value tnum">{{ value }}</div>
+  {% if foot %}<div class="stat-foot">{{ foot }}</div>{% endif %}
+</div>

@@ -1,0 +1,8 @@
+<c-vars add_label="Add row" class="" />
+<div class="inline-repeater{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="inline-head">
+    {% if head %}{{ head }}{% else %}<span>Type</span><span>Value</span><span>Label</span><span>Primary</span><span></span>{% endif %}
+  </div>
+  {{ slot }}
+  <c-button variant="default" size="sm" class="inline-add"><c-icon name="plus" size="sm" /> {{ add_label }}</c-button>
+</div>

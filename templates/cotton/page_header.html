@@ -1,0 +1,8 @@
+<c-vars title="" subtitle="" class="" />
+<div class="page-header{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="ph-text">
+    <h1 class="page-title">{{ title }}</h1>
+    {% if subtitle %}<p class="page-sub">{{ subtitle }}</p>{% endif %}
+  </div>
+  {% if actions %}<div class="page-actions">{{ actions }}</div>{% endif %}
+</div>

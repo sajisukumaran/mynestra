@@ -1,0 +1,19 @@
+<c-vars name="" description="" glyph="" tint="contacts" href="#" soon="" class="" />
+{% if soon %}
+<div class="app-tile soon{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="tile-head">
+    <span class="tile-glyph soon"><c-icon name="{{ glyph }}" size="lg" /></span>
+    <div class="grow"><h3>{{ name }}</h3><div class="tile-desc">{{ description }}</div></div>
+  </div>
+  <div class="tile-stats"><c-badge>Coming soon</c-badge></div>
+</div>
+{% else %}
+<a class="app-tile{% if class %} {{ class }}{% endif %}" href="{{ href }}" {{ attrs }}>
+  <div class="tile-head">
+    <span class="tile-glyph {{ tint }}"><c-icon name="{{ glyph }}" size="lg" /></span>
+    <div class="grow"><h3>{{ name }}</h3><div class="tile-desc">{{ description }}</div></div>
+    <span class="tile-go"><c-icon name="chevron-right" size="sm" /></span>
+  </div>
+  {% if slot %}<div class="tile-stats">{{ slot }}</div>{% endif %}
+</a>
+{% endif %}

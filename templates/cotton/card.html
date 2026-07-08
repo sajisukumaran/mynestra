@@ -1,0 +1,12 @@
+<c-vars title="" icon="" flush="" class="" />
+<div class="card{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if title or icon or actions %}
+  <div class="card-head">
+    {% if icon %}<c-icon name="{{ icon }}" class="muted" />{% endif %}
+    {% if title %}<span class="card-title">{{ title }}</span>{% endif %}
+    {% if actions %}<div class="card-actions">{{ actions }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% if flush %}{{ slot }}{% else %}<div class="card-body">{{ slot }}</div>{% endif %}
+  {% if foot %}<div class="card-foot">{{ foot }}</div>{% endif %}
+</div>
