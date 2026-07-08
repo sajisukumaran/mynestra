@@ -26,7 +26,7 @@ def ui(request):
     tenant_initials = ""
     tenant_url = ""
     # Household palette (DESIGN §7.2): server-authoritative so Appearance changes recolor the app
-    # for every member. "" on public pages so the /styleguide dev switcher (localStorage) still works.
+    # for every member. Empty on public pages so the /styleguide localStorage switcher still works.
     tenant_palette = ""
     if tenant is not None and tenant.schema_name != get_public_schema_name():
         tenant_name = tenant.name

@@ -12,15 +12,19 @@ from apps.tenants.models import Domain, Tenant
 def public_tenant(transactional_db):
     """Every request goes through TenantSubfolderMiddleware, which needs a public Tenant row.
 
-    Also resets the connection to public at the start of each test: a prior test's client request
-    to /t/<slug>/ leaves the connection pinned to that tenant schema (django-tenants doesn't reset
-    it between test-client requests), which would break tenant creation in the next test.
+    Resets the connection to public at BOTH the start and end of each test. A client request to
+    /t/<slug>/ leaves the connection pinned to that tenant schema (django-tenants doesn't reset it
+    between test-client requests). At start this would break tenant creation; at teardown it would
+    make transactional_db's flush TRUNCATE the pinned tenant schema instead of `public`, so public
+    tables (e.g. users_user) would survive and collide with the next test. Resetting here (this
+    fixture tears down just before transactional_db flushes) keeps the flush pointed at public.
     """
     connection.set_schema_to_public()
     tenant, _ = Tenant.objects.get_or_create(
         schema_name=get_public_schema_name(), defaults={"name": "Public"}
     )
-    return tenant
+    yield tenant
+    connection.set_schema_to_public()
 
 
 @pytest.fixture
