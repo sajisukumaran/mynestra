@@ -1,5 +1,6 @@
-<c-vars title="" class="" />
-<div x-data="{ open: false }" {{ attrs }}>
+<c-vars title="" open="false" class="" />
+{% comment %}`open` may start true (e.g. reopened server-side after a validation error).{% endcomment %}
+<div x-data="{ open: {{ open }} }" {{ attrs }}>
   {% if trigger %}<div @click="open = true">{{ trigger }}</div>{% endif %}
   <template x-teleport="body">
     <div x-show="open" x-cloak class="overlay right"

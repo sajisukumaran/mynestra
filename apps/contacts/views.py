@@ -8,8 +8,8 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.contacts.forms import PersonForm
-from apps.contacts.models import ContactChannel, Person
+from apps.contacts.forms import AddressForm, ImportantDateForm, PersonForm
+from apps.contacts.models import Address, ContactChannel, ImportantDate, Person
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
@@ -134,3 +134,87 @@ def _person_form(request, person, mode):
         if person.pk else set(),
     )
     return render(request, "contacts/person_form.html", ctx)
+
+
+# --- Detail (Overview + History) ------------------------------------------------------------
+
+def _person_qs():
+    return Person.objects.prefetch_related(
+        "categories", "channels", "addresses", "important_dates"
+    )
+
+
+def person_detail(request, pk):
+    return _render_detail(request, get_object_or_404(_person_qs(), pk=pk))
+
+
+def _render_detail(request, person, address_form=None, date_form=None, reopen=""):
+    ctx = contacts_context(
+        request, "people",
+        person=person,
+        history=person.history.all()[:60],
+        address_form=address_form or AddressForm(),
+        date_form=date_form or ImportantDateForm(),
+        reopen=reopen,
+    )
+    return render(request, "contacts/person_detail.html", ctx)
+
+
+# --- Addresses & important dates (edited from the detail via slide-over) ---------------------
+
+def address_create(request, pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        form = AddressForm(request.POST)
+        if form.is_valid():
+            address = form.save(commit=False)
+            address.person = person
+            address.save()
+        else:
+            return _render_detail(request, person, address_form=form, reopen="address")
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def address_edit(request, pk, addr_pk):
+    person = get_object_or_404(Person, pk=pk)
+    address = get_object_or_404(Address, pk=addr_pk, person=person)
+    if request.method == "POST":
+        AddressForm(request.POST, instance=address).save()
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def address_delete(request, pk, addr_pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        Address.objects.filter(pk=addr_pk, person=person).delete()
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def importantdate_create(request, pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        form = ImportantDateForm(request.POST)
+        if form.is_valid():
+            date = form.save(commit=False)
+            date.person = person
+            date.save()
+        else:
+            return _render_detail(request, person, date_form=form, reopen="date")
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def importantdate_edit(request, pk, date_pk):
+    person = get_object_or_404(Person, pk=pk)
+    date = get_object_or_404(ImportantDate, pk=date_pk, person=person)
+    if request.method == "POST":
+        form = ImportantDateForm(request.POST, instance=date)
+        if form.is_valid():
+            form.save()
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def importantdate_delete(request, pk, date_pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        ImportantDate.objects.filter(pk=date_pk, person=person).delete()
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))

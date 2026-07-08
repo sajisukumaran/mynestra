@@ -1,0 +1,195 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}{{ person.display_name }}{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}contacts/people/">People</a><c-icon name="chevron-right" />
+  <span class="strong">{{ person.display_name }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      {% if person.photo %}<c-avatar src="{{ person.photo.url }}" size="xl" alt="{{ person.display_name }}" />
+      {% else %}<c-avatar size="xl" tint="{{ person.avatar_tint }}">{{ person.initials }}</c-avatar>{% endif %}
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ person.full_name }}</h1>
+          {% for c in person.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip>{% endfor %}
+          {% if person.is_deceased %}<c-badge variant="lock"><c-icon name="info" /> Deceased</c-badge>{% endif %}
+          {% if person.marital_status %}<c-badge variant="info"><c-icon name="heart" /> {{ person.get_marital_status_display }}</c-badge>{% endif %}
+        </div>
+        {% if person.preferred_name or person.pronouns %}<div class="muted">{% if person.preferred_name %}Goes by <span class="strong">{{ person.preferred_name }}</span>{% endif %}{% if person.preferred_name and person.pronouns %} · {% endif %}{{ person.pronouns }}</div>{% endif %}
+        <div class="ph-meta">
+          {% if person.occupation %}<span class="row"><c-icon name="briefcase" size="sm" class="subtle" />{{ person.occupation }}</span>{% endif %}
+          {% if person.primary_city %}<span class="row"><c-icon name="map-pin" size="sm" class="subtle" />{{ person.primary_city }}</span>{% endif %}
+          {% if person.is_deceased %}<span class="row tnum"><c-icon name="cake" size="sm" class="subtle" />{{ person.lifespan }}</span>
+          {% elif person.dob.is_set %}<span class="row"><c-icon name="cake" size="sm" class="subtle" /><span class="tnum">{{ person.dob.display }}{% if person.age is not None %} · {{ person.age }}{% endif %}</span></span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        <c-button variant="primary" href="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {# Tabs #}
+  <div x-data="{ tab: 'overview' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="contact" size="sm" /> Overview</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# OVERVIEW #}
+    <div x-show="tab === 'overview'">
+      <div class="grid-detail">
+        <div class="stack stack-20">
+          <c-card title="Details">
+            <c-key-value>
+              <c-kv-row key="Gender" icon="user-round">{{ person.get_gender_display }}</c-kv-row>
+              {% if person.dob.is_set %}<c-kv-row key="Born" icon="cake"><span class="tnum">{{ person.dob.display }}</span>{% if person.age is not None %} <span class="muted">· {{ person.age }} yrs</span>{% endif %}</c-kv-row>{% endif %}
+              {% if person.marital_status %}<c-kv-row key="Marital" icon="heart">{{ person.get_marital_status_display }}</c-kv-row>{% endif %}
+              {% if person.anniversary.is_set %}<c-kv-row key="Anniversary" icon="heart"><span class="tnum">{{ person.anniversary.display }}</span></c-kv-row>{% endif %}
+              {% if person.blood_group %}<c-kv-row key="Blood group" icon="droplet">{{ person.get_blood_group_display }}</c-kv-row>{% endif %}
+              {% if person.languages %}<c-kv-row key="Languages" icon="languages">{{ person.languages|join:" · " }}</c-kv-row>{% endif %}
+              {% if person.dietary %}<c-kv-row key="Dietary" icon="utensils">{{ person.dietary }}</c-kv-row>{% endif %}
+              {% if person.education %}<c-kv-row key="Education" icon="graduation-cap">{{ person.education }}</c-kv-row>{% endif %}
+            </c-key-value>
+          </c-card>
+
+          <c-card title="Categories">
+            <c-slot name="actions"><c-button size="sm" variant="ghost" href="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+            <div class="row wrap">
+              {% for c in person.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip>{% empty %}<span class="subtle">No categories yet.</span>{% endfor %}
+            </div>
+          </c-card>
+        </div>
+
+        <div class="stack stack-20">
+          <c-card title="Contact channels" icon="phone">
+            <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/edit/"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+            {% for ch in person.channels.all %}
+            <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
+              {% if ch.is_primary %}<c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+            </c-channel-row>
+            {% empty %}<span class="subtle">No contact channels yet.</span>{% endfor %}
+          </c-card>
+
+          <c-card title="Addresses" icon="map-pin">
+            <c-slot name="actions">
+              <c-slide-over title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
+                <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/addresses/new/">{% csrf_token %}
+                  <div class="stack-16">
+                    <c-field label="Label"><div class="control">{{ address_form.label }}</div></c-field>
+                    <c-field label="Address line 1"><div class="control">{{ address_form.line1 }}</div></c-field>
+                    <c-field label="Address line 2"><div class="control">{{ address_form.line2 }}</div></c-field>
+                    <c-field label="City"><div class="control">{{ address_form.city }}</div></c-field>
+                    <c-field label="Region / state"><div class="control">{{ address_form.region }}</div></c-field>
+                    <c-field label="Postal code"><div class="control">{{ address_form.postal_code }}</div></c-field>
+                    <c-field label="Country"><div class="control">{{ address_form.country }}</div></c-field>
+                    <label class="row">{{ address_form.is_primary }} <span class="muted">Primary address</span></label>
+                    <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
+                  </div>
+                </form>
+              </c-slide-over>
+            </c-slot>
+            {% for a in person.addresses.all %}
+            <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
+              <c-slot name="tail">
+                {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
+                <c-slide-over title="Edit address">
+                  <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                  <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
+                    <div class="stack-16">
+                      <c-field label="Label"><c-input name="label" value="{{ a.label }}" /></c-field>
+                      <c-field label="Address line 1"><c-input name="line1" value="{{ a.line1 }}" /></c-field>
+                      <c-field label="Address line 2"><c-input name="line2" value="{{ a.line2 }}" /></c-field>
+                      <c-field label="City"><c-input name="city" value="{{ a.city }}" /></c-field>
+                      <c-field label="Region / state"><c-input name="region" value="{{ a.region }}" /></c-field>
+                      <c-field label="Postal code"><c-input name="postal_code" value="{{ a.postal_code }}" /></c-field>
+                      <c-field label="Country"><c-input name="country" value="{{ a.country }}" /></c-field>
+                      <label class="row"><input type="checkbox" name="is_primary" {% if a.is_primary %}checked{% endif %}> <span class="muted">Primary address</span></label>
+                      <div class="between">
+                        <c-button type="submit" variant="primary">Save</c-button>
+                        <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/addresses/{{ a.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                      </div>
+                    </div>
+                  </form>
+                </c-slide-over>
+              </c-slot>
+            </c-channel-row>
+            {% empty %}<span class="subtle">No addresses yet.</span>{% endfor %}
+          </c-card>
+
+          <c-card title="Important dates" icon="calendar-days">
+            <c-slot name="actions">
+              <c-slide-over title="Add important date" open="{% if reopen == 'date' %}true{% else %}false{% endif %}">
+                <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/dates/new/">{% csrf_token %}
+                  <div class="stack-16">
+                    <c-field label="Label" required error="{{ date_form.label.errors.0 }}"><div class="control">{{ date_form.label }}</div></c-field>
+                    <c-field label="Date" help="Leave any part blank if unknown." error="{{ date_form.date_day.errors.0 }}">
+                      <c-partial-date prefix="date" day="{{ date_form.date_day.value|default:'' }}" month="{{ date_form.date_month.value|default:'' }}" year="{{ date_form.date_year.value|default:'' }}" />
+                    </c-field>
+                    <div class="row"><c-button type="submit" variant="primary">Save date</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
+                  </div>
+                </form>
+              </c-slide-over>
+            </c-slot>
+            <c-key-value>
+              {% if person.dob.is_set %}<c-kv-row key="Birthday" icon="cake"><span class="tnum">{{ person.dob.display }}</span></c-kv-row>{% endif %}
+              {% if person.anniversary.is_set %}<c-kv-row key="Anniversary" icon="heart"><span class="tnum">{{ person.anniversary.display }}</span></c-kv-row>{% endif %}
+              {% for d in person.important_dates.all %}
+              <c-kv-row key="{{ d.label }}" icon="star">
+                <span class="between">
+                  <span class="tnum">{{ d.date.display|default:'—' }}</span>
+                  <c-slide-over title="Edit important date">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                    <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/dates/{{ d.pk }}/edit/">{% csrf_token %}
+                      <div class="stack-16">
+                        <c-field label="Label" required><c-input name="label" value="{{ d.label }}" required /></c-field>
+                        <c-field label="Date"><c-partial-date prefix="date" day="{{ d.date_day|default:'' }}" month="{{ d.date_month|default:'' }}" year="{{ d.date_year|default:'' }}" /></c-field>
+                        <div class="between">
+                          <c-button type="submit" variant="primary">Save</c-button>
+                          <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/dates/{{ d.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                        </div>
+                      </div>
+                    </form>
+                  </c-slide-over>
+                </span>
+              </c-kv-row>
+              {% endfor %}
+            </c-key-value>
+          </c-card>
+
+          {% if person.notes %}
+          <c-card title="Notes" icon="pencil">
+            <p class="muted">{{ person.notes|linebreaksbr }}</p>
+          </c-card>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {# HISTORY #}
+    <div x-show="tab === 'history'" x-cloak>
+      <c-card>
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this contact{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}
+          <span class="subtle">No history yet.</span>
+          {% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

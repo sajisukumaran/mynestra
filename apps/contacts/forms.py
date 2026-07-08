@@ -6,7 +6,7 @@ page, not here (lean, mockup-faithful form)."""
 from django import forms
 from django.core.exceptions import ValidationError
 
-from apps.contacts.models import Person
+from apps.contacts.models import Address, ImportantDate, Person
 from apps.core.partialdate import validate_partial_date
 
 PARTIAL_DATES = [("dob", "date of birth"), ("dod", "date of death"), ("anniversary", "anniversary")]
@@ -54,3 +54,31 @@ class PersonForm(forms.ModelForm):
     def save(self, commit=True):
         self.instance.languages = self.cleaned_data.get("languages", [])
         return super().save(commit)
+
+
+class AddressForm(forms.ModelForm):
+    """Edited from the Person detail via a slide-over. All parts optional."""
+
+    class Meta:
+        model = Address
+        fields = [
+            "label", "line1", "line2", "city", "region", "postal_code", "country", "is_primary",
+        ]
+
+
+class ImportantDateForm(forms.ModelForm):
+    """Edited from the Person detail via a slide-over. Label required; date is a PartialDate."""
+
+    class Meta:
+        model = ImportantDate
+        fields = ["label", "date_year", "date_month", "date_day"]
+
+    def clean(self):
+        cleaned = super().clean()
+        try:
+            validate_partial_date(
+                cleaned.get("date_year"), cleaned.get("date_month"), cleaned.get("date_day")
+            )
+        except ValidationError as exc:
+            self.add_error("date_day", exc)
+        return cleaned

@@ -414,6 +414,12 @@ table.tbl { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
 .person-cell { display:flex; align-items:center; gap:11px; }
 .person-cell .pc-name { font-weight:600; color:var(--text-strong); }
 .person-cell .pc-sub { font-size:var(--fs-sm); color:var(--text-subtle); }
+
+/* Person detail identity header (composed on the detail page). */
+.person-head { display:flex; gap:20px; align-items:flex-start; flex-wrap:wrap; }
+.person-head .ph-main { flex:1 1 220px; min-width:220px; }
+.person-head .ph-name { font-size:var(--fs-2xl); font-weight:700; letter-spacing:-.01em; color:var(--text-strong); }
+.person-head .ph-meta { display:flex; flex-wrap:wrap; gap:18px; margin-top:14px; color:var(--text-muted); font-size:var(--fs-sm); }
 .cell-actions { display:flex; gap:2px; justify-content:flex-end; opacity:0; }
 .tbl tbody tr:hover .cell-actions { opacity:1; }
 .pager { display:flex; align-items:center; gap:5px; }
