@@ -1,0 +1,12 @@
+<c-vars variant="" icon="info" title="" message="" class="" />
+{% comment %}Presentational toast (variant: success/warning/danger/info). Dynamic dispatch via an
+Alpine store lands with htmx flows in P4; this renders the vetted look.{% endcomment %}
+<div class="toast{% if variant %} {{ variant }}{% endif %}{% if class %} {{ class }}{% endif %}" role="status" {{ attrs }}>
+  <span class="t-ic"><c-icon name="{{ icon }}" /></span>
+  <div class="t-body">
+    {% if title %}<div class="t-title">{{ title }}</div>{% endif %}
+    {% if message %}<div class="t-msg">{{ message }}</div>{% endif %}
+    {{ slot }}
+  </div>
+  <button type="button" class="t-close" aria-label="Dismiss"><c-icon name="x" size="sm" /></button>
+</div>

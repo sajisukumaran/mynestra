@@ -1,0 +1,27 @@
+<c-vars title="Are you sure?" message="" confirm_label="Confirm" cancel_label="Cancel" confirm_variant="danger" icon="triangle-alert" class="" />
+{% comment %}Danger-styled confirm modal. Provide the confirm action via the `confirm` slot (e.g. an
+htmx button / form). Trigger slot opens it.{% endcomment %}
+<div x-data="{ open: false }" {{ attrs }}>
+  {% if trigger %}<div @click="open = true">{{ trigger }}</div>{% endif %}
+  <template x-teleport="body">
+    <div x-show="open" x-cloak class="overlay center"
+         @keydown.escape.window="open = false" @click.self="open = false">
+      <div class="modal{% if class %} {{ class }}{% endif %}" style="width:min(420px,100%);"
+           x-show="open" x-transition.opacity x-transition.scale.95>
+        <div class="modal-body">
+          <div class="row" style="align-items:flex-start; gap:14px;">
+            <span class="confirm-ic"><c-icon name="{{ icon }}" /></span>
+            <div>
+              <h4 style="font-size:var(--fs-lg);">{{ title }}</h4>
+              {% if message %}<p class="muted" style="margin-top:4px;">{{ message }}</p>{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <c-button variant="ghost" @click="open = false">{{ cancel_label }}</c-button>
+          {% if confirm %}{{ confirm }}{% else %}<c-button variant="{{ confirm_variant }}">{{ confirm_label }}</c-button>{% endif %}
+        </div>
+      </div>
+    </div>
+  </template>
+</div>

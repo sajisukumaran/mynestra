@@ -1,0 +1,18 @@
+<c-vars title="" class="" />
+<div x-data="{ open: false }" {{ attrs }}>
+  {% if trigger %}<div @click="open = true">{{ trigger }}</div>{% endif %}
+  <template x-teleport="body">
+    <div x-show="open" x-cloak class="overlay right"
+         @keydown.escape.window="open = false" @click.self="open = false">
+      <div class="slideover{% if class %} {{ class }}{% endif %}"
+           x-show="open" x-transition:enter-start="translate-x-full" x-transition>
+        <div class="modal-head">
+          <span class="modal-title">{{ title }}</span>
+          <button type="button" class="modal-close" @click="open = false" aria-label="Close"><c-icon name="x" size="sm" /></button>
+        </div>
+        <div class="modal-body grow">{{ slot }}</div>
+        {% if foot %}<div class="modal-foot">{{ foot }}</div>{% endif %}
+      </div>
+    </div>
+  </template>
+</div>

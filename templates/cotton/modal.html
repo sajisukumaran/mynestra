@@ -1,0 +1,19 @@
+<c-vars title="" class="" />
+{% comment %}Designed fresh from tokens (no mockup). Trigger slot opens it; Alpine + x-teleport.{% endcomment %}
+<div x-data="{ open: false }" {{ attrs }}>
+  {% if trigger %}<div @click="open = true">{{ trigger }}</div>{% endif %}
+  <template x-teleport="body">
+    <div x-show="open" x-cloak class="overlay center"
+         @keydown.escape.window="open = false" @click.self="open = false">
+      <div class="modal{% if class %} {{ class }}{% endif %}"
+           x-show="open" x-transition.opacity x-transition.scale.95>
+        <div class="modal-head">
+          <span class="modal-title">{{ title }}</span>
+          <button type="button" class="modal-close" @click="open = false" aria-label="Close"><c-icon name="x" size="sm" /></button>
+        </div>
+        <div class="modal-body">{{ slot }}</div>
+        {% if foot %}<div class="modal-foot">{{ foot }}</div>{% endif %}
+      </div>
+    </div>
+  </template>
+</div>
