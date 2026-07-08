@@ -49,7 +49,8 @@ TENANT_APPS = [
     "simple_history",          # audit history for tenant models (DESIGN §3); no tables of its own
     "apps.setup",              # Category catalogs (seeded §6)
     "apps.relationships",      # P2P/P2O relationship-type catalogs (seeded §6)
-    # apps.contacts joins in P4 (added with the app); organizations/families in P5/P6.
+    "apps.contacts",           # People, contact channels/addresses, important dates (P4)
+    # organizations/families join in P5/P6.
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]
