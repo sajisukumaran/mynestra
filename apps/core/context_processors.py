@@ -21,12 +21,17 @@ def ui(request):
     tenant = getattr(request, "tenant", None)
     tenant_name = ""
     tenant_initials = ""
+    tenant_url = ""
     if tenant is not None and tenant.schema_name != get_public_schema_name():
         tenant_name = tenant.name
         tenant_initials = _initials(tenant.name, "H")
+        # Tenant routes are addressed explicitly as /t/<slug>/... (reversing is not subfolder-aware
+        # in django-tenants); templates build links from this base.
+        tenant_url = f"/t/{tenant.schema_name}/"
 
     return {
         "ui_user_initials": user_initials,
         "ui_tenant_name": tenant_name,
         "ui_tenant_initials": tenant_initials,
+        "ui_tenant_url": tenant_url,
     }

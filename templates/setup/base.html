@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% comment %}Setup shell wrapper: topbar + Setup per-app sidebar (theme-matched, variant A).
+Every Setup page extends this and fills the `setup` block. Tenant links are built from
+`ui_tenant_url` (django-tenants reversing is not subfolder-aware).{% endcomment %}
+{% block title %}{% block setup_heading %}Setup{% endblock %} · Setup · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}" show_setup="true"
+         setup_url="{{ ui_tenant_url }}setup/" home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Setup" subtitle="{{ ui_tenant_name }}" glyph="settings">
+      <c-sidebar-item label="Overview" icon="layout-grid" href="{{ ui_tenant_url }}setup/" {% if active == 'overview' %}active="true"{% endif %} />
+      <c-sidebar-item label="Categories" icon="tag" count="{{ nav_categories }}" href="{{ ui_tenant_url }}setup/categories/" {% if active == 'categories' %}active="true"{% endif %} />
+      <c-sidebar-item label="Relationship types" icon="network" count="{{ nav_rel_types }}" href="{{ ui_tenant_url }}setup/relationship-types/" {% if active == 'rel-types' %}active="true"{% endif %} />
+      <c-sidebar-item label="Members" icon="users" count="{{ nav_members }}" href="{{ ui_tenant_url }}setup/members/" {% if active == 'members' %}active="true"{% endif %} />
+      <c-sidebar-item label="Appearance" icon="palette" href="{{ ui_tenant_url }}setup/appearance/" {% if active == 'appearance' %}active="true"{% endif %} />
+      <c-sidebar-item label="Recently deleted" icon="trash-2" href="{{ ui_tenant_url }}setup/recently-deleted/" {% if active == 'recently-deleted' %}active="true"{% endif %} />
+      <c-sidebar-item label="Household profile" icon="building-2" href="{{ ui_tenant_url }}setup/profile/" {% if active == 'profile' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block setup %}{% endblock %}
+</c-shell>
+{% endblock %}
