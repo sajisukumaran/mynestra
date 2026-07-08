@@ -1,0 +1,6 @@
+<c-vars label="" icon="" count="" active="" href="#" class="" />
+<a class="nav-item{% if active %} active{% endif %}{% if class %} {{ class }}{% endif %}" href="{{ href }}" {{ attrs }}>
+  <c-icon name="{{ icon }}" />
+  <span class="lbl">{{ label }}</span>
+  {% if count != "" %}<span class="nav-count tnum">{{ count }}</span>{% endif %}
+</a>

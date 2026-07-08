@@ -1,0 +1,10 @@
+<c-vars title="" subtitle="" glyph="layout-grid" class="" />
+<aside class="sidebar{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="sidebar-head">
+    <span class="app-glyph"><c-icon name="{{ glyph }}" size="lg" /></span>
+    <div class="s-meta"><div class="s-title">{{ title }}</div>{% if subtitle %}<div class="s-sub">{{ subtitle }}</div>{% endif %}</div>
+    <button class="collapse-btn" @click="$store.ui.toggleSidebar()" title="Collapse" aria-label="Collapse sidebar"><c-icon name="chevrons-left" size="sm" /></button>
+  </div>
+  <nav class="nav">{{ slot }}</nav>
+  {% if foot %}<div class="sidebar-foot">{{ foot }}</div>{% endif %}
+</aside>

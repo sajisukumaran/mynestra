@@ -1,0 +1,13 @@
+<c-vars tenant_name="" tenant_initials="" user_initials="U" show_setup="" setup_url="" sidebar_toggle="true" show_search="true" home_url="/" class="" />
+{% comment %}App shell: topbar + optional sidebar (slot) + main content (default slot).
+Theme-matched sidebar (variant A) — no data-nav override.{% endcomment %}
+<div class="app{% if class %} {{ class }}{% endif %}" x-data :data-collapsed="$store.ui.collapsed">
+  <c-topbar tenant_name="{{ tenant_name }}" tenant_initials="{{ tenant_initials }}"
+            user_initials="{{ user_initials }}" sidebar_toggle="{{ sidebar_toggle }}"
+            show_search="{{ show_search }}" show_setup="{{ show_setup }}"
+            setup_url="{{ setup_url }}" home_url="{{ home_url }}" />
+  <div class="app-body">
+    {{ sidebar }}
+    <main class="main"><div class="main-inner">{{ slot }}</div></main>
+  </div>
+</div>

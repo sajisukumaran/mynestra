@@ -36,6 +36,7 @@ SHARED_APPS = [
     "apps.users",              # custom AUTH_USER_MODEL (shared identity)
     "apps.accounts",           # identity views: chooser, invitation accept/create (no models)
     "apps.core",               # health + middleware + shared views (no models)
+    "django_cotton",           # HTML component library (auto-wires template loaders + builtins)
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -86,6 +87,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "apps.core.context_processors.ui",
             ],
         },
     },
