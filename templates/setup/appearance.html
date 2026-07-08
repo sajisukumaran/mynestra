@@ -1,0 +1,33 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Appearance{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Appearance</span></c-breadcrumb>
+<c-page-header title="Appearance" subtitle="Your household's accent palette and your personal theme." />
+
+<form method="post">{% csrf_token %}
+  <div class="stack-20">
+    <c-card title="Household palette" icon="palette">
+      <div class="stack-16">
+        <p class="muted">Applies to everyone in {{ ui_tenant_name }}. Click a swatch to preview the accent — the four semantic colours never change.</p>
+        <c-swatch-select name="palette" value="{{ palette }}" />
+      </div>
+    </c-card>
+
+    <c-card title="Your theme" icon="sun">
+      <p class="muted">A personal preference — only you see it. &ldquo;System default&rdquo; follows your device.</p>
+      <c-field label="Theme" class="span2">
+        <c-select name="theme">
+          <option value="" {% if not theme %}selected{% endif %}>System default</option>
+          <option value="light" {% if theme == 'light' %}selected{% endif %}>Light</option>
+          <option value="dark" {% if theme == 'dark' %}selected{% endif %}>Dark</option>
+        </c-select>
+      </c-field>
+    </c-card>
+  </div>
+
+  <c-save-bar note="Palette is household-wide; theme is personal to you.">
+    <c-button type="submit" variant="primary">Save appearance</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

@@ -30,6 +30,8 @@ urlpatterns = [
         auth_views.PasswordResetCompleteView.as_view(),
         name="password_reset_complete",
     ),
+    # Per-user theme persistence (topbar toggle); public so it works on any page.
+    path("theme/", account_views.set_theme, name="set-theme"),
     # Invitation accept — un-prefixed, single-use token
     path("invite/<str:token>/", account_views.invite_accept, name="invite-accept"),
     # Tenant chooser / landing when authenticated

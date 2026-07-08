@@ -5,9 +5,21 @@
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import redirect_to_login
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.tenants.models import Invitation, Membership, Role
+from apps.users.models import User
+
+
+def set_theme(request):
+    """Persist the caller's per-user theme (DESIGN §7.2). Called by the topbar toggle via fetch;
+    public so it works on any page. No-op for anonymous callers. Returns 204."""
+    if request.method == "POST" and request.user.is_authenticated:
+        value = request.POST.get("theme", "")
+        request.user.theme = value if value in User.Theme.values else None
+        request.user.save(update_fields=["theme"])
+    return HttpResponse(status=204)
 
 
 @login_required

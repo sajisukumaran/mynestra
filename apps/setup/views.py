@@ -22,7 +22,7 @@ from apps.setup.forms import (
     RelationshipTypeForm,
 )
 from apps.setup.models import Category
-from apps.tenants.models import Invitation, Membership, Role
+from apps.tenants.models import Invitation, Membership, Role, Tenant
 
 # Relationship-type kinds: URL segment -> (model, form, is_p2p). P2P carries gender-aware labels;
 # P2O carries a single label (DESIGN §5).
@@ -300,3 +300,31 @@ def member_remove(request, pk):
     if request.method == "POST":
         membership.delete()
     return redirect(setup_url(request, "members/"))
+
+
+# --- Appearance -----------------------------------------------------------------------------
+# Household palette (Tenant.palette, owner-set, recolors everyone) + per-user theme (User.theme).
+# Both are server-authoritative (see apps.core.context_processors.ui + base.html pre-paint).
+
+
+@owner_required
+def appearance(request):
+    tenant = request.tenant
+    from apps.users.models import User
+
+    if request.method == "POST":
+        palette = request.POST.get("palette")
+        if palette in Tenant.Palette.values:
+            # queryset update avoids TenantMixin.save() (which would switch the connection schema).
+            Tenant.objects.filter(pk=tenant.pk).update(palette=palette)
+        theme = request.POST.get("theme", "")
+        request.user.theme = theme if theme in User.Theme.values else None
+        request.user.save(update_fields=["theme"])
+        return redirect(setup_url(request, "appearance/"))
+
+    ctx = setup_context(
+        request, "appearance",
+        palette=tenant.palette,
+        theme=request.user.theme or "",
+    )
+    return render(request, "setup/appearance.html", ctx)

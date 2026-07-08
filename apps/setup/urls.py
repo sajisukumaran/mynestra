@@ -33,4 +33,6 @@ urlpatterns = [
     path("members/<int:pk>/remove/", views.member_remove, name="member-remove"),
     path("invitations/<int:pk>/revoke/", views.invitation_revoke, name="invitation-revoke"),
     path("invitations/<int:pk>/resend/", views.invitation_resend, name="invitation-resend"),
+    # Appearance
+    path("appearance/", views.appearance, name="appearance"),
 ]

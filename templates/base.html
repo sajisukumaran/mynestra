@@ -5,18 +5,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}MyNestra{% endblock %}</title>
-  {# Pre-paint: apply saved theme/palette before first paint (no flash). Always sets an explicit
-     data-theme so palette dark selectors resolve. #}
+  {# Pre-paint (no flash): server values win inside a tenant — household palette (ui_palette) and
+     the user's explicit theme (ui_theme) — falling back to localStorage/system on public pages so
+     the /styleguide dev switcher keeps working. Always sets data-theme so dark selectors resolve. #}
   <script>
     (function () {
       var r = document.documentElement;
+      var sp = "{{ ui_palette }}";  // household palette ("" on public pages)
+      var st = "{{ ui_theme }}";    // user's explicit theme ("" = system default)
       try {
-        var t = localStorage.getItem("mynestra-theme");
-        r.setAttribute("data-theme", t || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"));
-        r.setAttribute("data-palette", localStorage.getItem("mynestra-palette") || "teal");
+        var theme = st || localStorage.getItem("mynestra-theme")
+                    || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        r.setAttribute("data-theme", theme);
+        r.setAttribute("data-palette", sp || localStorage.getItem("mynestra-palette") || "teal");
       } catch (e) {
-        r.setAttribute("data-theme", "light");
-        r.setAttribute("data-palette", "teal");
+        r.setAttribute("data-theme", st || "light");
+        r.setAttribute("data-palette", sp || "teal");
       }
     })();
   </script>
