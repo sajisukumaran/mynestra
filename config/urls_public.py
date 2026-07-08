@@ -44,3 +44,10 @@ urlpatterns = [
 # In production this is served by the web server / object storage instead.
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+
+# Match the tenant urlconf: define error handlers so 404/500 render under DEBUG=False. Default
+# views for now; on-brand styled pages land in P7.
+handler400 = "django.views.defaults.bad_request"
+handler403 = "django.views.defaults.permission_denied"
+handler404 = "django.views.defaults.page_not_found"
+handler500 = "django.views.defaults.server_error"
