@@ -1,0 +1,119 @@
+"""Identity views (public + tenant). Minimal templates in P1; restyled into the component system
+in P2. Login/logout/password-reset use Django's built-in views (wired in config/urls_public.py)."""
+
+from django.conf import settings
+from django.contrib.auth import get_user_model, login
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.views import redirect_to_login
+from django.core.mail import send_mail
+from django.http import HttpResponseForbidden
+from django.shortcuts import get_object_or_404, redirect, render
+
+from apps.tenants.models import Invitation, Membership, Role
+
+
+@login_required
+def chooser(request):
+    """Public landing: pick a household. Redirect straight through when there's an obvious one."""
+    memberships = list(request.user.memberships.select_related("tenant").all())
+
+    default_tenant = request.user.default_tenant
+    if default_tenant and any(m.tenant_id == default_tenant.id for m in memberships):
+        return redirect(f"/t/{default_tenant.slug}/")
+    if len(memberships) == 1:
+        return redirect(f"/t/{memberships[0].tenant.slug}/")
+
+    return render(request, "accounts/chooser.html", {"memberships": memberships})
+
+
+def tenant_home(request):
+    """Minimal tenant landing (membership already enforced by MembershipMiddleware)."""
+    is_owner = Membership.objects.filter(
+        user=request.user, tenant=request.tenant, role=Role.OWNER
+    ).exists()
+    return render(
+        request, "accounts/tenant_home.html", {"tenant": request.tenant, "is_owner": is_owner}
+    )
+
+
+@login_required
+def invite_create(request):
+    """Owner-only: invite an email into the current household and send the tokened link."""
+    tenant = request.tenant
+    membership = Membership.objects.filter(user=request.user, tenant=tenant).first()
+    if membership is None or not membership.is_owner:
+        return HttpResponseForbidden("Only owners can send invitations.")
+
+    if request.method == "POST":
+        email = request.POST.get("email", "").strip().lower()
+        role = request.POST.get("role", Role.MEMBER)
+        if email:
+            invitation = Invitation.objects.create(
+                email=email, tenant=tenant, role=role, invited_by=request.user
+            )
+            accept_url = request.build_absolute_uri(invitation.get_accept_path())
+            send_mail(
+                subject=f"You're invited to {tenant.name} on MyNestra",
+                message=(
+                    f"You've been invited to join {tenant.name}.\n\n"
+                    f"Accept your invitation:\n{accept_url}\n\n"
+                    f"This link expires on {invitation.expires_at:%d-%b-%Y}."
+                ),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+            )
+            return redirect(request.path)
+
+    invitations = Invitation.objects.filter(tenant=tenant).order_by("-created_at")
+    return render(request, "accounts/invite_create.html", {"invitations": invitations})
+
+
+def invite_accept(request, token):
+    """Public accept flow: new user sets name+password then joins; existing user just joins."""
+    invitation = get_object_or_404(Invitation, token=token)
+    if not invitation.is_actionable:
+        return render(
+            request, "accounts/invite_invalid.html", {"invitation": invitation}, status=410
+        )
+
+    User = get_user_model()
+    existing = User.objects.filter(email=invitation.email.lower()).first()
+
+    if request.method == "POST":
+        errors = []
+        if existing:
+            user = existing
+        else:
+            full_name = request.POST.get("full_name", "").strip()
+            password = request.POST.get("password", "")
+            if len(password) < 8:
+                errors.append("Password must be at least 8 characters.")
+            if not errors:
+                user = User.objects.create_user(
+                    email=invitation.email, password=password, full_name=full_name
+                )
+        if errors:
+            return render(
+                request,
+                "accounts/invite_accept.html",
+                {"invitation": invitation, "existing": bool(existing), "errors": errors},
+            )
+
+        Membership.objects.get_or_create(
+            user=user, tenant=invitation.tenant, defaults={"role": invitation.role}
+        )
+        invitation.status = Invitation.Status.ACCEPTED
+        invitation.save(update_fields=["status"])
+
+        landing = f"/t/{invitation.tenant.slug}/"
+        if existing:
+            # Existing account: send them through login (their own password), landing on the tenant.
+            return redirect_to_login(landing)
+        login(request, user)
+        return redirect(landing)
+
+    return render(
+        request,
+        "accounts/invite_accept.html",
+        {"invitation": invitation, "existing": bool(existing)},
+    )
