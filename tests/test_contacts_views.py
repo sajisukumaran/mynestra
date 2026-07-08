@@ -20,6 +20,14 @@ def _c(tenant, path=""):
     return f"/t/{tenant.schema_name}/contacts/{path}"
 
 
+def test_contacts_root_redirects_to_people(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    resp = client.get(_c(tenant))
+    assert resp.status_code == 302
+    assert resp.headers["Location"] == _c(tenant, "people/")
+
+
 def test_people_list_search_filter_sort_paginate(make_tenant, make_user, client):
     tenant, owner = _owner(make_tenant, make_user)
     with schema_context(tenant.schema_name):

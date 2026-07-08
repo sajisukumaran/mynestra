@@ -7,6 +7,7 @@ from apps.contacts import views
 app_name = "contacts"
 
 urlpatterns = [
+    path("", views.contacts_home, name="home"),
     path("people/", views.people_list, name="people"),
     path("people/new/", views.person_create, name="person-create"),
     path("people/<int:pk>/", views.person_detail, name="person-detail"),

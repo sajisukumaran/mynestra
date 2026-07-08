@@ -17,6 +17,11 @@ from apps.tenants.models import Membership, Role
 def tenant_url(request, path=""):
     return f"/t/{request.tenant.schema_name}/{path}"
 
+
+def contacts_home(request):
+    """Contacts landing → People (the only live section in P4)."""
+    return redirect(tenant_url(request, "contacts/people/"))
+
 # Sort keys → order_by tuples for the People list column headers.
 SORTS = {
     "name": ("first_name", "last_name"),
