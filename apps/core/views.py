@@ -1,7 +1,8 @@
-"""Core views. In P0 this is just a health page proving the app + DB + Tailwind pipeline work."""
+"""Core views: the health page and the dev-only /styleguide (UI-gate review surface)."""
 
 from django.conf import settings
 from django.db import connection
+from django.http import Http404
 from django.shortcuts import render
 
 
@@ -22,3 +23,10 @@ def health(request):
         "db_ok": db_ok,
     }
     return render(request, "health.html", context, status=200 if db_ok else 503)
+
+
+def styleguide(request):
+    """Dev-only component gallery — the UI-gate review surface (DESIGN §7.5). 404 in prod."""
+    if not settings.DEBUG:
+        raise Http404()
+    return render(request, "styleguide/index.html")

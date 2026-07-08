@@ -5,11 +5,12 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from apps.accounts import views as account_views
-from apps.core.views import health
+from apps.core.views import health, styleguide
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health, name="health"),
+    path("styleguide/", styleguide, name="styleguide"),
     # Auth (public identity schema)
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),

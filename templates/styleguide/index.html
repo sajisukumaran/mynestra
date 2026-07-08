@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+{% block title %}Styleguide · MyNestra{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="Sharma Household" tenant_initials="SH" user_initials="RS" show_setup="true" setup_url="#" home_url="#">
+  <c-slot name="sidebar">
+    <c-sidebar title="Styleguide" subtitle="MyNestra UI" glyph="palette">
+      <c-sidebar-item label="Overview" icon="layout-grid" active href="#top" />
+      <c-sidebar-item label="Buttons" icon="sparkles" href="#buttons" />
+      <c-sidebar-item label="Badges & chips" icon="tag" href="#badges" count="12" />
+      <c-sidebar-item label="Forms" icon="contact" href="#forms" />
+      <c-sidebar-item label="Data" icon="network" href="#data" />
+      <c-sidebar-item label="Overlays" icon="inbox" href="#overlays" />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="/" />
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  <span id="top"></span>
+  <c-breadcrumb><a href="#">Dev</a><c-icon name="chevron-right" /><span class="strong">Styleguide</span></c-breadcrumb>
+  <c-page-header title="Styleguide" subtitle="Every component, variant and state. Toggle theme (top bar) and sweep the palettes below.">
+    <c-slot name="actions">
+      <div class="swatches" x-data>
+        <button class="sw" style="background:#0f766e" title="Teal" @click="$store.ui.setPalette('teal')" :class="{active: $store.ui.palette==='teal'}"></button>
+        <button class="sw" style="background:#4f46e5" title="Indigo" @click="$store.ui.setPalette('indigo')" :class="{active: $store.ui.palette==='indigo'}"></button>
+        <button class="sw" style="background:#2563eb" title="Blue" @click="$store.ui.setPalette('blue')" :class="{active: $store.ui.palette==='blue'}"></button>
+        <button class="sw" style="background:#7c3aed" title="Violet" @click="$store.ui.setPalette('violet')" :class="{active: $store.ui.palette==='violet'}"></button>
+        <button class="sw" style="background:#475569" title="Graphite" @click="$store.ui.setPalette('graphite')" :class="{active: $store.ui.palette==='graphite'}"></button>
+      </div>
+    </c-slot>
+  </c-page-header>
+
+  <div class="stack-20">
+
+    {# ---- Buttons ---- #}
+    <c-card title="Buttons" id="buttons">
+      <div class="stack-16">
+        <div class="row wrap">
+          <c-button variant="primary"><c-icon name="plus" /> Primary</c-button>
+          <c-button>Default</c-button>
+          <c-button variant="ghost">Ghost</c-button>
+          <c-button variant="danger"><c-icon name="trash-2" /> Danger</c-button>
+          <c-button variant="primary" disabled>Disabled</c-button>
+        </div>
+        <div class="row wrap">
+          <c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Small</c-button>
+          <c-button size="sm">Small default</c-button>
+          <c-button icon_only variant="ghost"><c-icon name="ellipsis" /></c-button>
+          <c-button icon_only size="sm"><c-icon name="pencil" size="sm" /></c-button>
+          <c-button variant="default">Trailing <c-icon name="chevron-right" /></c-button>
+        </div>
+      </div>
+    </c-card>
+
+    {# ---- Badges & chips ---- #}
+    <c-card title="Badges &amp; chips" id="badges">
+      <div class="stack-16">
+        <div class="row wrap">
+          <c-badge>Neutral</c-badge>
+          <c-badge variant="success"><c-icon name="check" /> Active</c-badge>
+          <c-badge variant="warning">in 3 days</c-badge>
+          <c-badge variant="danger">Overdue</c-badge>
+          <c-badge variant="info"><c-icon name="heart" /> Married</c-badge>
+          <c-badge variant="accent">Primary</c-badge>
+          <c-badge variant="lock"><c-icon name="info" /> Deceased</c-badge>
+        </div>
+        <div class="row wrap">
+          <c-chip tint="teal" dot>Family</c-chip>
+          <c-chip tint="blue" dot>Doctor</c-chip>
+          <c-chip tint="violet" dot>Lawyer</c-chip>
+          <c-chip tint="amber" dot>Teacher</c-chip>
+          <c-chip tint="rose" dot>Accountant</c-chip>
+          <c-chip tint="emerald" dot>Advisor</c-chip>
+          <c-chip tint="sky" dot>Student</c-chip>
+          <c-chip tint="slate" dot>Neighbour</c-chip>
+          <c-chip tint="orange" dot>Merchant</c-chip>
+          <c-chip tint="fuchsia" dot>Club</c-chip>
+          <c-chip tint="teal" removable>Removable</c-chip>
+        </div>
+        <div class="row wrap">
+          <c-filter-chip active count="148">All</c-filter-chip>
+          <c-filter-chip count="8">Family</c-filter-chip>
+          <c-filter-chip count="12">Doctors</c-filter-chip>
+          <c-filter-chip><c-icon name="plus" size="sm" /></c-filter-chip>
+        </div>
+      </div>
+    </c-card>
+
+    {# ---- Avatars ---- #}
+    <c-card title="Avatars">
+      <div class="row wrap" style="align-items:flex-end;">
+        <c-avatar tint="teal" size="sm">RS</c-avatar>
+        <c-avatar tint="blue">PS</c-avatar>
+        <c-avatar tint="violet" size="lg">AK</c-avatar>
+        <c-avatar tint="rose" size="xl">MJ</c-avatar>
+        <c-avatar tint="emerald" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>
+        <div class="avatar-group">
+          <c-avatar tint="teal" size="sm">RS</c-avatar>
+          <c-avatar tint="rose" size="sm">PS</c-avatar>
+          <c-avatar tint="amber" size="sm">AK</c-avatar>
+          <span class="avatar-more a-sm" style="width:28px;height:28px;">+3</span>
+        </div>
+      </div>
+    </c-card>
+
+    {# ---- Forms ---- #}
+    <c-card title="Forms &amp; inputs" id="forms">
+      <div class="form-grid">
+        <c-field label="First name" required>
+          <c-input value="Rajesh" name="first_name" />
+        </c-field>
+        <c-field label="Preferred name" help="Shown across the app instead of the full name.">
+          <c-input value="Raj" name="preferred" />
+        </c-field>
+        <c-field label="Gender">
+          <c-select name="gender"><option>Male</option><option>Female</option><option>Other</option></c-select>
+        </c-field>
+        <c-field label="Email" required error="Enter a valid email address.">
+          <c-input value="rajesh.sharma@gmail" name="email" />
+        </c-field>
+        <c-field label="Date of birth" class="span2">
+          <c-partial-date prefix="dob" day="14" month="3" year="1974" />
+        </c-field>
+        <c-field label="Notes" class="span-all">
+          <c-textarea name="notes">Met at the annual meetup.</c-textarea>
+        </c-field>
+      </div>
+      <div class="stack-16" style="margin-top:18px;">
+        <c-toggle label="Deceased" description="Turn on to record a date of death." name="deceased" />
+        <c-toggle label="Primary" on name="primary" />
+        <c-checkbox label="Send a welcome email" on name="welcome" />
+        <c-checkbox label="Subscribe to reminders" name="subscribe" />
+      </div>
+    </c-card>
+
+    {# ---- Data display ---- #}
+    <span id="data"></span>
+    <div class="stat-grid">
+      <c-stat-tile icon="user-round" tint="teal" value="148" label="People">
+        <c-slot name="foot"><span class="delta up"><c-icon name="arrow-up" />6</span> added this month</c-slot>
+      </c-stat-tile>
+      <c-stat-tile icon="house" tint="blue" value="12" label="Families">
+        <c-slot name="foot">across the household</c-slot>
+      </c-stat-tile>
+      <c-stat-tile icon="cake" tint="amber" value="5" label="Birthdays">
+        <c-slot name="foot">in the next 30 days</c-slot>
+      </c-stat-tile>
+      <c-stat-tile icon="building-2" tint="violet" value="9" label="Organizations">
+        <c-slot name="foot"><span class="delta down"><c-icon name="arrow-down" />1</span> since last month</c-slot>
+      </c-stat-tile>
+    </div>
+
+    <div class="tiles">
+      <c-app-tile name="Contacts" description="People, families &amp; relationships" glyph="users" tint="contacts" href="#">
+        <c-tile-stat n="148" label="People" />
+        <c-tile-stat n="12" label="Families" />
+        <c-tile-stat n="5" label="Birthdays" />
+      </c-app-tile>
+      <c-app-tile soon name="Banking" description="Accounts, cards &amp; bills" glyph="landmark" />
+    </div>
+
+    <c-card title="People" icon="user-round" flush>
+      <c-slot name="actions"><c-button size="sm"><c-icon name="filter" size="sm" /> Filter</c-button></c-slot>
+      <c-table>
+        <thead><tr>
+          <c-th sortable sorted dir="up">Name</c-th>
+          <c-th>Categories</c-th>
+          <c-th>Primary contact</c-th>
+          <c-th sortable>Added</c-th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="person-cell"><c-avatar tint="teal" size="sm">RS</c-avatar><div><div class="pc-name">Rajesh Sharma</div><div class="pc-sub">Raj · 51</div></div></div></td>
+            <td><c-chip tint="teal" dot>Family</c-chip></td>
+            <td class="tnum">+91 98450 12345</td>
+            <td class="subtle">12 Jun 2024</td>
+            <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button><c-button icon_only size="sm" variant="ghost"><c-icon name="ellipsis" size="sm" /></c-button></div></td>
+          </tr>
+          <tr>
+            <td><div class="person-cell"><c-avatar tint="rose" size="sm">PS</c-avatar><div><div class="pc-name">Priya Sharma</div><div class="pc-sub">48</div></div></div></td>
+            <td><c-chip tint="teal" dot>Family</c-chip> <c-chip tint="sky" dot>Teacher</c-chip></td>
+            <td class="subtle">No contact yet</td>
+            <td class="subtle">12 Jun 2024</td>
+            <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></div></td>
+          </tr>
+        </tbody>
+      </c-table>
+      <c-slot name="foot">
+        <span class="subtle">Showing 1–2 of 148</span>
+        <c-pagination class="between" style="margin-left:auto;">
+          <c-pg disabled><c-icon name="chevron-left" size="sm" /></c-pg>
+          <c-pg active>1</c-pg>
+          <c-pg>2</c-pg>
+          <c-pg>3</c-pg>
+          <span class="pg" style="pointer-events:none;">…</span>
+          <c-pg>15</c-pg>
+          <c-pg><c-icon name="chevron-right" size="sm" /></c-pg>
+        </c-pagination>
+      </c-slot>
+    </c-card>
+
+    <div class="grid-2">
+      <c-card title="Overview">
+        <c-tabs>
+          <c-tab active>Overview</c-tab>
+          <c-tab count="5">Relationships</c-tab>
+          <c-tab count="3">Families</c-tab>
+          <c-tab>History</c-tab>
+        </c-tabs>
+        <c-key-value>
+          <c-kv-row key="Gender" icon="user-round">Male</c-kv-row>
+          <c-kv-row key="Born" icon="cake"><span class="tnum">14 Mar 1974</span> <span class="muted">· 51 yrs</span></c-kv-row>
+          <c-kv-row key="Occupation" icon="briefcase">Architect</c-kv-row>
+        </c-key-value>
+        <div style="margin-top:14px;">
+          <c-channel-row icon="phone" value="+91 98450 12345" label="Mobile">
+            <c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>
+          </c-channel-row>
+          <c-channel-row icon="mail" value="rajesh@example.com" label="Work" />
+          <c-rel-row name="Priya Sharma" role="Wife">
+            <c-slot name="avatar"><c-avatar tint="rose" size="sm">PS</c-avatar></c-slot>
+            <c-slot name="tail"><c-chip tint="teal" dot>Family</c-chip></c-slot>
+          </c-rel-row>
+        </div>
+      </c-card>
+
+      <c-card title="History">
+        <c-timeline>
+          <c-tl-item variant="edit" icon="pencil" title="Added contact channel" meta="by Rajesh · 1 hour ago"><span class="muted">WhatsApp</span></c-tl-item>
+          <c-tl-item icon="pencil" title="Updated occupation" meta="by Priya · yesterday" />
+          <c-tl-item variant="create" icon="plus" title="Created this contact" meta="by Rajesh · 12 Jun 2024" />
+        </c-timeline>
+      </c-card>
+    </div>
+
+    <c-card title="Inline repeater (channels)">
+      <c-inline-repeater add_label="Add channel">
+        <div class="inline-row">
+          <c-select><option>Phone</option><option>Email</option></c-select>
+          <c-input value="+91 98450 12345" class="tnum" />
+          <c-input value="Mobile" />
+          <div class="prim"><c-toggle on /></div>
+          <button class="rm" title="Remove" aria-label="Remove"><c-icon name="trash-2" size="sm" /></button>
+        </div>
+        <div class="inline-row">
+          <c-select><option>Email</option><option>Phone</option></c-select>
+          <c-input value="rajesh@example.com" />
+          <c-input value="Work" />
+          <div class="prim"><c-toggle /></div>
+          <button class="rm" title="Remove" aria-label="Remove"><c-icon name="trash-2" size="sm" /></button>
+        </div>
+      </c-inline-repeater>
+    </c-card>
+
+    <div class="grid-2">
+      <c-card title="Empty state" flush>
+        <c-empty-state icon="inbox" title="No people yet" text="Add your first contact to get started.">
+          <c-button variant="primary"><c-icon name="plus" /> New person</c-button>
+        </c-empty-state>
+      </c-card>
+      <c-card title="Dropdown menu">
+        <c-dropdown-menu>
+          <c-slot name="trigger"><c-button icon_only variant="ghost"><c-icon name="ellipsis" /></c-button></c-slot>
+          <div class="menu-label">Actions</div>
+          <c-menu-item icon="pencil">Edit</c-menu-item>
+          <c-menu-item icon="external-link">Open in new tab</c-menu-item>
+          <div class="menu-sep"></div>
+          <c-menu-item icon="trash-2" danger>Delete</c-menu-item>
+        </c-dropdown-menu>
+      </c-card>
+    </div>
+
+    {# ---- Overlays ---- #}
+    <c-card title="Overlays" id="overlays">
+      <div class="row wrap">
+        <c-modal title="Edit person">
+          <c-slot name="trigger"><c-button variant="primary">Open modal</c-button></c-slot>
+          <p class="muted">This modal is composed from tokens (no mockup reference) and opens via Alpine + x-teleport.</p>
+          <c-slot name="foot">
+            <c-button variant="ghost" @click="open = false">Cancel</c-button>
+            <c-button variant="primary">Save</c-button>
+          </c-slot>
+        </c-modal>
+
+        <c-slide-over title="Person details">
+          <c-slot name="trigger"><c-button>Open slide-over</c-button></c-slot>
+          <p class="muted">A right-hand panel for detail/edit flows.</p>
+        </c-slide-over>
+
+        <c-confirm-dialog title="Delete this person?" message="This moves the record to Recently deleted. You can restore it later.">
+          <c-slot name="trigger"><c-button variant="danger"><c-icon name="trash-2" /> Delete…</c-button></c-slot>
+          <c-slot name="confirm"><c-button variant="danger">Delete</c-button></c-slot>
+        </c-confirm-dialog>
+      </div>
+      <div class="stack-16" style="margin-top:16px; max-width:420px;">
+        <c-toast variant="success" icon="circle-check" title="Saved" message="Rajesh Sharma was updated." />
+        <c-toast variant="warning" icon="triangle-alert" title="Heads up" message="2 fields need attention." />
+        <c-toast variant="danger" icon="triangle-alert" title="Couldn't save" message="Please try again." />
+      </div>
+    </c-card>
+
+  </div>
+</c-shell>
+{% endblock %}
