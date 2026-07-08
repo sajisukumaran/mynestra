@@ -351,3 +351,15 @@ def profile(request):
         return redirect(setup_url(request, "profile/"))
 
     return render(request, "setup/profile.html", setup_context(request, "profile", tenant=tenant))
+
+
+# --- Recently deleted (scaffold) ------------------------------------------------------------
+# Placeholder until the soft-delete base (deleted_at + restore + history) lands in P4 with Person;
+# nothing is soft-deletable yet. Hard-delete gating (ALLOW_HARD_DELETE) arrives in P7.
+
+
+@owner_required
+def recently_deleted(request):
+    return render(
+        request, "setup/recently_deleted.html", setup_context(request, "recently-deleted")
+    )

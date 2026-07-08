@@ -1,0 +1,12 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Recently deleted{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Recently deleted</span></c-breadcrumb>
+<c-page-header title="Recently deleted" subtitle="Restore records you've removed." />
+
+<c-card flush>
+  <c-empty-state icon="archive" title="Nothing has been deleted"
+    text="Deleted people, organizations and other records will appear here so you can restore them. This becomes active once contacts arrive." />
+</c-card>
+{% endblock %}
