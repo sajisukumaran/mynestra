@@ -148,6 +148,14 @@ def person_detail(request, pk):
     return _render_detail(request, get_object_or_404(_person_qs(), pk=pk))
 
 
+def person_delete(request, pk):
+    """Soft-delete a person (member-level); it moves to Setup → Recently deleted for restore."""
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        person.delete()
+    return redirect(tenant_url(request, "contacts/people/"))
+
+
 def _render_detail(request, person, address_form=None, date_form=None, reopen=""):
     ctx = contacts_context(
         request, "people",

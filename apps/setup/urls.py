@@ -37,6 +37,11 @@ urlpatterns = [
     path("appearance/", views.appearance, name="appearance"),
     # Household profile
     path("profile/", views.profile, name="profile"),
-    # Recently deleted (scaffold; engine lands P4)
+    # Recently deleted
     path("recently-deleted/", views.recently_deleted, name="recently-deleted"),
+    path("recently-deleted/people/<int:pk>/restore/", views.person_restore, name="person-restore"),
+    path(
+        "recently-deleted/people/<int:pk>/delete/",
+        views.person_hard_delete, name="person-hard-delete",
+    ),
 ]

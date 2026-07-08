@@ -30,6 +30,14 @@
         </div>
       </div>
       <div class="row">
+        <c-confirm-dialog title="Delete {{ person.display_name }}?" message="This moves the record to Recently deleted. An owner can restore it later.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
         <c-button variant="primary" href="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
       </div>
     </div>

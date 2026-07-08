@@ -11,6 +11,7 @@ urlpatterns = [
     path("people/new/", views.person_create, name="person-create"),
     path("people/<int:pk>/", views.person_detail, name="person-detail"),
     path("people/<int:pk>/edit/", views.person_edit, name="person-edit"),
+    path("people/<int:pk>/delete/", views.person_delete, name="person-delete"),
     path("people/<int:pk>/addresses/new/", views.address_create, name="address-create"),
     path(
         "people/<int:pk>/addresses/<int:addr_pk>/edit/",
