@@ -9,6 +9,7 @@ dependencies = [
     "psycopg[binary]>=3.2.1,<3.3",
     "django-environ>=0.12",
     "pillow>=11",
+    "django-cotton>=2.7,<3",
 ]
 
 [dependency-groups]
