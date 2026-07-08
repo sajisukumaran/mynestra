@@ -30,6 +30,9 @@ htmlcov/
 .coverage
 .coverage.*
 
+# Session logs — local only, never checked in (may contain sensitive info)
+docs/sessions/
+
 # Editors / OS
 .idea/
 .vscode/
