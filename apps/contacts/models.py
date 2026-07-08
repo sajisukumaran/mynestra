@@ -5,12 +5,13 @@ use the PartialDate pattern from apps.core.partialdate. Contact channels, addres
 and category links live in sibling modules / M2M added alongside.
 """
 
+import datetime
 import zlib
 
 from django.db import models
 from simple_history.models import HistoricalRecords
 
-from apps.core.models import SoftDeleteModel
+from apps.core.models import SoftDeleteModel, TimeStampedModel
 from apps.core.partialdate import PartialDate, partial_date_age
 
 # Curated avatar tints (match .av-* in app.css); chosen deterministically from the display name.
@@ -120,7 +121,6 @@ class Person(SoftDeleteModel):
         """Living age today; age at death when a year of death is known."""
         on = None
         if self.is_deceased and self.dod_year:
-            import datetime
             on = datetime.date(self.dod_year, self.dod_month or 1, self.dod_day or 1)
         return partial_date_age(self.dob_year, self.dob_month, self.dob_day, on)
 
@@ -130,3 +130,93 @@ class Person(SoftDeleteModel):
         start = f"{self.dob_year}" if self.dob_year else "XXXX"
         end = f"{self.dod_year}" if self.dod_year else "XXXX"
         return f"{start} – {end}"
+
+    @property
+    def primary_channel(self):
+        return self.channels.filter(is_primary=True).first() or self.channels.first()
+
+    @property
+    def primary_city(self) -> str:
+        addr = self.addresses.filter(is_primary=True).first() or self.addresses.first()
+        return addr.city if addr else ""
+
+
+# --- Unified contact info (DESIGN §5) -------------------------------------------------------
+# ContactChannel and Address each attach to exactly ONE owner. In P4 the only owner is `person`;
+# the organization/branch/family owner FKs (and the widened CHECK) are added in P5/P6.
+
+
+class ContactChannel(TimeStampedModel):
+    class Type(models.TextChoices):
+        PHONE = "phone", "Phone"
+        EMAIL = "email", "Email"
+        WHATSAPP = "whatsapp", "WhatsApp"
+        URL = "url", "Website"
+        OTHER = "other", "Other"
+
+    _ICONS = {"phone": "phone", "email": "mail", "whatsapp": "message-circle", "url": "globe"}
+
+    type = models.CharField(max_length=12, choices=Type.choices, default=Type.PHONE)
+    label = models.CharField(max_length=40, blank=True)
+    value = models.CharField(max_length=255)
+    is_primary = models.BooleanField(default=False)
+    person = models.ForeignKey(
+        "contacts.Person", null=True, blank=True, on_delete=models.CASCADE, related_name="channels"
+    )
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-is_primary", "id"]
+        constraints = [
+            # Exactly one owner. Widened to a multi-column count when org/branch/family land (P5).
+            models.CheckConstraint(
+                condition=models.Q(person__isnull=False), name="contactchannel_one_owner"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_type_display()}: {self.value}"
+
+    @property
+    def icon(self) -> str:
+        return self._ICONS.get(self.type, "link")
+
+
+class Address(TimeStampedModel):
+    line1 = models.CharField(max_length=200, blank=True)
+    line2 = models.CharField(max_length=200, blank=True)
+    city = models.CharField(max_length=120, blank=True)
+    region = models.CharField(max_length=120, blank=True)
+    postal_code = models.CharField(max_length=32, blank=True)
+    country = models.CharField(max_length=120, blank=True)
+    label = models.CharField(max_length=40, blank=True)
+    is_primary = models.BooleanField(default=False)
+    person = models.ForeignKey(
+        "contacts.Person", null=True, blank=True, on_delete=models.CASCADE, related_name="addresses"
+    )
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-is_primary", "id"]
+        verbose_name_plural = "addresses"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(person__isnull=False), name="address_one_owner"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.one_line
+
+    @property
+    def one_line(self) -> str:
+        parts = [self.line1, self.line2, self.city, self.region, self.postal_code, self.country]
+        return ", ".join(p for p in parts if p)
+
+    @property
+    def locality(self) -> str:
+        """`Bengaluru, Karnataka 560001 · India` — the secondary line on the detail card."""
+        region_postal = " ".join(p for p in [self.region, self.postal_code] if p)
+        city = f"{self.city}," if self.city and region_postal else self.city
+        left = " ".join(p for p in [city, region_postal] if p)
+        return f"{left} · {self.country}" if self.country and left else (left or self.country)
