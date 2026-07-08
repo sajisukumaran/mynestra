@@ -46,9 +46,10 @@ SHARED_APPS = [
 ]
 
 TENANT_APPS = [
+    "simple_history",          # audit history for tenant models (DESIGN §3); no tables of its own
     "apps.setup",              # Category catalogs (seeded §6)
     "apps.relationships",      # P2P/P2O relationship-type catalogs (seeded §6)
-    # More feature apps (contacts, organizations, families) join this list in P4+.
+    # apps.contacts joins in P4 (added with the app); organizations/families in P5/P6.
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]
@@ -68,6 +69,7 @@ MIDDLEWARE = [
     "apps.core.middleware.MembershipMiddleware",  # after auth; enforces per-tenant access
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "simple_history.middleware.HistoryRequestMiddleware",  # stamps the acting user on history rows
 ]
 
 # Tenant routes are served under /t/<slug>/ from ROOT_URLCONF; every non-prefixed path

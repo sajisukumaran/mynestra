@@ -10,6 +10,7 @@ dependencies = [
     "django-environ>=0.12",
     "pillow>=11",
     "django-cotton>=2.7,<3",
+    "django-simple-history>=3.12.0",
 ]
 
 [dependency-groups]
