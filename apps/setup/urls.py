@@ -12,4 +12,9 @@ app_name = "setup"
 
 urlpatterns = [
     path("", views.overview, name="overview"),
+    # Categories
+    path("categories/", views.categories, name="categories"),
+    path("categories/new/<str:kind>/", views.category_create, name="category-create"),
+    path("categories/<int:pk>/edit/", views.category_edit, name="category-edit"),
+    path("categories/<int:pk>/delete/", views.category_delete, name="category-delete"),
 ]

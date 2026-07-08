@@ -1,0 +1,54 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Categories{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Categories</span></c-breadcrumb>
+<c-page-header title="Categories" subtitle="Labels for people and organizations. System categories are locked." />
+
+<div class="stack-20">
+  {% for group in groups %}
+  <c-card title="{{ group.label }}" flush>
+    <c-slot name="actions">
+      <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}setup/categories/new/{{ group.kind }}/"><c-icon name="plus" size="sm" /> New</c-button>
+    </c-slot>
+    <c-table>
+      <thead><tr>
+        <c-th>Category</c-th>
+        <c-th>Status</c-th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for c in group.items %}
+        <tr>
+          <td><c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip></td>
+          <td>
+            {% if c.is_system %}<c-badge variant="lock"><c-icon name="key-round" /> System</c-badge>
+            {% else %}<span class="subtle">Custom</span>{% endif %}
+          </td>
+          <td>
+            <div class="cell-actions">
+            {% if c.is_system %}
+              <span class="subtle" title="Locked — system category"><c-icon name="key-round" size="sm" /></span>
+            {% else %}
+              <c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}setup/categories/{{ c.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button>
+              <c-confirm-dialog title="Delete &ldquo;{{ c.name }}&rdquo;?" message="This removes the category. It has no contacts attached yet.">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                <c-slot name="confirm">
+                  <form method="post" action="{{ ui_tenant_url }}setup/categories/{{ c.pk }}/delete/">{% csrf_token %}
+                    <c-button type="submit" variant="danger">Delete</c-button>
+                  </form>
+                </c-slot>
+              </c-confirm-dialog>
+            {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="3"><span class="subtle">Nothing here yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+  </c-card>
+  {% endfor %}
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}{% if mode == 'create' %}New category{% else %}Edit category{% endif %}{% endblock %}
+
+{% block setup %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}setup/categories/">Categories</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'create' %}New{% else %}{{ category.name }}{% endif %}</span>
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New {{ kind_label|lower }} category{% else %}Edit category{% endif %}" subtitle="{{ kind_label }} category" />
+
+<c-card>
+  <form method="post">{% csrf_token %}
+    <div class="form-grid">
+      <c-field label="Name" required error="{{ form.name.errors.0 }}">
+        <c-input name="name" value="{{ form.name.value|default:'' }}" maxlength="80" required />
+      </c-field>
+      <c-field label="Tint" class="span2" help="Curated chip tints; independent of the household accent." error="{{ form.color.errors.0 }}">
+        <c-tint-select name="color" value="{{ form.color.value|default:'slate' }}" />
+      </c-field>
+    </div>
+    <c-save-bar note="{{ kind_label }} category">
+      <c-button variant="ghost" href="{{ ui_tenant_url }}setup/categories/">Cancel</c-button>
+      <c-button type="submit" variant="primary">{% if mode == 'create' %}Create category{% else %}Save changes{% endif %}</c-button>
+    </c-save-bar>
+  </form>
+</c-card>
+{% endblock %}
