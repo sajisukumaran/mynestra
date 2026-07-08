@@ -1,0 +1,87 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Relationship types{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Relationship types</span></c-breadcrumb>
+<c-page-header title="Relationship types" subtitle="How people relate to each other and to organizations. System types are locked." />
+
+<div class="stack-20">
+  <c-card title="Person &harr; Person" flush>
+    <c-slot name="actions">
+      <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}setup/relationship-types/p2p/new/"><c-icon name="plus" size="sm" /> New</c-button>
+    </c-slot>
+    <c-table>
+      <thead><tr>
+        <c-th>Type</c-th><c-th>Labels</c-th><c-th>Status</c-th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for t in p2p_types %}
+        <tr>
+          <td><span class="strong">{{ t.code }}</span> {% if t.is_symmetric %}<c-badge>symmetric</c-badge>{% endif %}</td>
+          <td class="subtle">{{ t.a_label_n }}{% if not t.is_symmetric %} &rarr; {{ t.b_label_n }}{% endif %}</td>
+          <td>{% if t.is_system %}<c-badge variant="lock"><c-icon name="key-round" /> System</c-badge>{% else %}<span class="subtle">Custom</span>{% endif %}</td>
+          <td>
+            <div class="cell-actions">
+            {% if t.is_system %}
+              <span class="subtle" title="Locked — system type"><c-icon name="key-round" size="sm" /></span>
+            {% else %}
+              <c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}setup/relationship-types/p2p/{{ t.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button>
+              <c-confirm-dialog title="Delete &ldquo;{{ t.code }}&rdquo;?" message="This removes the relationship type.">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                <c-slot name="confirm">
+                  <form method="post" action="{{ ui_tenant_url }}setup/relationship-types/p2p/{{ t.pk }}/delete/">{% csrf_token %}
+                    <c-button type="submit" variant="danger">Delete</c-button>
+                  </form>
+                </c-slot>
+              </c-confirm-dialog>
+            {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4"><span class="subtle">Nothing here yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+  </c-card>
+
+  <c-card title="Person &harr; Organization" flush>
+    <c-slot name="actions">
+      <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}setup/relationship-types/p2o/new/"><c-icon name="plus" size="sm" /> New</c-button>
+    </c-slot>
+    <c-table>
+      <thead><tr>
+        <c-th>Label</c-th><c-th>Code</c-th><c-th>Status</c-th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for t in p2o_types %}
+        <tr>
+          <td><span class="strong">{{ t.label }}</span></td>
+          <td class="subtle">{{ t.code }}</td>
+          <td>{% if t.is_system %}<c-badge variant="lock"><c-icon name="key-round" /> System</c-badge>{% else %}<span class="subtle">Custom</span>{% endif %}</td>
+          <td>
+            <div class="cell-actions">
+            {% if t.is_system %}
+              <span class="subtle" title="Locked — system type"><c-icon name="key-round" size="sm" /></span>
+            {% else %}
+              <c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}setup/relationship-types/p2o/{{ t.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button>
+              <c-confirm-dialog title="Delete &ldquo;{{ t.label }}&rdquo;?" message="This removes the relationship type.">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                <c-slot name="confirm">
+                  <form method="post" action="{{ ui_tenant_url }}setup/relationship-types/p2o/{{ t.pk }}/delete/">{% csrf_token %}
+                    <c-button type="submit" variant="danger">Delete</c-button>
+                  </form>
+                </c-slot>
+              </c-confirm-dialog>
+            {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="4"><span class="subtle">Nothing here yet.</span></td></tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+  </c-card>
+</div>
+{% endblock %}

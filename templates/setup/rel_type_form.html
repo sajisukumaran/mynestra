@@ -1,0 +1,56 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}{% if mode == 'create' %}New relationship type{% else %}Edit relationship type{% endif %}{% endblock %}
+
+{% block setup %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}setup/relationship-types/">Relationship types</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'create' %}New{% else %}Edit{% endif %}</span>
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New relationship type{% else %}Edit relationship type{% endif %}" subtitle="{% if is_p2p %}Person &harr; Person{% else %}Person &harr; Organization{% endif %}" />
+
+<c-card>
+  <form method="post">{% csrf_token %}
+    <div class="stack-16">
+      <div class="form-grid">
+        <c-field label="Code" required help="A short identifier, e.g. godparent_godchild." error="{{ form.code.errors.0 }}">
+          <c-input name="code" value="{{ form.code.value|default:'' }}" maxlength="40" required />
+        </c-field>
+        {% if is_p2p %}
+        <c-field label="Symmetry" class="span2">
+          <c-toggle name="is_symmetric" label="Symmetric" description="Both people use the same label (e.g. sibling, friend)." {% if form.is_symmetric.value %}on{% endif %} />
+        </c-field>
+        {% else %}
+        <c-field label="Label" class="span2" required error="{{ form.label.errors.0 }}">
+          <c-input name="label" value="{{ form.label.value|default:'' }}" maxlength="60" required />
+        </c-field>
+        {% endif %}
+      </div>
+
+      {% if is_p2p %}
+      <div>
+        <div class="eyebrow">Side A labels — describing the first person, by the other person's gender</div>
+        <div class="form-grid">
+          <c-field label="Male" required error="{{ form.a_label_m.errors.0 }}"><c-input name="a_label_m" value="{{ form.a_label_m.value|default:'' }}" maxlength="40" required /></c-field>
+          <c-field label="Female" required error="{{ form.a_label_f.errors.0 }}"><c-input name="a_label_f" value="{{ form.a_label_f.value|default:'' }}" maxlength="40" required /></c-field>
+          <c-field label="Neutral / unknown" required error="{{ form.a_label_n.errors.0 }}"><c-input name="a_label_n" value="{{ form.a_label_n.value|default:'' }}" maxlength="40" required /></c-field>
+        </div>
+      </div>
+      <div>
+        <div class="eyebrow">Side B labels — describing the second person, by the other person's gender</div>
+        <div class="form-grid">
+          <c-field label="Male" required error="{{ form.b_label_m.errors.0 }}"><c-input name="b_label_m" value="{{ form.b_label_m.value|default:'' }}" maxlength="40" required /></c-field>
+          <c-field label="Female" required error="{{ form.b_label_f.errors.0 }}"><c-input name="b_label_f" value="{{ form.b_label_f.value|default:'' }}" maxlength="40" required /></c-field>
+          <c-field label="Neutral / unknown" required error="{{ form.b_label_n.errors.0 }}"><c-input name="b_label_n" value="{{ form.b_label_n.value|default:'' }}" maxlength="40" required /></c-field>
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <c-save-bar note="{% if is_p2p %}Person &harr; Person{% else %}Person &harr; Organization{% endif %} type">
+      <c-button variant="ghost" href="{{ ui_tenant_url }}setup/relationship-types/">Cancel</c-button>
+      <c-button type="submit" variant="primary">{% if mode == 'create' %}Create type{% else %}Save changes{% endif %}</c-button>
+    </c-save-bar>
+  </form>
+</c-card>
+{% endblock %}

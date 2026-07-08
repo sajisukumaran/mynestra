@@ -10,9 +10,20 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.decorators import owner_required
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
-from apps.setup.forms import CategoryForm
+from apps.setup.forms import (
+    CategoryForm,
+    PersonOrgRelationshipTypeForm,
+    RelationshipTypeForm,
+)
 from apps.setup.models import Category
 from apps.tenants.models import Invitation, Membership
+
+# Relationship-type kinds: URL segment -> (model, form, is_p2p). P2P carries gender-aware labels;
+# P2O carries a single label (DESIGN §5).
+REL_KINDS = {
+    "p2p": (RelationshipType, RelationshipTypeForm, True),
+    "p2o": (PersonOrgRelationshipType, PersonOrgRelationshipTypeForm, False),
+}
 
 
 def setup_url(request, path=""):
@@ -112,3 +123,66 @@ def category_delete(request, pk):
     if request.method == "POST":
         category.delete()  # hard delete: P3 catalogs have no dependents yet (soft-delete lands P4)
     return redirect(setup_url(request, "categories/"))
+
+
+# --- Relationship types (P2P + P2O) ---------------------------------------------------------
+# System rows are locked identically to categories: edit/delete refused server-side + hidden in UI.
+
+
+@owner_required
+def relationship_types(request):
+    """List P2P types (gender-aware labels) and P2O types; system rows locked."""
+    ctx = setup_context(
+        request, "rel-types",
+        p2p_types=RelationshipType.objects.all(),
+        p2o_types=PersonOrgRelationshipType.objects.all(),
+    )
+    return render(request, "setup/relationship_types.html", ctx)
+
+
+@owner_required
+def rel_type_create(request, kind):
+    if kind not in REL_KINDS:
+        raise Http404()
+    model, form_class, is_p2p = REL_KINDS[kind]
+
+    form = form_class(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(setup_url(request, "relationship-types/"))
+
+    ctx = setup_context(request, "rel-types", form=form, kind=kind, is_p2p=is_p2p, mode="create")
+    return render(request, "setup/rel_type_form.html", ctx)
+
+
+@owner_required
+def rel_type_edit(request, kind, pk):
+    if kind not in REL_KINDS:
+        raise Http404()
+    model, form_class, is_p2p = REL_KINDS[kind]
+    obj = get_object_or_404(model, pk=pk)
+    if obj.is_system:
+        return HttpResponseForbidden("System relationship types are locked and cannot be edited.")
+
+    form = form_class(request.POST or None, instance=obj)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(setup_url(request, "relationship-types/"))
+
+    ctx = setup_context(
+        request, "rel-types", form=form, kind=kind, is_p2p=is_p2p, obj=obj, mode="edit"
+    )
+    return render(request, "setup/rel_type_form.html", ctx)
+
+
+@owner_required
+def rel_type_delete(request, kind, pk):
+    if kind not in REL_KINDS:
+        raise Http404()
+    model, _form_class, _is_p2p = REL_KINDS[kind]
+    obj = get_object_or_404(model, pk=pk)
+    if obj.is_system:
+        return HttpResponseForbidden("System relationship types are locked and cannot be deleted.")
+    if request.method == "POST":
+        obj.delete()  # hard delete: no dependents in P3 (relationship edges land in P5)
+    return redirect(setup_url(request, "relationship-types/"))

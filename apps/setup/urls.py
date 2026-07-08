@@ -17,4 +17,13 @@ urlpatterns = [
     path("categories/new/<str:kind>/", views.category_create, name="category-create"),
     path("categories/<int:pk>/edit/", views.category_edit, name="category-edit"),
     path("categories/<int:pk>/delete/", views.category_delete, name="category-delete"),
+    # Relationship types (kind = p2p | p2o)
+    path("relationship-types/", views.relationship_types, name="relationship-types"),
+    path("relationship-types/<str:kind>/new/", views.rel_type_create, name="rel-type-create"),
+    path("relationship-types/<str:kind>/<int:pk>/edit/", views.rel_type_edit, name="rel-type-edit"),
+    path(
+        "relationship-types/<str:kind>/<int:pk>/delete/",
+        views.rel_type_delete,
+        name="rel-type-delete",
+    ),
 ]

@@ -3,6 +3,7 @@ components bound to these fields' values."""
 
 from django import forms
 
+from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.models import Category
 
 # Curated category chip tints (DESIGN §7.1). The picker (c-tint-select) offers exactly these.
@@ -28,3 +29,32 @@ class CategoryForm(forms.ModelForm):
         if color not in CATEGORY_TINTS:
             raise forms.ValidationError("Choose one of the available tints.")
         return color
+
+
+class RelationshipTypeForm(forms.ModelForm):
+    """P2P type: code + symmetry + the six gender-aware side labels (DESIGN §5)."""
+
+    class Meta:
+        model = RelationshipType
+        fields = [
+            "code", "is_symmetric",
+            "a_label_m", "a_label_f", "a_label_n",
+            "b_label_m", "b_label_f", "b_label_n",
+        ]
+
+    def clean_code(self):
+        return self.cleaned_data["code"].strip()
+
+
+class PersonOrgRelationshipTypeForm(forms.ModelForm):
+    """P2O type: code + a single label (DESIGN §5)."""
+
+    class Meta:
+        model = PersonOrgRelationshipType
+        fields = ["code", "label"]
+
+    def clean_code(self):
+        return self.cleaned_data["code"].strip()
+
+    def clean_label(self):
+        return self.cleaned_data["label"].strip()
