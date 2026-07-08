@@ -6,3 +6,7 @@ class TenantsConfig(AppConfig):
     name = "apps.tenants"
     label = "tenants"
     verbose_name = "Tenants"
+
+    def ready(self):
+        # Register the post_schema_sync seeding receiver.
+        from . import signals  # noqa: F401
