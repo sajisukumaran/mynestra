@@ -1,0 +1,24 @@
+<c-vars prefix="date" day="" month="" year="" class="" />
+{% comment %}Three-part real-world date (any part may be blank; renders XX/XXXX). Engine + display in P4.{% endcomment %}
+<div class="partial-date{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="control"><input name="{{ prefix }}_day" value="{{ day }}" inputmode="numeric" placeholder="DD" aria-label="Day"></div>
+  <div class="control is-select">
+    <select name="{{ prefix }}_month" aria-label="Month">
+      <option value="">MM</option>
+      <option value="1"{% if month|stringformat:"s" == "1" %} selected{% endif %}>Jan</option>
+      <option value="2"{% if month|stringformat:"s" == "2" %} selected{% endif %}>Feb</option>
+      <option value="3"{% if month|stringformat:"s" == "3" %} selected{% endif %}>Mar</option>
+      <option value="4"{% if month|stringformat:"s" == "4" %} selected{% endif %}>Apr</option>
+      <option value="5"{% if month|stringformat:"s" == "5" %} selected{% endif %}>May</option>
+      <option value="6"{% if month|stringformat:"s" == "6" %} selected{% endif %}>Jun</option>
+      <option value="7"{% if month|stringformat:"s" == "7" %} selected{% endif %}>Jul</option>
+      <option value="8"{% if month|stringformat:"s" == "8" %} selected{% endif %}>Aug</option>
+      <option value="9"{% if month|stringformat:"s" == "9" %} selected{% endif %}>Sep</option>
+      <option value="10"{% if month|stringformat:"s" == "10" %} selected{% endif %}>Oct</option>
+      <option value="11"{% if month|stringformat:"s" == "11" %} selected{% endif %}>Nov</option>
+      <option value="12"{% if month|stringformat:"s" == "12" %} selected{% endif %}>Dec</option>
+    </select>
+    <c-icon name="chevron-down" size="sm" class="subtle" />
+  </div>
+  <div class="control"><input name="{{ prefix }}_year" value="{{ year }}" inputmode="numeric" placeholder="YYYY" aria-label="Year"></div>
+</div>

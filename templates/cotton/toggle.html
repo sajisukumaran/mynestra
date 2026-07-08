@@ -1,0 +1,6 @@
+<c-vars on="" name="" label="" description="" class="" />
+<div class="switch-row{% if class %} {{ class }}{% endif %}" x-data="{ on: {{ on|yesno:'true,false' }} }" {{ attrs }}>
+  <button type="button" role="switch" :aria-checked="on" class="switch" :class="{ 'on': on }" @click="on = !on"></button>
+  {% if name %}<input type="hidden" name="{{ name }}" :value="on ? 'true' : 'false'">{% endif %}
+  {% if label %}<div class="sw-txt"><div class="t">{{ label }}</div>{% if description %}<div class="d">{{ description }}</div>{% endif %}</div>{% endif %}
+</div>

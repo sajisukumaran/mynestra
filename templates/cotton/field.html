@@ -1,0 +1,7 @@
+<c-vars label="" required="" help="" error="" class="" />
+<div class="field{% if error %} err{% endif %}{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if label %}<label>{{ label }}{% if required %} <span class="req">*</span>{% endif %}</label>{% endif %}
+  {{ slot }}
+  {% if help and not error %}<span class="help">{{ help }}</span>{% endif %}
+  {% if error %}<span class="err-msg"><c-icon name="triangle-alert" size="sm" /> {{ error }}</span>{% endif %}
+</div>

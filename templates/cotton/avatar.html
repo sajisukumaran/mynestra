@@ -1,0 +1,2 @@
+<c-vars src="" alt="" size="" square="" tint="slate" class="" />
+<span class="avatar av-{{ tint }}{% if size %} a-{{ size }}{% endif %}{% if square %} sq{% endif %}{% if class %} {{ class }}{% endif %}" {{ attrs }}>{% if src %}<img src="{{ src }}" alt="{{ alt }}">{% else %}{{ slot }}{% endif %}</span>

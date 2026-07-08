@@ -1,0 +1,2 @@
+<c-vars tint="slate" dot="" removable="" class="" />
+<span class="chip chip-{{ tint }}{% if class %} {{ class }}{% endif %}" {{ attrs }}>{% if dot %}<span class="cdot"></span>{% endif %}{{ slot }}{% if removable %}<c-icon name="x" size="sm" style="cursor:pointer;opacity:.6;" />{% endif %}</span>

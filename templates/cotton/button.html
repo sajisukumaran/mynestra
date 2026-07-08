@@ -1,0 +1,2 @@
+<c-vars variant="default" size="" type="button" icon_only="" class="" />
+<button type="{{ type }}" class="btn{% if variant != 'default' %} btn-{{ variant }}{% endif %}{% if size %} btn-{{ size }}{% endif %}{% if icon_only %} btn-icon{% endif %}{% if class %} {{ class }}{% endif %}" {{ attrs }}>{{ slot }}</button>

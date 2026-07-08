@@ -1,0 +1,5 @@
+<c-vars key="" icon="" class="" />
+<div class="kv-row{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  <div class="k">{% if icon %}<c-icon name="{{ icon }}" />{% endif %}{{ key }}</div>
+  <div class="v">{{ slot }}</div>
+</div>

@@ -1,0 +1,6 @@
+<c-vars on="" name="" value="on" label="" class="" />
+<label class="row wrap" style="gap:9px;cursor:pointer;" x-data="{ on: {{ on|yesno:'true,false' }} }" {{ attrs }}>
+  <button type="button" role="checkbox" :aria-checked="on" class="check" :class="{ 'on': on }" @click="on = !on"><c-icon name="check" size="sm" /></button>
+  {% if name %}<input type="hidden" name="{{ name }}" :value="on ? '{{ value }}' : ''">{% endif %}
+  {% if label %}<span>{{ label }}</span>{% endif %}
+</label>
