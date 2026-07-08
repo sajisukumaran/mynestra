@@ -1,0 +1,40 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Household profile{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Household profile</span></c-breadcrumb>
+<c-page-header title="Household profile" subtitle="The name and logo shown across MyNestra." />
+
+<c-card>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    <div class="stack-16">
+      <div class="form-grid">
+        <c-field label="Household name" required class="span2">
+          <c-input name="name" value="{{ tenant.name }}" maxlength="100" required />
+        </c-field>
+      </div>
+
+      <div>
+        <div class="eyebrow">Logo</div>
+        <div class="row">
+          {% if tenant.logo %}
+            <c-avatar src="{{ tenant.logo.url }}" size="xl" square alt="{{ tenant.name }}" />
+          {% else %}
+            <c-avatar size="xl" square tint="teal">{{ ui_tenant_initials }}</c-avatar>
+          {% endif %}
+          <div class="stack-16">
+            <c-field help="PNG, JPG or SVG. Shown as a square badge.">
+              <c-file accept="image/*" name="logo" />
+            </c-field>
+            {% if tenant.logo %}<c-checkbox name="remove_logo" label="Remove current logo" />{% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <c-save-bar>
+      <c-button type="submit" variant="primary">Save profile</c-button>
+    </c-save-bar>
+  </form>
+</c-card>
+{% endblock %}

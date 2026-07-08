@@ -328,3 +328,26 @@ def appearance(request):
         theme=request.user.theme or "",
     )
     return render(request, "setup/appearance.html", ctx)
+
+
+# --- Household profile ----------------------------------------------------------------------
+# Tenant is a public (django-tenants) model; name is updated via queryset (no schema switch), the
+# logo via model save (TenantMixin.save() resets to public — safe because we redirect after).
+
+
+@owner_required
+def profile(request):
+    tenant = request.tenant
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        if name:
+            Tenant.objects.filter(pk=tenant.pk).update(name=name)
+        if request.POST.get("remove_logo") and tenant.logo:
+            tenant.logo.delete(save=False)
+            Tenant.objects.filter(pk=tenant.pk).update(logo="")
+        elif request.FILES.get("logo"):
+            tenant.logo = request.FILES["logo"]
+            tenant.save(update_fields=["logo"])
+        return redirect(setup_url(request, "profile/"))
+
+    return render(request, "setup/profile.html", setup_context(request, "profile", tenant=tenant))

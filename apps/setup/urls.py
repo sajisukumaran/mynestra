@@ -35,4 +35,6 @@ urlpatterns = [
     path("invitations/<int:pk>/resend/", views.invitation_resend, name="invitation-resend"),
     # Appearance
     path("appearance/", views.appearance, name="appearance"),
+    # Household profile
+    path("profile/", views.profile, name="profile"),
 ]

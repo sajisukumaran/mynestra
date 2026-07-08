@@ -1,0 +1,3 @@
+<c-vars accept="" class="" />
+{% comment %}File input, styled to match other controls (mirrors c-input's .control wrapper).{% endcomment %}
+<div class="control{% if class %} {{ class }}{% endif %}"><input type="file"{% if accept %} accept="{{ accept }}"{% endif %} {{ attrs }}></div>
