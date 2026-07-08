@@ -26,4 +26,11 @@ urlpatterns = [
         views.rel_type_delete,
         name="rel-type-delete",
     ),
+    # Members & invitations
+    path("members/", views.members, name="members"),
+    path("members/invite/", views.member_invite, name="member-invite"),
+    path("members/<int:pk>/role/", views.member_role, name="member-role"),
+    path("members/<int:pk>/remove/", views.member_remove, name="member-remove"),
+    path("invitations/<int:pk>/revoke/", views.invitation_revoke, name="invitation-revoke"),
+    path("invitations/<int:pk>/resend/", views.invitation_resend, name="invitation-resend"),
 ]

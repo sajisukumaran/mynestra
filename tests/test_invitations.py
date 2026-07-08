@@ -15,7 +15,8 @@ def test_owner_can_create_and_email_invitation(make_tenant, make_user, client, m
 
     client.force_login(owner)
     response = client.post(
-        f"/t/{tenant.schema_name}/invite/", {"email": "invitee@example.com", "role": "MEMBER"}
+        f"/t/{tenant.schema_name}/setup/members/invite/",
+        {"email": "invitee@example.com", "role": "MEMBER"},
     )
     assert response.status_code == 302
     assert Invitation.objects.filter(email="invitee@example.com", tenant=tenant).exists()
@@ -23,13 +24,22 @@ def test_owner_can_create_and_email_invitation(make_tenant, make_user, client, m
     assert "invitee@example.com" in mailoutbox[0].to
 
 
-def test_member_cannot_create_invitation(make_tenant, make_user, client):
+def test_member_cannot_manage_members(make_tenant, make_user, client):
     tenant = make_tenant(name="Acme")
     member = make_user("member@example.com")
     Membership.objects.create(user=member, tenant=tenant, role=Role.MEMBER)
 
     client.force_login(member)
-    assert client.get(f"/t/{tenant.schema_name}/invite/").status_code == 403
+    # Setup → Members is Owner-only.
+    assert client.get(f"/t/{tenant.schema_name}/setup/members/").status_code == 403
+    assert (
+        client.post(
+            f"/t/{tenant.schema_name}/setup/members/invite/",
+            {"email": "x@example.com", "role": "MEMBER"},
+        ).status_code
+        == 403
+    )
+    assert not Invitation.objects.filter(email="x@example.com", tenant=tenant).exists()
 
 
 def test_accept_as_new_user_creates_account_and_membership(make_tenant, client):

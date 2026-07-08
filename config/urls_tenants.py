@@ -5,6 +5,7 @@ setup, ...) mount their routes here in later phases.
 """
 
 from django.urls import include, path
+from django.views.generic import RedirectView
 
 from apps.accounts import views as account_views
 from apps.core.views import health
@@ -12,7 +13,7 @@ from apps.core.views import health
 urlpatterns = [
     path("", account_views.tenant_home, name="tenant-home"),
     path("setup/", include("apps.setup.urls")),
-    # P1 invite-create route; superseded by Setup → Members in P3 (see apps/setup).
-    path("invite/", account_views.invite_create, name="invite-create"),
+    # Legacy P1 invite route; invitations now live in Setup → Members (P3).
+    path("invite/", RedirectView.as_view(url="../setup/members/", permanent=False), name="invite-create"),
     path("health/", health, name="tenant-health"),
 ]

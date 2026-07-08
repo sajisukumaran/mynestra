@@ -5,18 +5,24 @@ relationship types, members & invitations, appearance, tenant profile, recently-
 view is guarded by `owner_required`; feature templates compose cotton components only.
 """
 
+from datetime import timedelta
+
+from django.conf import settings
+from django.core.mail import send_mail
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from apps.accounts.decorators import owner_required
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.forms import (
     CategoryForm,
+    InviteForm,
     PersonOrgRelationshipTypeForm,
     RelationshipTypeForm,
 )
 from apps.setup.models import Category
-from apps.tenants.models import Invitation, Membership
+from apps.tenants.models import Invitation, Membership, Role
 
 # Relationship-type kinds: URL segment -> (model, form, is_p2p). P2P carries gender-aware labels;
 # P2O carries a single label (DESIGN §5).
@@ -186,3 +192,111 @@ def rel_type_delete(request, kind, pk):
     if request.method == "POST":
         obj.delete()  # hard delete: no dependents in P3 (relationship edges land in P5)
     return redirect(setup_url(request, "relationship-types/"))
+
+
+# --- Members & invitations ------------------------------------------------------------------
+# Full management (DESIGN §4/§8): roster, invite, revoke/resend, role change, remove — all scoped
+# to request.tenant. A last-Owner guard prevents removing/demoting the final Owner (server-side).
+
+
+def _send_invitation_email(request, invitation):
+    accept_url = request.build_absolute_uri(invitation.get_accept_path())
+    send_mail(
+        subject=f"You're invited to {request.tenant.name} on MyNestra",
+        message=(
+            f"You've been invited to join {request.tenant.name}.\n\n"
+            f"Accept your invitation:\n{accept_url}\n\n"
+            f"This link expires on {invitation.expires_at:%d-%b-%Y}."
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[invitation.email],
+    )
+
+
+def _owner_count(tenant):
+    return Membership.objects.filter(tenant=tenant, role=Role.OWNER).count()
+
+
+def _render_members(request, invite_form):
+    memberships = (
+        Membership.objects.filter(tenant=request.tenant)
+        .select_related("user")
+        .order_by("-role", "joined_at")
+    )
+    invitations = Invitation.objects.filter(tenant=request.tenant).order_by("-created_at")
+    ctx = setup_context(
+        request, "members",
+        memberships=memberships,
+        invitations=invitations,
+        owner_count=_owner_count(request.tenant),
+        invite_form=invite_form,
+    )
+    return render(request, "setup/members.html", ctx)
+
+
+@owner_required
+def members(request):
+    return _render_members(request, InviteForm())
+
+
+@owner_required
+def member_invite(request):
+    if request.method != "POST":
+        return redirect(setup_url(request, "members/"))
+    form = InviteForm(request.POST)
+    if not form.is_valid():
+        return _render_members(request, form)
+
+    invitation = Invitation.objects.create(
+        email=form.cleaned_data["email"],
+        tenant=request.tenant,
+        role=form.cleaned_data["role"],
+        invited_by=request.user,
+    )
+    _send_invitation_email(request, invitation)
+    return redirect(setup_url(request, "members/"))
+
+
+@owner_required
+def invitation_revoke(request, pk):
+    invitation = get_object_or_404(Invitation, pk=pk, tenant=request.tenant)
+    if request.method == "POST" and invitation.status == Invitation.Status.PENDING:
+        invitation.status = Invitation.Status.REVOKED
+        invitation.save(update_fields=["status"])
+    return redirect(setup_url(request, "members/"))
+
+
+@owner_required
+def invitation_resend(request, pk):
+    invitation = get_object_or_404(Invitation, pk=pk, tenant=request.tenant)
+    if request.method == "POST" and invitation.status == Invitation.Status.PENDING:
+        invitation.expires_at = timezone.now() + timedelta(days=7)
+        invitation.save(update_fields=["expires_at"])
+        _send_invitation_email(request, invitation)
+    return redirect(setup_url(request, "members/"))
+
+
+@owner_required
+def member_role(request, pk):
+    membership = get_object_or_404(Membership, pk=pk, tenant=request.tenant)
+    new_role = request.POST.get("role")
+    if request.method != "POST" or new_role not in (Role.OWNER, Role.MEMBER):
+        return redirect(setup_url(request, "members/"))
+    # Last-owner guard: never demote the final Owner.
+    demoting_owner = membership.role == Role.OWNER and new_role == Role.MEMBER
+    if demoting_owner and _owner_count(request.tenant) <= 1:
+        return HttpResponseForbidden("The household must keep at least one owner.")
+    membership.role = new_role
+    membership.save(update_fields=["role"])
+    return redirect(setup_url(request, "members/"))
+
+
+@owner_required
+def member_remove(request, pk):
+    membership = get_object_or_404(Membership, pk=pk, tenant=request.tenant)
+    # Last-owner guard: never remove the final Owner.
+    if membership.role == Role.OWNER and _owner_count(request.tenant) <= 1:
+        return HttpResponseForbidden("The household must keep at least one owner.")
+    if request.method == "POST":
+        membership.delete()
+    return redirect(setup_url(request, "members/"))

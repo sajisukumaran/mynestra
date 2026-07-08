@@ -5,6 +5,7 @@ from django import forms
 
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.models import Category
+from apps.tenants.models import Role
 
 # Curated category chip tints (DESIGN §7.1). The picker (c-tint-select) offers exactly these.
 CATEGORY_TINTS = [
@@ -58,3 +59,16 @@ class PersonOrgRelationshipTypeForm(forms.ModelForm):
 
     def clean_label(self):
         return self.cleaned_data["label"].strip()
+
+
+ROLE_CHOICES = [(Role.MEMBER, "Member"), (Role.OWNER, "Owner")]
+
+
+class InviteForm(forms.Form):
+    """Invite an email into the current household with a role (DESIGN §4)."""
+
+    email = forms.EmailField()
+    role = forms.ChoiceField(choices=ROLE_CHOICES, initial=Role.MEMBER)
+
+    def clean_email(self):
+        return self.cleaned_data["email"].strip().lower()

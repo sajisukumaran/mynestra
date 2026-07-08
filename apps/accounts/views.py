@@ -1,12 +1,10 @@
-"""Identity views (public + tenant). Minimal templates in P1; restyled into the component system
-in P2. Login/logout/password-reset use Django's built-in views (wired in config/urls_public.py)."""
+"""Identity views (public + tenant). Login/logout/password-reset use Django's built-in views
+(wired in config/urls_public.py). Invitation *management* moved to the Setup app in P3
+(apps/setup); this module keeps the chooser, tenant landing, and the public accept flow."""
 
-from django.conf import settings
 from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import redirect_to_login
-from django.core.mail import send_mail
-from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.tenants.models import Invitation, Membership, Role
@@ -34,38 +32,6 @@ def tenant_home(request):
     return render(
         request, "accounts/tenant_home.html", {"tenant": request.tenant, "is_owner": is_owner}
     )
-
-
-@login_required
-def invite_create(request):
-    """Owner-only: invite an email into the current household and send the tokened link."""
-    tenant = request.tenant
-    membership = Membership.objects.filter(user=request.user, tenant=tenant).first()
-    if membership is None or not membership.is_owner:
-        return HttpResponseForbidden("Only owners can send invitations.")
-
-    if request.method == "POST":
-        email = request.POST.get("email", "").strip().lower()
-        role = request.POST.get("role", Role.MEMBER)
-        if email:
-            invitation = Invitation.objects.create(
-                email=email, tenant=tenant, role=role, invited_by=request.user
-            )
-            accept_url = request.build_absolute_uri(invitation.get_accept_path())
-            send_mail(
-                subject=f"You're invited to {tenant.name} on MyNestra",
-                message=(
-                    f"You've been invited to join {tenant.name}.\n\n"
-                    f"Accept your invitation:\n{accept_url}\n\n"
-                    f"This link expires on {invitation.expires_at:%d-%b-%Y}."
-                ),
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[email],
-            )
-            return redirect(request.path)
-
-    invitations = Invitation.objects.filter(tenant=tenant).order_by("-created_at")
-    return render(request, "accounts/invite_create.html", {"invitations": invitations})
 
 
 def invite_accept(request, token):

@@ -1,0 +1,118 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Members{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Members</span></c-breadcrumb>
+<c-page-header title="Members" subtitle="People with access to this household, and pending invitations." />
+
+<div class="stack-20">
+  <c-card title="Members" flush>
+    <c-table>
+      <thead><tr>
+        <c-th>Member</c-th><c-th>Role</c-th><c-th>Joined</c-th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for m in memberships %}
+        <tr>
+          <td>
+            <div class="person-cell">
+              <c-avatar tint="teal" size="sm">{{ m.user.get_full_name|slice:":2"|upper }}</c-avatar>
+              <div><div class="pc-name">{{ m.user.get_full_name }}</div><div class="pc-sub">{{ m.user.email }}</div></div>
+            </div>
+          </td>
+          <td>
+            {% if m.role == 'OWNER' %}<c-badge variant="accent">Owner</c-badge>{% else %}<c-badge>Member</c-badge>{% endif %}
+          </td>
+          <td class="subtle">{{ m.joined_at|date:"d M Y" }}</td>
+          <td>
+            <div class="cell-actions">
+              {% if m.role == 'OWNER' %}
+                {% if owner_count > 1 %}
+                <form method="post" action="{{ ui_tenant_url }}setup/members/{{ m.pk }}/role/">{% csrf_token %}
+                  <input type="hidden" name="role" value="MEMBER">
+                  <c-button type="submit" size="sm" variant="ghost">Make member</c-button>
+                </form>
+                {% endif %}
+              {% else %}
+                <form method="post" action="{{ ui_tenant_url }}setup/members/{{ m.pk }}/role/">{% csrf_token %}
+                  <input type="hidden" name="role" value="OWNER">
+                  <c-button type="submit" size="sm" variant="ghost">Make owner</c-button>
+                </form>
+              {% endif %}
+              {% if not m.role == 'OWNER' or owner_count > 1 %}
+              <c-confirm-dialog title="Remove {{ m.user.get_full_name }}?" message="They will lose access to this household. You can re-invite them later.">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                <c-slot name="confirm">
+                  <form method="post" action="{{ ui_tenant_url }}setup/members/{{ m.pk }}/remove/">{% csrf_token %}
+                    <c-button type="submit" variant="danger">Remove</c-button>
+                  </form>
+                </c-slot>
+              </c-confirm-dialog>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+  </c-card>
+
+  <c-card title="Invite a member">
+    <form method="post" action="{{ ui_tenant_url }}setup/members/invite/">{% csrf_token %}
+      <div class="form-grid">
+        <c-field label="Email" required class="span2" error="{{ invite_form.email.errors.0 }}">
+          <c-input type="email" name="email" value="{{ invite_form.email.value|default:'' }}" required />
+        </c-field>
+        <c-field label="Role">
+          <c-select name="role">
+            <option value="MEMBER">Member</option>
+            <option value="OWNER">Owner</option>
+          </c-select>
+        </c-field>
+      </div>
+      <c-save-bar note="An invitation email with a single-use link will be sent.">
+        <c-button type="submit" variant="primary"><c-icon name="user-round-plus" /> Send invitation</c-button>
+      </c-save-bar>
+    </form>
+  </c-card>
+
+  <c-card title="Invitations" flush>
+    {% if invitations %}
+    <c-table>
+      <thead><tr>
+        <c-th>Email</c-th><c-th>Role</c-th><c-th>Status</c-th><c-th>Expires</c-th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for inv in invitations %}
+        <tr>
+          <td>{{ inv.email }}</td>
+          <td class="subtle">{{ inv.role|capfirst }}</td>
+          <td>
+            {% if inv.status == 'PENDING' %}{% if inv.is_expired %}<c-badge variant="danger">Expired</c-badge>{% else %}<c-badge variant="warning">Pending</c-badge>{% endif %}
+            {% elif inv.status == 'ACCEPTED' %}<c-badge variant="success">Accepted</c-badge>
+            {% elif inv.status == 'REVOKED' %}<c-badge>Revoked</c-badge>
+            {% else %}<c-badge>{{ inv.get_status_display }}</c-badge>{% endif %}
+          </td>
+          <td class="subtle">{{ inv.expires_at|date:"d M Y" }}</td>
+          <td>
+            <div class="cell-actions">
+              {% if inv.status == 'PENDING' %}
+              <form method="post" action="{{ ui_tenant_url }}setup/invitations/{{ inv.pk }}/resend/">{% csrf_token %}
+                <c-button type="submit" size="sm" variant="ghost"><c-icon name="mail" size="sm" /> Resend</c-button>
+              </form>
+              <form method="post" action="{{ ui_tenant_url }}setup/invitations/{{ inv.pk }}/revoke/">{% csrf_token %}
+                <c-button type="submit" size="sm" variant="ghost">Revoke</c-button>
+              </form>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    {% else %}
+    <c-empty-state icon="mail" title="No invitations yet" text="Invite someone above to give them access to this household." />
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}
