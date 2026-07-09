@@ -10,6 +10,7 @@
       <c-sidebar-item label="Badges & chips" icon="tag" href="#badges" count="12" />
       <c-sidebar-item label="Forms" icon="contact" href="#forms" />
       <c-sidebar-item label="Data" icon="network" href="#data" />
+      <c-sidebar-item label="Money" icon="coins" href="#money" />
       <c-sidebar-item label="Overlays" icon="inbox" href="#overlays" />
       <c-slot name="foot">
         <c-sidebar-item label="All apps" icon="layout-grid" href="/" />
@@ -176,8 +177,24 @@
         <c-tile-stat n="12" label="Families" />
         <c-tile-stat n="5" label="Birthdays" />
       </c-app-tile>
+      <c-app-tile name="Finance" description="Accounts, ledger & balances" glyph="coins" tint="finance" href="#">
+        <c-tile-stat n="51" label="Accounts" />
+        <c-tile-stat n="128" label="Entries" />
+        <c-tile-stat n="16" label="Currencies" />
+      </c-app-tile>
       <c-app-tile soon name="Banking" description="Accounts, cards & bills" glyph="landmark" />
     </div>
+
+    {# ---- Money ---- #}
+    <c-card title="Money" id="money" icon="coins">
+      <div class="row wrap" style="gap:28px; align-items:baseline;">
+        <div>Positive <c-money amount="1234.56" symbol="$" /></div>
+        <div>Negative <c-money amount="-89.99" symbol="$" /></div>
+        <div>Zero <c-money amount="0" symbol="$" /></div>
+        <div>Yen (0dp) <c-money amount="150000" symbol="¥" dp="0" /></div>
+        <div>Indian grouping <c-money amount="1234567.5" symbol="₹" grouping="indian" /></div>
+      </div>
+    </c-card>
 
     <c-card title="People" icon="user-round" flush>
       <c-slot name="actions"><c-button size="sm"><c-icon name="filter" size="sm" /> Filter</c-button></c-slot>
