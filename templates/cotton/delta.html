@@ -1,0 +1,4 @@
+<c-vars dir="up" value="" class="" />
+{% comment %}KPI delta for stat-tile feet — up=success, down=danger (DESIGN §7.1). Keeps the
+`.delta` pattern component-composed so feature templates never hand-write the class.{% endcomment %}
+<span class="delta {{ dir }}{% if class %} {{ class }}{% endif %}" {{ attrs }}><c-icon name="arrow-{{ dir }}" />{{ value }}</span>

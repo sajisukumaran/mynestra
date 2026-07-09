@@ -704,6 +704,16 @@ textarea.control { min-height:70px; height:auto; align-items:stretch; padding:8p
   --accent-soft:rgba(148,163,184,.18); --accent-soft-fg:#e2e8f0; --ring:rgba(148,163,184,.35); }
 
 /* =====================================================================
+   Error pages (403 / 404 / 500) — a centered empty-state on the neutral canvas.
+   ===================================================================== */
+.error-page { min-height:100vh; display:flex; align-items:center; justify-content:center;
+  padding:32px 20px; background:var(--bg); }
+.error-card { width:100%; max-width:460px; background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--r-lg); box-shadow:var(--shadow-lg); padding:12px 20px 24px; text-align:center; }
+.error-card .error-code { font-size:56px; line-height:1; font-weight:700; letter-spacing:-.03em;
+  color:var(--accent-text); padding-top:20px; }
+
+/* =====================================================================
    Responsive
    ===================================================================== */
 @media (max-width:1180px){ .form-grid, .form-grid.g4 { grid-template-columns:repeat(2,minmax(0,1fr)); } }

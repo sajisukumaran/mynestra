@@ -157,7 +157,7 @@
     <span id="data"></span>
     <div class="stat-grid">
       <c-stat-tile icon="user-round" tint="teal" value="148" label="People">
-        <c-slot name="foot"><span class="delta up"><c-icon name="arrow-up" />6</span> added this month</c-slot>
+        <c-slot name="foot"><c-delta dir="up" value="6" /> added this month</c-slot>
       </c-stat-tile>
       <c-stat-tile icon="house" tint="blue" value="12" label="Families">
         <c-slot name="foot">across the household</c-slot>
@@ -166,7 +166,7 @@
         <c-slot name="foot">in the next 30 days</c-slot>
       </c-stat-tile>
       <c-stat-tile icon="building-2" tint="violet" value="9" label="Organizations">
-        <c-slot name="foot"><span class="delta down"><c-icon name="arrow-down" />1</span> since last month</c-slot>
+        <c-slot name="foot"><c-delta dir="down" value="1" /> since last month</c-slot>
       </c-stat-tile>
     </div>
 
@@ -303,6 +303,16 @@
         <c-empty-state icon="inbox" title="No people yet" text="Add your first contact to get started.">
           <c-button variant="primary"><c-icon name="plus" /> New person</c-button>
         </c-empty-state>
+      </c-card>
+      <c-card title="Error page (403 / 404 / 500)" flush>
+        {# The .error-page wrapper fills the viewport in production; boxed here for preview. #}
+        <div class="error-card" style="margin:16px auto; box-shadow:none;">
+          <div class="error-code tnum">404</div>
+          <c-empty-state icon="map" title="Page not found"
+            text="We couldn't find that page. It may have been moved or deleted.">
+            <c-button variant="primary" href="#"><c-icon name="house" /> Back to home</c-button>
+          </c-empty-state>
+        </div>
       </c-card>
       <c-card title="Dropdown menu">
         <c-dropdown-menu>
