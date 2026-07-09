@@ -18,9 +18,11 @@ def seed_new_tenant(sender, tenant, **kwargs):
         return  # never seed the public schema
 
     # Imported lazily so app loading doesn't depend on import order.
+    from apps.finance.seed import seed_finance
     from apps.relationships.seed import seed_relationship_types
     from apps.setup.seed import seed_categories
 
     with schema_context(tenant.schema_name):
         seed_categories()
         seed_relationship_types()
+        seed_finance()
