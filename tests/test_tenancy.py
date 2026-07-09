@@ -5,7 +5,13 @@ from django_tenants.utils import schema_context
 
 from apps.contacts.models import Person
 from apps.families.models import Family
-from apps.relationships.models import PersonRelationship, RelationshipType
+from apps.organizations.models import Organization
+from apps.relationships.models import (
+    PersonOrgRelationship,
+    PersonOrgRelationshipType,
+    PersonRelationship,
+    RelationshipType,
+)
 from apps.setup.models import Category
 
 
@@ -55,3 +61,24 @@ def test_families_and_relationships_are_isolated(make_tenant):
         assert Family.objects.count() == 0
         assert PersonRelationship.objects.count() == 0
         assert not Family.objects.filter(name="Alpha-Only Family").exists()
+
+
+def test_organizations_and_p2o_are_isolated(make_tenant):
+    """P6 models (Organization, PersonOrgRelationship) must not leak across tenant schemas."""
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        org = Organization.objects.create(name="Alpha-Only Bank")
+        person = Person.objects.create(first_name="Alpha", last_name="Owner")
+        PersonOrgRelationship.objects.create(
+            person=person, organization=org,
+            type=PersonOrgRelationshipType.objects.get(code="account_holder"),
+        )
+        assert Organization.objects.count() == 1
+        assert PersonOrgRelationship.objects.count() == 1
+
+    with schema_context(b.schema_name):
+        assert Organization.objects.count() == 0
+        assert PersonOrgRelationship.objects.count() == 0
+        assert not Organization.objects.filter(name="Alpha-Only Bank").exists()

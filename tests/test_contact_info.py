@@ -6,6 +6,7 @@ from django_tenants.utils import schema_context
 
 from apps.contacts.models import Address, ContactChannel, Person
 from apps.families.models import Family
+from apps.organizations.models import Branch, Organization
 
 
 def test_channel_requires_an_owner(make_tenant):
@@ -67,3 +68,26 @@ def test_two_owners_rejected(make_tenant):
         fam = Family.objects.create(name="Sharma")
         with pytest.raises(IntegrityError), transaction.atomic():
             Address.objects.create(city="X", person=p, family=fam)
+
+
+def test_org_and_branch_can_own_contact_info(make_tenant):
+    """P6 widened the owner to the final four — org- and branch-owned rows pass the CHECK."""
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.create(name="HDFC Bank")
+        branch = Branch.objects.create(organization=org, name="Main")
+        oa = Address.objects.create(organization=org, city="Mumbai")
+        bc = ContactChannel.objects.create(branch=branch, type="phone", value="+91 1")
+        assert org.addresses.count() == 1 and branch.channels.count() == 1
+        assert oa.person_id is None and bc.organization_id is None
+
+
+def test_three_owners_rejected(make_tenant):
+    """Exactly-one-owner still holds across all four owner columns."""
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        p = Person.objects.create(first_name="A", last_name="B")
+        fam = Family.objects.create(name="Sharma")
+        org = Organization.objects.create(name="HDFC Bank")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Address.objects.create(city="X", person=p, family=fam, organization=org)

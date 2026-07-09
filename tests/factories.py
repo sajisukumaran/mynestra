@@ -5,6 +5,7 @@ import factory
 
 from apps.contacts.models import Person
 from apps.families.models import Family, FamilyMembership
+from apps.organizations.models import Branch, Organization
 
 
 class PersonFactory(factory.django.DjangoModelFactory):
@@ -28,3 +29,18 @@ class FamilyMembershipFactory(factory.django.DjangoModelFactory):
 
     family = factory.SubFactory(FamilyFactory)
     person = factory.SubFactory(PersonFactory)
+
+
+class OrganizationFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Organization
+
+    name = factory.Sequence(lambda n: f"Org{n}")
+
+
+class BranchFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Branch
+
+    organization = factory.SubFactory(OrganizationFactory)
+    name = factory.Sequence(lambda n: f"Branch{n}")
