@@ -159,8 +159,9 @@ class Person(SoftDeleteModel):
 
 
 # --- Unified contact info (DESIGN §5) -------------------------------------------------------
-# ContactChannel and Address each attach to exactly ONE owner. In P4 the only owner is `person`;
-# the organization/branch/family owner FKs (and the widened CHECK) are added in P5/P6.
+# ContactChannel and Address each attach to exactly ONE owner, enforced by a DB CHECK. P4 shipped
+# `person`; P5 widens to `person | family` (Families own an address). The organization/branch owners
+# (and a wider CHECK) are added in P6 with the Organization model.
 
 
 class ContactChannel(TimeStampedModel):
@@ -180,14 +181,21 @@ class ContactChannel(TimeStampedModel):
     person = models.ForeignKey(
         "contacts.Person", null=True, blank=True, on_delete=models.CASCADE, related_name="channels"
     )
+    family = models.ForeignKey(
+        "families.Family", null=True, blank=True, on_delete=models.CASCADE, related_name="channels"
+    )
     history = HistoricalRecords()
 
     class Meta:
         ordering = ["-is_primary", "id"]
         constraints = [
-            # Exactly one owner. Widened to a multi-column count when org/branch/family land (P5).
+            # Exactly one owner (person | family). Widen with org/branch in P6.
             models.CheckConstraint(
-                condition=models.Q(person__isnull=False), name="contactchannel_one_owner"
+                condition=(
+                    models.Q(person__isnull=False, family__isnull=True)
+                    | models.Q(person__isnull=True, family__isnull=False)
+                ),
+                name="contactchannel_one_owner",
             ),
         ]
 
@@ -211,14 +219,22 @@ class Address(TimeStampedModel):
     person = models.ForeignKey(
         "contacts.Person", null=True, blank=True, on_delete=models.CASCADE, related_name="addresses"
     )
+    family = models.ForeignKey(
+        "families.Family", null=True, blank=True, on_delete=models.CASCADE, related_name="addresses"
+    )
     history = HistoricalRecords()
 
     class Meta:
         ordering = ["-is_primary", "id"]
         verbose_name_plural = "addresses"
         constraints = [
+            # Exactly one owner (person | family). Widen with org/branch in P6.
             models.CheckConstraint(
-                condition=models.Q(person__isnull=False), name="address_one_owner"
+                condition=(
+                    models.Q(person__isnull=False, family__isnull=True)
+                    | models.Q(person__isnull=True, family__isnull=False)
+                ),
+                name="address_one_owner",
             ),
         ]
 
