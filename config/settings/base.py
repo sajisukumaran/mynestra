@@ -52,6 +52,7 @@ TENANT_APPS = [
     "apps.contacts",           # People, contact channels/addresses, important dates (P4)
     "apps.families",           # Families + membership (P5); owns Address via unified FK
     "apps.organizations",      # Organizations + identifiers + branches (P6)
+    "apps.finance",            # Double-entry GL backbone: COA, currencies, ledger (module 2)
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]
