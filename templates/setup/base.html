@@ -6,7 +6,7 @@ Every Setup page extends this and fills the `setup` block. Tenant links are buil
 
 {% block content %}
 <c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
-         user_initials="{{ ui_user_initials }}" show_setup="true"
+         user_initials="{{ ui_user_initials }}"
          setup_url="{{ ui_tenant_url }}setup/" home_url="{{ ui_tenant_url }}">
   <c-slot name="sidebar">
     <c-sidebar title="Setup" subtitle="{{ ui_tenant_name }}" glyph="settings">

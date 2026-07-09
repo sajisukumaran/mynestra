@@ -1,4 +1,4 @@
-<c-vars tenant_name="" tenant_initials="" user_initials="U" sidebar_toggle="" show_search="true" show_setup="" setup_url="" home_url="/" class="" />
+<c-vars tenant_name="" tenant_initials="" user_initials="U" sidebar_toggle="" show_search="true" setup_url="" home_url="/" class="" />
 <header class="topbar{% if class %} {{ class }}{% endif %}" {{ attrs }}>
   <div class="topbar-l">
     {% if sidebar_toggle %}<button class="icon-btn" @click="$store.ui.toggleSidebar()" title="Toggle menu" aria-label="Toggle menu"><c-icon name="panel-left" /></button>{% endif %}
@@ -15,13 +15,13 @@
   <div class="topbar-r">
     {% if show_search %}<label class="search"><c-icon name="search" size="sm" /><input placeholder="Search people, organizations…"><span class="kbd">/</span></label>{% endif %}
     <button class="icon-btn theme-btn" @click="$store.ui.toggleTheme()" title="Toggle theme" aria-label="Toggle theme"><c-icon name="moon" class="th-moon" /><c-icon name="sun" class="th-sun" /></button>
-    {% if show_setup %}<a class="icon-btn" href="{{ setup_url }}" title="Setup" aria-label="Setup"><c-icon name="settings" /></a>{% endif %}
     <button class="icon-btn" title="Notifications" aria-label="Notifications"><c-icon name="bell" /><span class="dot"></span></button>
     <c-dropdown-menu align="right">
       <c-slot name="trigger">
         <button class="usermenu"><span class="avatar a-sm av-teal">{{ user_initials }}</span><c-icon name="chevron-down" size="sm" class="muted" /></button>
       </c-slot>
       <a class="menu-item" href="/"><c-icon name="layout-grid" /> Switch household</a>
+      {% if setup_url %}<a class="menu-item" href="{{ setup_url }}"><c-icon name="settings" /> Setup</a>{% endif %}
       <div class="menu-sep"></div>
       <form method="post" action="/logout/">{% csrf_token %}
         <button type="submit" class="menu-item danger"><c-icon name="log-out" /> Sign out</button>

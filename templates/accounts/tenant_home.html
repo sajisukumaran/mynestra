@@ -5,7 +5,7 @@
 <div class="app app--launcher" x-data>
   <c-topbar tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
             user_initials="{{ ui_user_initials }}" show_search="true"
-            {% if is_owner %}show_setup="true" setup_url="setup/"{% endif %} home_url="." />
+            setup_url="{% if is_owner %}setup/{% endif %}" home_url="." />
 
   <div class="launcher-wrap">
     <div class="launcher-inner">
