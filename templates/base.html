@@ -5,9 +5,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}MyNestra{% endblock %}</title>
-  {# Pre-paint (no flash): server values win inside a tenant — household palette (ui_palette) and
-     the user's explicit theme (ui_theme) — falling back to localStorage/system on public pages so
-     the /styleguide dev switcher keeps working. Always sets data-theme so dark selectors resolve. #}
+  {% comment %}
+    Pre-paint (no flash): server values win inside a tenant — household palette (ui_palette) and
+    the user's explicit theme (ui_theme) — falling back to localStorage/system on public pages so
+    the /styleguide dev switcher keeps working. Always sets data-theme so dark selectors resolve.
+  {% endcomment %}
   <script>
     (function () {
       var r = document.documentElement;
