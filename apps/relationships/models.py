@@ -1,9 +1,9 @@
 """Relationship types + edges (tenant schema).
 
 The *type catalogs* (seeded §6) — the P2P `RelationshipType` and the P2O `PersonOrgRelationshipType`
-— arrived in P1. P5 adds the P2P **edge** (`PersonRelationship`, stored once per unordered pair)
-plus the gender-reciprocal label-resolution engine in `services.py`. The P2O edge
-(`PersonOrgRelationship`) lands in P6 with the Organization model.
+— arrived in P1. P5 added the P2P **edge** (`PersonRelationship`, stored once per unordered pair)
+plus the gender-reciprocal label-resolution engine in `services.py`. P6 adds the P2O edge
+(`PersonOrgRelationship`) — the "key people" / "organizations" link between a Person and an Org.
 """
 
 from django.db import models
@@ -11,6 +11,7 @@ from django.db.models.functions import Greatest, Least
 from simple_history.models import HistoricalRecords
 
 from apps.core.models import SoftDeleteModel
+from apps.core.partialdate import PartialDate
 from apps.relationships.services import label_for, other_side
 
 
@@ -122,3 +123,50 @@ class PersonRelationship(SoftDeleteModel):
         """Label describing the *other* endpoint, as shown on `viewer`'s page."""
         other = self.other_of(viewer)
         return label_for(self.type, other.gender, other_side(self.side_of(viewer)))
+
+
+class PersonOrgRelationship(SoftDeleteModel):
+    """A person's link to an organization (DESIGN §5) — "key people" from the org side, the
+    "organizations" list from the person side. A single label per type (no gender reciprocity),
+    with optional `from`/`to` PartialDates and a free `role_note`."""
+
+    person = models.ForeignKey(
+        "contacts.Person", on_delete=models.CASCADE, related_name="org_links"
+    )
+    organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.CASCADE, related_name="people_links"
+    )
+    type = models.ForeignKey(
+        PersonOrgRelationshipType, on_delete=models.PROTECT, related_name="edges"
+    )
+    role_note = models.CharField(max_length=200, blank=True)
+
+    from_year = models.SmallIntegerField(null=True, blank=True)
+    from_month = models.SmallIntegerField(null=True, blank=True)
+    from_day = models.SmallIntegerField(null=True, blank=True)
+    to_year = models.SmallIntegerField(null=True, blank=True)
+    to_month = models.SmallIntegerField(null=True, blank=True)
+    to_day = models.SmallIntegerField(null=True, blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["organization__name", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["person", "organization", "type"],
+                condition=models.Q(deleted_at__isnull=True),
+                name="personorgrelationship_unique",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.person} — {self.organization} ({self.type.label})"
+
+    @property
+    def from_date(self) -> PartialDate:
+        return PartialDate.from_instance(self, "from")
+
+    @property
+    def to_date(self) -> PartialDate:
+        return PartialDate.from_instance(self, "to")
