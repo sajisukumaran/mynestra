@@ -53,11 +53,10 @@ def org_dashboard(request):
 
     now = timezone.now()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    org_alive = Q(organizations__deleted_at__isnull=True)
     categories = (
         Category.objects.filter(kind=Category.Kind.ORG)
-        .annotate(
-            n=Count("organizations", filter=Q(organizations__deleted_at__isnull=True), distinct=True)
-        )
+        .annotate(n=Count("organizations", filter=org_alive, distinct=True))
         .filter(n__gt=0)
         .order_by("-n", "name")
     )

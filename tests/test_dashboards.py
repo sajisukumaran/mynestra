@@ -126,3 +126,48 @@ def test_org_list_moved_to_all(make_tenant, make_user, client):
     tenant, owner = _owner(make_tenant, make_user)
     client.force_login(owner)
     assert client.get(f"/t/{tenant.schema_name}/organizations/all/").status_code == 200
+
+
+# --- Launcher live counts + module registry (DESIGN §9) -------------------------------------
+
+def _launcher_counts(app_label):
+    from django.apps import apps as django_apps
+
+    return {c["label"]: c["n"] for c in django_apps.get_app_config(app_label).launcher_counts()}
+
+
+def test_launcher_counts_reflect_live_data(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        Person.objects.create(first_name="A", last_name="One")
+        Person.objects.create(first_name="B", last_name="Two")
+        Family.objects.create(name="Fam")
+        Organization.objects.create(name="HDFC Bank")
+
+        contacts = _launcher_counts("contacts")
+        assert contacts["People"] == 2 and contacts["Families"] == 1
+        orgs = _launcher_counts("organizations")
+        assert orgs["Organizations"] == 1 and orgs["Branches"] == 0
+
+
+def test_launcher_renders_enabled_and_coming_soon_tiles(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/").content.decode()
+    for label in ("Contacts", "Organizations", "People", "Branches", "Key people", "Banking"):
+        assert label in body
+
+
+def test_launcher_counts_are_tenant_isolated(make_tenant):
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+    with schema_context(a.schema_name):
+        for i in range(3):
+            Person.objects.create(first_name=f"A{i}", last_name="X")
+    with schema_context(b.schema_name):
+        Person.objects.create(first_name="Bonly", last_name="Y")
+
+    with schema_context(a.schema_name):
+        assert _launcher_counts("contacts")["People"] == 3
+    with schema_context(b.schema_name):
+        assert _launcher_counts("contacts")["People"] == 1  # no leak from Alpha

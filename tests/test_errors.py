@@ -1,6 +1,6 @@
 """On-brand error pages (DESIGN §8): 404 for unknown paths, 403 for non-members (via
-PermissionDenied in MembershipMiddleware), and the standalone 500 template. Test settings run with
-DEBUG=False, so Django's handlers render our templates/{403,404,500}.html rather than debug pages."""
+PermissionDenied in MembershipMiddleware), and the standalone 500 template. Test settings run
+with DEBUG=False, so Django's handlers render our templates/{403,404,500}.html, not debug pages."""
 
 from django.template.loader import render_to_string
 
