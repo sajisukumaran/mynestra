@@ -118,3 +118,35 @@ def test_branch_popup_number_dates_and_folded_address(make_tenant, make_user, cl
     body = client.get(base).content.decode()
     assert "XX-Mar-2020" in body        # closed date display on the branch card
     assert "badge-warning" in body      # the Closed badge (only warning badge on this page)
+
+
+def test_branch_popup_folded_phone(make_tenant, make_user, client):
+    """The branch popup carries a `phone` that upserts the branch's primary phone channel:
+    created on add, updated in place on edit (no duplicate channel), and prefilled on the form."""
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    with schema_context(tenant.schema_name):
+        oid = Organization.objects.create(name="HDFC Bank").pk
+    base = f"/t/{tenant.schema_name}/organizations/{oid}/"
+
+    client.post(base + "branches/new/", {"name": "MG Road", "phone": "+91 80 4000 1234"})
+    with schema_context(tenant.schema_name):
+        b = Branch.objects.get(name="MG Road")
+        ch = b.channels.get()
+        assert ch.type == "phone" and ch.value == "+91 80 4000 1234" and ch.is_primary
+        bid, chid = b.pk, ch.pk
+
+    # Prefilled on the edit popup.
+    assert 'value="+91 80 4000 1234"' in client.get(base).content.decode()
+
+    # Edit updates the same channel in place — no duplicate row.
+    client.post(f"{base}branches/{bid}/edit/", {"name": "MG Road", "phone": "+91 80 9999 0000"})
+    with schema_context(tenant.schema_name):
+        b = Branch.objects.get(pk=bid)
+        assert b.channels.count() == 1
+        assert b.channels.get().pk == chid and b.channels.get().value == "+91 80 9999 0000"
+
+    # Blank phone on edit is a no-op (keeps the existing channel).
+    client.post(f"{base}branches/{bid}/edit/", {"name": "MG Road", "phone": ""})
+    with schema_context(tenant.schema_name):
+        assert Branch.objects.get(pk=bid).channels.count() == 1

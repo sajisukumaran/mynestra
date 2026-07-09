@@ -158,12 +158,15 @@
       <div class="stack stack-20">
         <div class="between">
           <span class="eyebrow">Branches</span>
-          <c-modal title="Add branch">
+          <c-modal title="Add branch" class="modal-wide">
             <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add branch</c-button></c-slot>
             <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/new/">{% csrf_token %}
               <div class="stack-16">
                 <c-field label="Branch name" required><c-input name="name" required /></c-field>
-                <c-field label="Branch number"><c-input name="number" placeholder="Branch code / IFSC / number" /></c-field>
+                <div class="grid-halves">
+                  <c-field label="Branch number"><c-input name="number" placeholder="Branch code / IFSC / number" /></c-field>
+                  <c-field label="Phone"><c-input name="phone" placeholder="Primary phone" /></c-field>
+                </div>
                 <label class="row"><input type="checkbox" name="is_primary"> <span class="muted">Primary branch</span></label>
                 <div class="grid-halves">
                   <c-field label="Opened"><c-partial-date prefix="opened" /></c-field>
@@ -198,12 +201,15 @@
                 </div>
               </form>
             </c-modal>
-            <c-modal title="Edit branch">
+            <c-modal title="Edit branch" class="modal-wide">
               <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit branch"><c-icon name="pencil" size="sm" /></c-button></c-slot>
               <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/edit/">{% csrf_token %}
                 <div class="stack-16">
                   <c-field label="Branch name" required><c-input name="name" value="{{ b.name }}" required /></c-field>
-                  <c-field label="Branch number"><c-input name="number" value="{{ b.number }}" placeholder="Branch code / IFSC / number" /></c-field>
+                  <div class="grid-halves">
+                    <c-field label="Branch number"><c-input name="number" value="{{ b.number }}" placeholder="Branch code / IFSC / number" /></c-field>
+                    <c-field label="Phone"><c-input name="phone" value="{{ b.primary_phone.value|default:'' }}" placeholder="Primary phone" /></c-field>
+                  </div>
                   <label class="row"><input type="checkbox" name="is_primary" {% if b.is_primary %}checked{% endif %}> <span class="muted">Primary branch</span></label>
                   <div class="grid-halves">
                     <c-field label="Opened"><c-partial-date prefix="opened" day="{{ b.opened_day|default:'' }}" month="{{ b.opened_month|default:'' }}" year="{{ b.opened_year|default:'' }}" /></c-field>

@@ -285,6 +285,23 @@ def _set_branch_dates(request, branch):
         setattr(branch, field, value)
 
 
+def _upsert_branch_phone(request, branch):
+    """Create/update the branch's main phone channel from the `phone` field folded into the branch
+    popup. No-op when blank; other channels (incl. non-phone) are left untouched."""
+    phone = request.POST.get("phone", "").strip()
+    if not phone:
+        return
+    channel = branch.channels.filter(type="phone").order_by("-is_primary", "id").first()
+    if channel:
+        channel.value = phone
+        channel.save()
+    else:
+        ContactChannel.objects.create(
+            branch=branch, type="phone", value=phone,
+            is_primary=not branch.channels.filter(is_primary=True).exists(),
+        )
+
+
 def branch_create(request, pk):
     org = get_object_or_404(Organization, pk=pk)
     if request.method == "POST":
@@ -295,6 +312,7 @@ def branch_create(request, pk):
             _set_branch_dates(request, branch)
             branch.save()
             _upsert_branch_primary_address(request, branch)
+            _upsert_branch_phone(request, branch)
     return redirect(tenant_url(request, f"organizations/{pk}/"))
 
 
@@ -307,6 +325,7 @@ def branch_edit(request, pk, branch_pk):
             _set_branch_dates(request, branch)
             branch.save()
             _upsert_branch_primary_address(request, branch)
+            _upsert_branch_phone(request, branch)
     return redirect(tenant_url(request, f"organizations/{pk}/"))
 
 

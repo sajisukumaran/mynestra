@@ -139,6 +139,11 @@ class Branch(SoftDeleteModel):
         return self.addresses.filter(is_primary=True).first() or self.addresses.first()
 
     @property
+    def primary_phone(self):
+        """The branch's main phone channel — surfaced/edited on the branch popup."""
+        return self.channels.filter(type="phone").order_by("-is_primary", "id").first()
+
+    @property
     def opened(self) -> PartialDate:
         return PartialDate.from_instance(self, "opened")
 
