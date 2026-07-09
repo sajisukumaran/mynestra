@@ -190,6 +190,7 @@
                 </span>
               </c-kv-row>
               {% endfor %}
+              {% if not person.dob.is_set and not person.anniversary.is_set and not person.important_dates.all %}<span class="subtle">No important dates yet.</span>{% endif %}
             </c-key-value>
           </c-card>
 
