@@ -88,7 +88,7 @@
 
           <c-card title="Addresses" icon="map-pin">
             <c-slot name="actions">
-              <c-slide-over title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
+              <c-modal title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
                 <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/addresses/new/">{% csrf_token %}
                   <div class="stack-16">
@@ -103,13 +103,13 @@
                     <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </c-slot>
             {% for a in org.addresses.all %}
             <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
               <c-slot name="tail">
                 {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
-                <c-slide-over title="Edit address">
+                <c-modal title="Edit address">
                   <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                   <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
                     <div class="stack-16">
@@ -127,7 +127,7 @@
                       </div>
                     </div>
                   </form>
-                </c-slide-over>
+                </c-modal>
               </c-slot>
             </c-channel-row>
             {% empty %}<span class="subtle">No addresses yet.</span>{% endfor %}
@@ -155,7 +155,7 @@
       <div class="stack stack-20">
         <div class="between">
           <span class="eyebrow">Branches</span>
-          <c-slide-over title="Add branch">
+          <c-modal title="Add branch">
             <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add branch</c-button></c-slot>
             <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/new/">{% csrf_token %}
               <div class="stack-16">
@@ -164,30 +164,30 @@
                 <div class="row"><c-button type="submit" variant="primary">Save branch</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
               </div>
             </form>
-          </c-slide-over>
+          </c-modal>
         </div>
 
         {% for b in branches %}
         <c-card title="{{ b.name }}" icon="building-2">
           <c-slot name="actions">
             {% if b.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}
-            <c-slide-over title="Add channel">
+            <c-modal title="Add channel">
               <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="phone" size="sm" /> Channel</c-button></c-slot>
               <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/new/">{% csrf_token %}
                 <div class="stack-16">{% include "organizations/partials/channel_fields.html" %}
                   <div class="row"><c-button type="submit" variant="primary">Save channel</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
                 </div>
               </form>
-            </c-slide-over>
-            <c-slide-over title="Add address">
+            </c-modal>
+            <c-modal title="Add address">
               <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="map-pin" size="sm" /> Address</c-button></c-slot>
               <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/new/">{% csrf_token %}
                 <div class="stack-16">{% include "organizations/partials/address_fields.html" %}
                   <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
                 </div>
               </form>
-            </c-slide-over>
-            <c-slide-over title="Edit branch">
+            </c-modal>
+            <c-modal title="Edit branch">
               <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit branch"><c-icon name="pencil" size="sm" /></c-button></c-slot>
               <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/edit/">{% csrf_token %}
                 <div class="stack-16">
@@ -199,14 +199,14 @@
                   </div>
                 </div>
               </form>
-            </c-slide-over>
+            </c-modal>
           </c-slot>
 
           {% for ch in b.channels.all %}
           <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
             <c-slot name="tail">
               {% if ch.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}
-              <c-slide-over title="Edit channel">
+              <c-modal title="Edit channel">
                 <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/{{ ch.pk }}/edit/">{% csrf_token %}
                   <div class="stack-16">{% include "organizations/partials/channel_fields.html" with channel=ch %}
@@ -216,7 +216,7 @@
                     </div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </c-slot>
           </c-channel-row>
           {% endfor %}
@@ -224,7 +224,7 @@
           <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
             <c-slot name="tail">
               {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
-              <c-slide-over title="Edit address">
+              <c-modal title="Edit address">
                 <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
                   <div class="stack-16">{% include "organizations/partials/address_fields.html" with address=a %}
@@ -234,7 +234,7 @@
                     </div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </c-slot>
           </c-channel-row>
           {% endfor %}
@@ -256,7 +256,7 @@
           <c-slot name="tail">
             <span class="row">
               {% with cat=kp.person.categories.first %}{% if cat %}<c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip>{% endif %}{% endwith %}
-              <c-slide-over title="Edit link">
+              <c-modal title="Edit link">
                 <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/people/{{ kp.link.pk }}/edit/">{% csrf_token %}
                   <div class="stack-16">
@@ -270,7 +270,7 @@
                     </div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </span>
           </c-slot>
         </c-rel-row>

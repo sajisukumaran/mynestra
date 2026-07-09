@@ -101,3 +101,23 @@ def test_org_hard_delete_when_allowed(make_tenant, make_user, client):
     client.post(f"/t/{tenant.schema_name}/setup/recently-deleted/organizations/{oid}/delete/")
     with schema_context(tenant.schema_name):
         assert not Organization.all_objects.filter(pk=oid).exists()
+
+
+def test_detail_sub_edits_use_popups_not_drawers(make_tenant, make_user, client):
+    """Detail sub-edits (address / branch / etc.) are centered popups (overlay center), not side
+    drawers (overlay right) — applied app-wide across Organization, Person and Family details."""
+    from apps.contacts.models import Person
+    from apps.families.models import Family
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        oid = Organization.objects.create(name="HDFC Bank").pk
+        pid = Person.objects.create(first_name="Rajesh", last_name="Sharma").pk
+        fid = Family.objects.create(name="Sharma").pk
+
+    client.force_login(owner)
+    base = f"/t/{tenant.schema_name}/"
+    for path in (f"organizations/{oid}/", f"contacts/people/{pid}/", f"contacts/families/{fid}/"):
+        body = client.get(base + path).content.decode()
+        assert "overlay right" not in body, path   # no side-drawers left
+        assert "overlay center" in body, path       # modals present

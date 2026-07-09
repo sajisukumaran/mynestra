@@ -61,7 +61,7 @@
       {# Address #}
       <c-card title="Address" icon="map-pin">
         <c-slot name="actions">
-          <c-slide-over title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
+          <c-modal title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
             <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
             <form method="post" action="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/addresses/new/">{% csrf_token %}
               <div class="stack-16">
@@ -76,13 +76,13 @@
                 <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
               </div>
             </form>
-          </c-slide-over>
+          </c-modal>
         </c-slot>
         {% for a in family.addresses.all %}
         <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
           <c-slot name="tail">
             {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
-            <c-slide-over title="Edit address">
+            <c-modal title="Edit address">
               <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
               <form method="post" action="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
                 <div class="stack-16">
@@ -100,7 +100,7 @@
                   </div>
                 </div>
               </form>
-            </c-slide-over>
+            </c-modal>
           </c-slot>
         </c-channel-row>
         {% empty %}<span class="subtle">No address yet.</span>{% endfor %}

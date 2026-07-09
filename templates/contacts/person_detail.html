@@ -89,7 +89,7 @@
 
           <c-card title="Addresses" icon="map-pin">
             <c-slot name="actions">
-              <c-slide-over title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
+              <c-modal title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
                 <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/addresses/new/">{% csrf_token %}
                   <div class="stack-16">
@@ -104,13 +104,13 @@
                     <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </c-slot>
             {% for a in person.addresses.all %}
             <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
               <c-slot name="tail">
                 {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
-                <c-slide-over title="Edit address">
+                <c-modal title="Edit address">
                   <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                   <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
                     <div class="stack-16">
@@ -128,7 +128,7 @@
                       </div>
                     </div>
                   </form>
-                </c-slide-over>
+                </c-modal>
               </c-slot>
             </c-channel-row>
             {% empty %}<span class="subtle">No addresses yet.</span>{% endfor %}
@@ -154,7 +154,7 @@
 
           <c-card title="Important dates" icon="calendar-days">
             <c-slot name="actions">
-              <c-slide-over title="Add important date" open="{% if reopen == 'date' %}true{% else %}false{% endif %}">
+              <c-modal title="Add important date" open="{% if reopen == 'date' %}true{% else %}false{% endif %}">
                 <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/dates/new/">{% csrf_token %}
                   <div class="stack-16">
@@ -165,7 +165,7 @@
                     <div class="row"><c-button type="submit" variant="primary">Save date</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </c-slot>
             <c-key-value>
               {% if person.dob.is_set %}<c-kv-row key="Birthday" icon="cake"><span class="tnum">{{ person.dob.display }}</span></c-kv-row>{% endif %}
@@ -174,7 +174,7 @@
               <c-kv-row key="{{ d.label }}" icon="star">
                 <span class="between">
                   <span class="tnum">{{ d.date.display|default:'—' }}</span>
-                  <c-slide-over title="Edit important date">
+                  <c-modal title="Edit important date">
                     <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                     <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/dates/{{ d.pk }}/edit/">{% csrf_token %}
                       <div class="stack-16">
@@ -186,7 +186,7 @@
                         </div>
                       </div>
                     </form>
-                  </c-slide-over>
+                  </c-modal>
                 </span>
               </c-kv-row>
               {% endfor %}
@@ -227,7 +227,7 @@
           <c-slot name="tail">
             <span class="row">
               <c-badge>{{ r.type_name }}</c-badge>
-              <c-slide-over title="Edit relationship">
+              <c-modal title="Edit relationship">
                 <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/{{ r.rel.pk }}/edit/">{% csrf_token %}
                   <div class="stack-16">
@@ -246,7 +246,7 @@
                     </div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </span>
           </c-slot>
         </c-rel-row>
@@ -259,7 +259,7 @@
           <c-slot name="tail">
             <span class="row">
               {% with cat=o.org.categories.first %}{% if cat %}<c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip>{% endif %}{% endwith %}
-              <c-slide-over title="Edit organization link">
+              <c-modal title="Edit organization link">
                 <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                 <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/orgs/{{ o.link.pk }}/edit/">{% csrf_token %}
                   <div class="stack-16">
@@ -273,7 +273,7 @@
                     </div>
                   </div>
                 </form>
-              </c-slide-over>
+              </c-modal>
             </span>
           </c-slot>
         </c-rel-row>
