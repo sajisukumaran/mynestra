@@ -22,8 +22,11 @@
           <c-tile-stat n="0" label="Birthdays" />
         </c-app-tile>
 
-        {# Organizations becomes a live tile in P6; until then it is "coming soon" so it never 404s. #}
-        <c-app-tile soon name="Organizations" description="Companies, branches & key people" glyph="building-2" tint="orgs" />
+        <c-app-tile name="Organizations" description="Companies, branches & key people" glyph="building-2" tint="orgs" href="organizations/">
+          <c-tile-stat n="0" label="Organizations" />
+          <c-tile-stat n="0" label="Branches" />
+          <c-tile-stat n="0" label="Key people" />
+        </c-app-tile>
 
         <c-app-tile soon name="Banking" description="Accounts, cards & bills" glyph="landmark" />
         <c-app-tile soon name="Health" description="Records, visits & medications" glyph="activity" />
