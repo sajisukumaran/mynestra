@@ -49,4 +49,9 @@ urlpatterns = [
         "<int:pk>/branches/<int:branch_pk>/addresses/<int:addr_pk>/delete/",
         views.branch_address_delete, name="branch-address-delete",
     ),
+    # Key people (P2O)
+    path("<int:pk>/people/search/", views.org_person_search, name="org-person-search"),
+    path("<int:pk>/people/new/", views.p2o_create, name="p2o-create"),
+    path("<int:pk>/people/<int:link_pk>/edit/", views.p2o_edit, name="p2o-edit"),
+    path("<int:pk>/people/<int:link_pk>/delete/", views.p2o_delete, name="p2o-delete"),
 ]

@@ -1,0 +1,11 @@
+{% comment %}P2O form fields (type + since/until PartialDates + role note). Needs `p2o_types` in
+context; pass `link` for edit prefill.{% endcomment %}
+<c-field label="Relationship" required>
+  <c-select name="type">
+    <option value="">Choose relationship…</option>
+    {% for t in p2o_types %}<option value="{{ t.pk }}" {% if link.type_id == t.pk %}selected{% endif %}>{{ t.label }}</option>{% endfor %}
+  </c-select>
+</c-field>
+<c-field label="Since" help="Leave any part blank if unknown."><c-partial-date prefix="from" day="{{ link.from_day|default:'' }}" month="{{ link.from_month|default:'' }}" year="{{ link.from_year|default:'' }}" /></c-field>
+<c-field label="Until"><c-partial-date prefix="to" day="{{ link.to_day|default:'' }}" month="{{ link.to_month|default:'' }}" year="{{ link.to_year|default:'' }}" /></c-field>
+<c-field label="Role note (optional)"><c-input name="role_note" value="{{ link.role_note|default:'' }}" placeholder="e.g. Account manager" /></c-field>

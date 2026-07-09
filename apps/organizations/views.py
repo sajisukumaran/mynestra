@@ -8,9 +8,10 @@ from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.contacts.forms import AddressForm
-from apps.contacts.models import Address, ContactChannel
+from apps.contacts.models import Address, ContactChannel, Person
 from apps.organizations.forms import BranchForm, OrganizationForm
 from apps.organizations.models import Branch, Organization, OrgIdentifier
+from apps.relationships.models import PersonOrgRelationship, PersonOrgRelationshipType
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
@@ -180,6 +181,7 @@ def _render_detail(request, org, address_form=None, reopen=""):
         branches=branches,
         branch_count=len(branches),
         key_people=_key_people_rows(org),
+        p2o_types=PersonOrgRelationshipType.objects.all(),
         history=org.history.all()[:60],
         address_form=address_form or AddressForm(),
         reopen=reopen,
@@ -305,4 +307,70 @@ def branch_address_delete(request, pk, branch_pk, addr_pk):
         Address.objects.filter(
             pk=addr_pk, branch__pk=branch_pk, branch__organization_id=pk
         ).delete()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+# --- Key people (P2O), managed from the org detail ------------------------------------------
+
+def _p2o_dates(request):
+    """Parse from_*/to_* PartialDate parts from the modal POST (blank → None)."""
+    def geti(name):
+        v = request.POST.get(name, "").strip()
+        return int(v) if v.lstrip("-").isdigit() else None
+
+    return {
+        f"{bound}_{part}": geti(f"{bound}_{part}")
+        for bound in ("from", "to")
+        for part in ("year", "month", "day")
+    }
+
+
+def org_person_search(request, pk):
+    """htmx: people not yet linked to this org (for the key-people picker)."""
+    org = get_object_or_404(Organization, pk=pk)
+    linked = set(org.people_links.values_list("person_id", flat=True))
+    qs = Person.objects.exclude(pk__in=linked)
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q)
+            | Q(preferred_name__icontains=q)
+        )
+    return render(request, "contacts/partials/rel_search.html", {"candidates": qs[:8], "q": q})
+
+
+def p2o_create(request, pk):
+    org = get_object_or_404(Organization, pk=pk)
+    if request.method == "POST":
+        person = Person.objects.filter(pk=request.POST.get("person", "")).first()
+        rtype = PersonOrgRelationshipType.objects.filter(pk=request.POST.get("type", "")).first()
+        if person and rtype:
+            exists = PersonOrgRelationship.objects.filter(
+                person=person, organization=org, type=rtype
+            ).exists()
+            if not exists:
+                PersonOrgRelationship.objects.create(
+                    person=person, organization=org, type=rtype,
+                    role_note=request.POST.get("role_note", "").strip(),
+                    **_p2o_dates(request),
+                )
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def p2o_edit(request, pk, link_pk):
+    link = get_object_or_404(PersonOrgRelationship, pk=link_pk, organization_id=pk)
+    if request.method == "POST":
+        rtype = PersonOrgRelationshipType.objects.filter(pk=request.POST.get("type", "")).first()
+        if rtype:
+            link.type = rtype
+            link.role_note = request.POST.get("role_note", "").strip()
+            for field, value in _p2o_dates(request).items():
+                setattr(link, field, value)
+            link.save()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def p2o_delete(request, pk, link_pk):
+    if request.method == "POST":
+        PersonOrgRelationship.objects.filter(pk=link_pk, organization_id=pk).delete()
     return redirect(tenant_url(request, f"organizations/{pk}/"))

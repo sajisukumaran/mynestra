@@ -246,13 +246,33 @@
       </div>
     </div>
 
-    {# KEY PEOPLE #}
+    {# KEY PEOPLE (P2O) #}
     <div x-show="tab === 'people'" x-cloak>
       <c-card title="Key people" icon="users">
+        <c-slot name="actions">{% include "organizations/partials/p2o_modal.html" %}</c-slot>
         {% for kp in key_people %}
         <c-rel-row name="{{ kp.person.display_name }}" role="{{ kp.role }}{% if kp.since %} · since {{ kp.since }}{% endif %}{% if kp.link.role_note %} · {{ kp.link.role_note }}{% endif %}" href="{{ ui_tenant_url }}contacts/people/{{ kp.person.pk }}/">
           <c-slot name="avatar"><c-avatar tint="{{ kp.person.avatar_tint }}" size="sm">{{ kp.person.initials }}</c-avatar></c-slot>
-          {% with cat=kp.person.categories.first %}{% if cat %}<c-slot name="tail"><c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip></c-slot>{% endif %}{% endwith %}
+          <c-slot name="tail">
+            <span class="row">
+              {% with cat=kp.person.categories.first %}{% if cat %}<c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip>{% endif %}{% endwith %}
+              <c-slide-over title="Edit link">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/people/{{ kp.link.pk }}/edit/">{% csrf_token %}
+                  <div class="stack-16">
+                    <c-rel-row name="{{ kp.person.display_name }}" role="{{ kp.person.list_subtitle }}">
+                      <c-slot name="avatar"><c-avatar tint="{{ kp.person.avatar_tint }}" size="sm">{{ kp.person.initials }}</c-avatar></c-slot>
+                    </c-rel-row>
+                    {% include "organizations/partials/p2o_fields.html" with link=kp.link %}
+                    <div class="between">
+                      <c-button type="submit" variant="primary">Save</c-button>
+                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/people/{{ kp.link.pk }}/delete/">Remove</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                    </div>
+                  </div>
+                </form>
+              </c-slide-over>
+            </span>
+          </c-slot>
         </c-rel-row>
         {% empty %}
         <c-empty-state icon="users" title="No key people yet" text="Link the people who matter at this organization — account managers, doctors, teachers." />
