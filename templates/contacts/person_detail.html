@@ -140,7 +140,7 @@
                   <div class="stack-16">
                     <c-field label="Label" required error="{{ date_form.label.errors.0 }}"><div class="control">{{ date_form.label }}</div></c-field>
                     <c-field label="Date" help="Leave any part blank if unknown." error="{{ date_form.date_day.errors.0 }}">
-                      <c-partial-date prefix="date" day="{{ date_form.date_day.value|default:'' }}" month="{{ date_form.date_month.value|default:'' }}" year="{{ date_form.date_year.value|default:'' }}" />
+                      <c-partial-date prefix="date" day="{{ date_form.date_day.value|default:'' }}" month="{{ date_form.date_month.value|default:'' }}" year="{{ date_form.date_year.value|default:'' }}" invalid="{{ date_form.date_day.errors|yesno:'1,' }}" />
                     </c-field>
                     <div class="row"><c-button type="submit" variant="primary">Save date</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
                   </div>

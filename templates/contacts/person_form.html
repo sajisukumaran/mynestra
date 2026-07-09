@@ -41,11 +41,11 @@
       <div class="stack-16" x-data="{ deceased: {{ form.is_deceased.value|yesno:'true,false' }} }">
         <div class="form-grid">
           <c-field label="Date of birth" help="Leave any part blank if unknown — renders as XX / XXXX." error="{{ form.dob_day.errors.0 }}">
-            <c-partial-date prefix="dob" day="{{ form.dob_day.value|default:'' }}" month="{{ form.dob_month.value|default:'' }}" year="{{ form.dob_year.value|default:'' }}" />
+            <c-partial-date prefix="dob" day="{{ form.dob_day.value|default:'' }}" month="{{ form.dob_month.value|default:'' }}" year="{{ form.dob_year.value|default:'' }}" invalid="{{ form.dob_day.errors|yesno:'1,' }}" />
           </c-field>
           <c-field label="Marital status" error="{{ form.marital_status.errors.0 }}"><div class="control is-select">{{ form.marital_status }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
           <c-field label="Anniversary" error="{{ form.anniversary_day.errors.0 }}">
-            <c-partial-date prefix="anniversary" day="{{ form.anniversary_day.value|default:'' }}" month="{{ form.anniversary_month.value|default:'' }}" year="{{ form.anniversary_year.value|default:'' }}" />
+            <c-partial-date prefix="anniversary" day="{{ form.anniversary_day.value|default:'' }}" month="{{ form.anniversary_month.value|default:'' }}" year="{{ form.anniversary_year.value|default:'' }}" invalid="{{ form.anniversary_day.errors|yesno:'1,' }}" />
           </c-field>
           <c-field label="Blood group" error="{{ form.blood_group.errors.0 }}"><div class="control is-select">{{ form.blood_group }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
         </div>
@@ -56,7 +56,7 @@
         </div>
         <div class="form-grid" x-show="deceased" x-cloak>
           <c-field label="Date of death" error="{{ form.dod_day.errors.0 }}">
-            <c-partial-date prefix="dod" day="{{ form.dod_day.value|default:'' }}" month="{{ form.dod_month.value|default:'' }}" year="{{ form.dod_year.value|default:'' }}" />
+            <c-partial-date prefix="dod" day="{{ form.dod_day.value|default:'' }}" month="{{ form.dod_month.value|default:'' }}" year="{{ form.dod_year.value|default:'' }}" invalid="{{ form.dod_day.errors|yesno:'1,' }}" />
           </c-field>
         </div>
       </div>

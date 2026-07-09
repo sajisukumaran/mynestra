@@ -1,24 +1,62 @@
-<c-vars prefix="date" day="" month="" year="" class="" />
-{% comment %}Three-part real-world date (any part may be blank; renders XX/XXXX). Engine + display in P4.{% endcomment %}
-<div class="partial-date{% if class %} {{ class }}{% endif %}" {{ attrs }}>
-  <div class="control"><input name="{{ prefix }}_day" value="{{ day }}" inputmode="numeric" placeholder="DD" aria-label="Day"></div>
-  <div class="control is-select">
-    <select name="{{ prefix }}_month" aria-label="Month">
-      <option value="">MM</option>
-      <option value="1"{% if month|stringformat:"s" == "1" %} selected{% endif %}>Jan</option>
-      <option value="2"{% if month|stringformat:"s" == "2" %} selected{% endif %}>Feb</option>
-      <option value="3"{% if month|stringformat:"s" == "3" %} selected{% endif %}>Mar</option>
-      <option value="4"{% if month|stringformat:"s" == "4" %} selected{% endif %}>Apr</option>
-      <option value="5"{% if month|stringformat:"s" == "5" %} selected{% endif %}>May</option>
-      <option value="6"{% if month|stringformat:"s" == "6" %} selected{% endif %}>Jun</option>
-      <option value="7"{% if month|stringformat:"s" == "7" %} selected{% endif %}>Jul</option>
-      <option value="8"{% if month|stringformat:"s" == "8" %} selected{% endif %}>Aug</option>
-      <option value="9"{% if month|stringformat:"s" == "9" %} selected{% endif %}>Sep</option>
-      <option value="10"{% if month|stringformat:"s" == "10" %} selected{% endif %}>Oct</option>
-      <option value="11"{% if month|stringformat:"s" == "11" %} selected{% endif %}>Nov</option>
-      <option value="12"{% if month|stringformat:"s" == "12" %} selected{% endif %}>Dec</option>
-    </select>
-    <c-icon name="chevron-down" size="sm" class="subtle" />
+<c-vars prefix="date" day="" month="" year="" invalid="" class="" />
+{% comment %}
+Compact partial date: one MM/DD/YYYY field (XX / XXXX for unknown parts) with a small
+pop-up editor of the three parts. Any part may be blank. The three real inputs
+({prefix}_day/_month/_year) live inside the popover and submit whether it is open or not
+(display:none inputs still POST), so views need no change. Pass invalid="1" to open the
+editor on load (e.g. after a validation error). Display + validation engine live in
+apps/core/partialdate.py.
+{% endcomment %}
+<div class="pdate{% if class %} {{ class }}{% endif %}"
+     x-data="{
+       open: {% if invalid %}true{% else %}false{% endif %},
+       month: '{{ month }}', day: '{{ day }}', year: '{{ year }}',
+       pad(v, n) { return v ? String(v).padStart(n, '0') : 'X'.repeat(n); }
+     }"
+     @keydown.escape.window="open = false">
+  <button type="button" class="control pdate-trigger{% if invalid %} is-err{% endif %}"
+          @click="open = !open" :aria-expanded="open" aria-haspopup="dialog"
+          aria-label="Edit date (month / day / year)">
+    <c-icon name="calendar-days" size="sm" class="subtle" />
+    <span class="tnum pdate-value"
+          x-text="pad(month, 2) + '/' + pad(day, 2) + '/' + pad(year, 4)">{{ month|default:'XX' }}/{{ day|default:'XX' }}/{{ year|default:'XXXX' }}</span>
+    <c-icon name="pencil" size="sm" class="subtle" />
+  </button>
+  <div class="pdate-pop" x-show="open" x-cloak x-transition.opacity.duration.120ms
+       @click.outside="open = false" role="dialog" aria-label="Edit date">
+    <div class="pdate-grid">
+      <label>Month
+        <div class="control is-select">
+          <select name="{{ prefix }}_month" x-model="month" aria-label="Month">
+            <option value="">MM</option>
+            <option value="1">Jan</option>
+            <option value="2">Feb</option>
+            <option value="3">Mar</option>
+            <option value="4">Apr</option>
+            <option value="5">May</option>
+            <option value="6">Jun</option>
+            <option value="7">Jul</option>
+            <option value="8">Aug</option>
+            <option value="9">Sep</option>
+            <option value="10">Oct</option>
+            <option value="11">Nov</option>
+            <option value="12">Dec</option>
+          </select>
+          <c-icon name="chevron-down" size="sm" class="subtle" />
+        </div>
+      </label>
+      <label>Day
+        <div class="control"><input name="{{ prefix }}_day" x-model="day" inputmode="numeric"
+             maxlength="2" placeholder="DD" aria-label="Day"></div>
+      </label>
+      <label>Year
+        <div class="control"><input name="{{ prefix }}_year" x-model="year" inputmode="numeric"
+             maxlength="4" placeholder="YYYY" aria-label="Year"></div>
+      </label>
+    </div>
+    <div class="pdate-foot">
+      <button type="button" class="pdate-clear" @click="month = ''; day = ''; year = ''">Clear</button>
+      <c-button size="sm" @click="open = false"><c-icon name="check" size="sm" /> Done</c-button>
+    </div>
   </div>
-  <div class="control"><input name="{{ prefix }}_year" value="{{ year }}" inputmode="numeric" placeholder="YYYY" aria-label="Year"></div>
 </div>

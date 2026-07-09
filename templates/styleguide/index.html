@@ -120,8 +120,11 @@
         <c-field label="Email" required error="Enter a valid email address.">
           <c-input value="rajesh.sharma@gmail" name="email" />
         </c-field>
-        <c-field label="Date of birth" class="span2">
+        <c-field label="Date of birth" help="Compact MM/DD/YYYY — click to edit the three parts.">
           <c-partial-date prefix="dob" day="14" month="3" year="1974" />
+        </c-field>
+        <c-field label="Partly unknown" help="Blank parts render as XX / XXXX.">
+          <c-partial-date prefix="ann" month="6" />
         </c-field>
         <c-field label="Notes" class="span-all">
           <c-textarea name="notes">Met at the annual meetup.</c-textarea>
