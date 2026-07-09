@@ -11,8 +11,14 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.contacts.forms import AddressForm, FamilyForm, ImportantDateForm, PersonForm
 from apps.contacts.models import Address, ContactChannel, ImportantDate, Person
 from apps.families.models import Family, FamilyMembership
-from apps.relationships.models import PersonRelationship, RelationshipType
-from apps.relationships.services import label_for, other_side
+from apps.organizations.models import Organization
+from apps.relationships.models import (
+    PersonOrgRelationship,
+    PersonOrgRelationshipType,
+    PersonRelationship,
+    RelationshipType,
+)
+from apps.relationships.services import label_for, other_side, parse_partial_dates
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
@@ -202,6 +208,14 @@ def _parse_typeside(raw):
     return RelationshipType.objects.filter(pk=type_id).first(), side
 
 
+def _org_link_rows(person):
+    """This person's P2O links (the "organizations" list): org + role label + optional since."""
+    return [
+        {"link": e, "org": e.organization, "role": e.type.label, "since": e.from_date.display}
+        for e in person.org_links.select_related("type", "organization").all()
+    ]
+
+
 # --- Detail (Overview + History) ------------------------------------------------------------
 
 def _person_qs():
@@ -225,6 +239,7 @@ def person_delete(request, pk):
 def _render_detail(request, person, address_form=None, date_form=None, reopen=""):
     rel_rows = _rel_rows(person)
     family_cards = _family_cards(person)
+    org_rows = _org_link_rows(person)
     ctx = contacts_context(
         request, "people",
         person=person,
@@ -236,7 +251,10 @@ def _render_detail(request, person, address_form=None, date_form=None, reopen=""
         rel_count=len(rel_rows),
         family_cards=family_cards,
         family_count=len(family_cards),
+        org_rows=org_rows,
+        org_count=len(org_rows),
         rel_type_options=_directed_type_options(RelationshipType.objects.all()),
+        p2o_types=PersonOrgRelationshipType.objects.all(),
     )
     return render(request, "contacts/person_detail.html", ctx)
 
@@ -323,6 +341,56 @@ def relationship_delete(request, pk, rel_pk):
         )
         if rel:
             rel.delete()  # soft-delete
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+# --- Person↔Organization links (P2O), edited from the Person detail --------------------------
+
+def org_link_search(request, pk):
+    """htmx: organizations this person is not yet linked to (for the add-org picker)."""
+    person = get_object_or_404(Person, pk=pk)
+    linked = set(person.org_links.values_list("organization_id", flat=True))
+    qs = Organization.objects.exclude(pk__in=linked)
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(Q(name__icontains=q) | Q(display_name__icontains=q))
+    return render(request, "contacts/partials/org_search.html", {"candidates": qs[:8], "q": q})
+
+
+def org_link_create(request, pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        org = Organization.objects.filter(pk=request.POST.get("organization", "")).first()
+        rtype = PersonOrgRelationshipType.objects.filter(pk=request.POST.get("type", "")).first()
+        if org and rtype:
+            exists = PersonOrgRelationship.objects.filter(
+                person=person, organization=org, type=rtype
+            ).exists()
+            if not exists:
+                PersonOrgRelationship.objects.create(
+                    person=person, organization=org, type=rtype,
+                    role_note=request.POST.get("role_note", "").strip(),
+                    **parse_partial_dates(request.POST, "from", "to"),
+                )
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def org_link_edit(request, pk, link_pk):
+    link = get_object_or_404(PersonOrgRelationship, pk=link_pk, person_id=pk)
+    if request.method == "POST":
+        rtype = PersonOrgRelationshipType.objects.filter(pk=request.POST.get("type", "")).first()
+        if rtype:
+            link.type = rtype
+            link.role_note = request.POST.get("role_note", "").strip()
+            for field, value in parse_partial_dates(request.POST, "from", "to").items():
+                setattr(link, field, value)
+            link.save()
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def org_link_delete(request, pk, link_pk):
+    if request.method == "POST":
+        PersonOrgRelationship.objects.filter(pk=link_pk, person_id=pk).delete()
     return redirect(tenant_url(request, f"contacts/people/{pk}/"))
 
 

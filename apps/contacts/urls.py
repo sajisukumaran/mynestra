@@ -46,6 +46,14 @@ urlpatterns = [
         "people/<int:pk>/relationships/<int:rel_pk>/delete/",
         views.relationship_delete, name="rel-delete",
     ),
+    # Person↔Organization links (P2O)
+    path("people/<int:pk>/orgs/search/", views.org_link_search, name="org-link-search"),
+    path("people/<int:pk>/orgs/new/", views.org_link_create, name="org-link-create"),
+    path("people/<int:pk>/orgs/<int:link_pk>/edit/", views.org_link_edit, name="org-link-edit"),
+    path(
+        "people/<int:pk>/orgs/<int:link_pk>/delete/",
+        views.org_link_delete, name="org-link-delete",
+    ),
     # Families
     path("families/", views.families_list, name="families"),
     path("families/new/", views.family_create, name="family-create"),

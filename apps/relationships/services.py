@@ -18,3 +18,17 @@ def label_for(rel_type, gender, side):
 
 def other_side(side):
     return "b" if side == "a" else "a"
+
+
+def parse_partial_dates(post, *prefixes):
+    """Pull `<prefix>_year/_month/_day` ints from a POST (blank → None). Used by the P2O modal on
+    both the org and person sides to read the `from`/`to` PartialDate parts."""
+    def geti(name):
+        v = (post.get(name) or "").strip()
+        return int(v) if v.lstrip("-").isdigit() else None
+
+    return {
+        f"{prefix}_{part}": geti(f"{prefix}_{part}")
+        for prefix in prefixes
+        for part in ("year", "month", "day")
+    }

@@ -12,6 +12,7 @@ from apps.contacts.models import Address, ContactChannel, Person
 from apps.organizations.forms import BranchForm, OrganizationForm
 from apps.organizations.models import Branch, Organization, OrgIdentifier
 from apps.relationships.models import PersonOrgRelationship, PersonOrgRelationshipType
+from apps.relationships.services import parse_partial_dates
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
@@ -312,19 +313,6 @@ def branch_address_delete(request, pk, branch_pk, addr_pk):
 
 # --- Key people (P2O), managed from the org detail ------------------------------------------
 
-def _p2o_dates(request):
-    """Parse from_*/to_* PartialDate parts from the modal POST (blank → None)."""
-    def geti(name):
-        v = request.POST.get(name, "").strip()
-        return int(v) if v.lstrip("-").isdigit() else None
-
-    return {
-        f"{bound}_{part}": geti(f"{bound}_{part}")
-        for bound in ("from", "to")
-        for part in ("year", "month", "day")
-    }
-
-
 def org_person_search(request, pk):
     """htmx: people not yet linked to this org (for the key-people picker)."""
     org = get_object_or_404(Organization, pk=pk)
@@ -352,7 +340,7 @@ def p2o_create(request, pk):
                 PersonOrgRelationship.objects.create(
                     person=person, organization=org, type=rtype,
                     role_note=request.POST.get("role_note", "").strip(),
-                    **_p2o_dates(request),
+                    **parse_partial_dates(request.POST, "from", "to"),
                 )
     return redirect(tenant_url(request, f"organizations/{pk}/"))
 
@@ -364,7 +352,7 @@ def p2o_edit(request, pk, link_pk):
         if rtype:
             link.type = rtype
             link.role_note = request.POST.get("role_note", "").strip()
-            for field, value in _p2o_dates(request).items():
+            for field, value in parse_partial_dates(request.POST, "from", "to").items():
                 setattr(link, field, value)
             link.save()
     return redirect(tenant_url(request, f"organizations/{pk}/"))

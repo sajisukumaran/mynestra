@@ -134,7 +134,7 @@
             {% empty %}<span class="subtle">No addresses yet.</span>{% endfor %}
           </c-card>
 
-          {# Relationships (top few; full list on the Relationships tab) #}
+          {# Relationships (top few P2P + P2O; full lists on the Relationships tab) #}
           <c-card title="Relationships" icon="network">
             <c-slot name="actions"><c-button size="sm" @click="tab = 'relationships'"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
             {% for r in rel_rows|slice:":5" %}
@@ -142,8 +142,14 @@
               <c-slot name="avatar"><c-avatar tint="{{ r.other.avatar_tint }}" size="sm">{{ r.other.initials }}</c-avatar></c-slot>
               {% with cat=r.other.categories.first %}{% if cat %}<c-slot name="tail"><c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip></c-slot>{% endif %}{% endwith %}
             </c-rel-row>
-            {% empty %}<span class="subtle">No relationships yet.</span>{% endfor %}
-            {% if rel_rows %}<c-hint>Labels resolve automatically from each person's gender — stored once per pair.</c-hint>{% endif %}
+            {% endfor %}
+            {% for o in org_rows|slice:":3" %}
+            <c-rel-row name="{{ o.org.display }}" role="{{ o.role }}{% if o.since %} · since {{ o.since }}{% endif %}" href="{{ ui_tenant_url }}organizations/{{ o.org.pk }}/">
+              <c-slot name="avatar"><c-avatar tint="{{ o.org.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar></c-slot>
+              {% with cat=o.org.categories.first %}{% if cat %}<c-slot name="tail"><c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip></c-slot>{% endif %}{% endwith %}
+            </c-rel-row>
+            {% endfor %}
+            {% if rel_rows or org_rows %}<c-hint>Labels resolve automatically from each person's gender — stored once per pair.</c-hint>{% else %}<span class="subtle">No relationships yet.</span>{% endif %}
           </c-card>
 
           <c-card title="Important dates" icon="calendar-days">
@@ -211,6 +217,7 @@
       <c-card title="All relationships" icon="network">
         <c-slot name="actions">
           {% include "contacts/partials/rel_modal.html" %}
+          {% include "contacts/partials/org_link_modal.html" %}
         </c-slot>
         {% if rel_rows %}<div class="eyebrow">People</div>{% endif %}
         {% for r in rel_rows %}
@@ -242,9 +249,38 @@
             </span>
           </c-slot>
         </c-rel-row>
-        {% empty %}
-        <c-empty-state icon="network" title="No relationships yet" text="Link this person to family, friends and colleagues — labels resolve from each person's gender." />
         {% endfor %}
+
+        {% if org_rows %}<div class="eyebrow">Organizations</div>{% endif %}
+        {% for o in org_rows %}
+        <c-rel-row name="{{ o.org.display }}" role="{{ o.role }}{% if o.since %} · since {{ o.since }}{% endif %}{% if o.link.role_note %} · {{ o.link.role_note }}{% endif %}" href="{{ ui_tenant_url }}organizations/{{ o.org.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ o.org.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar></c-slot>
+          <c-slot name="tail">
+            <span class="row">
+              {% with cat=o.org.categories.first %}{% if cat %}<c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip>{% endif %}{% endwith %}
+              <c-slide-over title="Edit organization link">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/orgs/{{ o.link.pk }}/edit/">{% csrf_token %}
+                  <div class="stack-16">
+                    <c-rel-row name="{{ o.org.display }}">
+                      <c-slot name="avatar"><c-avatar tint="{{ o.org.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar></c-slot>
+                    </c-rel-row>
+                    {% include "organizations/partials/p2o_fields.html" with link=o.link %}
+                    <div class="between">
+                      <c-button type="submit" variant="primary">Save</c-button>
+                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/orgs/{{ o.link.pk }}/delete/">Remove</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                    </div>
+                  </div>
+                </form>
+              </c-slide-over>
+            </span>
+          </c-slot>
+        </c-rel-row>
+        {% endfor %}
+
+        {% if not rel_rows and not org_rows %}
+        <c-empty-state icon="network" title="No relationships yet" text="Link this person to family, friends, colleagues and organizations." />
+        {% endif %}
       </c-card>
     </div>
 

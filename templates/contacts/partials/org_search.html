@@ -1,0 +1,15 @@
+{% comment %}htmx fragment: organization candidates for the person-side add-org picker. Each row
+sets the Alpine selection state on the enclosing modal form (presentation only).{% endcomment %}
+{% for o in candidates %}
+<button type="button" class="rel-pick"
+        data-id="{{ o.pk }}" data-name="{{ o.display }}" data-tint="{{ o.avatar_tint }}"
+        @click="pick($el.dataset)">
+  <c-avatar tint="{{ o.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>
+  <div class="grow">
+    <div class="r-name">{{ o.display }}</div>
+    {% if o.website %}<div class="r-role">{{ o.website }}</div>{% endif %}
+  </div>
+</button>
+{% empty %}
+<div class="rel-empty">{% if q %}No organizations match “{{ q }}”.{% else %}No organizations to link yet.{% endif %}</div>
+{% endfor %}

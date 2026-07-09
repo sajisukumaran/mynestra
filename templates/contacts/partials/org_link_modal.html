@@ -1,0 +1,35 @@
+{% comment %}Person-side "link an organization" modal: htmx org search → pick → P2O fields → save.
+Alpine holds only the selected org (presentation state). Reuses the org_search + p2o_fields
+partials.{% endcomment %}
+<c-modal title="Link an organization">
+  <c-slot name="trigger"><c-button size="sm"><c-icon name="building-2" size="sm" /> Add organization</c-button></c-slot>
+  <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/orgs/new/"
+        x-data="{ oid:'', oname:'', otint:'blue',
+                  pick(d){ this.oid=d.id; this.oname=d.name; this.otint=d.tint; },
+                  reset(){ this.oid=''; } }">
+    {% csrf_token %}
+    <input type="hidden" name="organization" :value="oid">
+    <div class="stack-16">
+      <div x-show="!oid">
+        <c-field label="Find an organization">
+          <c-input type="search" name="q" autocomplete="off" placeholder="Search organizations by name…"
+                   hx-get="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/orgs/search/"
+                   hx-trigger="input changed delay:200ms, focus"
+                   hx-target="#orglink-results" />
+        </c-field>
+        <div id="orglink-results" class="rel-results"
+             hx-get="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/orgs/search/"
+             hx-trigger="load"></div>
+      </div>
+      <div x-show="oid" x-cloak class="stack-16">
+        <div class="rel">
+          <span class="avatar a-sm sq" :class="'av-'+otint"><c-icon name="building-2" size="sm" /></span>
+          <div class="grow"><div class="r-name" x-text="oname"></div></div>
+          <c-button type="button" variant="ghost" size="sm" @click="reset()"><c-icon name="x" size="sm" /> Change</c-button>
+        </div>
+        {% include "organizations/partials/p2o_fields.html" %}
+        <div class="row"><c-button type="submit" variant="primary">Add link</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+      </div>
+    </div>
+  </form>
+</c-modal>
