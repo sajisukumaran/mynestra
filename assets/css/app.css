@@ -164,6 +164,8 @@ img { max-width:100%; display:block; }
 .subtle { color:var(--text-subtle); }
 .strong { color:var(--text-strong); font-weight:600; }
 .eyebrow { font-size:var(--fs-xs); font-weight:600; letter-spacing:.07em; text-transform:uppercase; color:var(--text-subtle); }
+.hint { display:flex; align-items:center; gap:7px; color:var(--text-subtle); font-size:var(--fs-sm); }
+.hint .ic { color:var(--accent); }
 
 /* ---- Icons ---- */
 .ic { width:20px; height:20px; flex:none; fill:none; stroke:currentColor;

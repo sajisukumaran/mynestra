@@ -1,0 +1,3 @@
+<c-vars icon="sparkles" class="" />
+{% comment %}Subtle inline note with a leading accent icon (e.g. "Labels resolve automatically…").{% endcomment %}
+<div class="hint{% if class %} {{ class }}{% endif %}" {{ attrs }}><c-icon name="{{ icon }}" size="sm" />{{ slot }}</div>

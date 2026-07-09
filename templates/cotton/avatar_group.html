@@ -1,0 +1,4 @@
+<c-vars more="" class="" />
+{% comment %}Stacked avatars + optional "+N" overflow badge. Caller places c-avatar elements in the
+slot; pass `more` for the overflow count. Matches the family-card group in the mockups.{% endcomment %}
+<div class="avatar-group{% if class %} {{ class }}{% endif %}" {{ attrs }}>{{ slot }}{% if more %}<span class="avatar-more">+{{ more }}</span>{% endif %}</div>

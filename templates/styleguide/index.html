@@ -274,6 +274,31 @@
     </c-card>
 
     <div class="grid-2">
+      <c-card title="Avatar group & hint">
+        <div class="stack-16">
+          <c-avatar-group more="1">
+            <c-avatar tint="teal" size="sm">RS</c-avatar>
+            <c-avatar tint="rose" size="sm">PS</c-avatar>
+            <c-avatar tint="blue" size="sm">AS</c-avatar>
+            <c-avatar tint="violet" size="sm">AN</c-avatar>
+            <c-avatar tint="slate" size="sm">KS</c-avatar>
+          </c-avatar-group>
+          <c-hint>Labels resolve automatically from each person's gender — stored once per pair.</c-hint>
+        </div>
+      </c-card>
+      <c-card title="Relationship rows">
+        <c-rel-row name="Priya Sharma" role="Wife">
+          <c-slot name="avatar"><c-avatar tint="rose" size="sm">PS</c-avatar></c-slot>
+          <c-slot name="tail"><c-badge variant="info">Spouse</c-badge></c-slot>
+        </c-rel-row>
+        <c-rel-row name="Aarav Sharma" role="Son">
+          <c-slot name="avatar"><c-avatar tint="blue" size="sm">AS</c-avatar></c-slot>
+          <c-slot name="tail"><c-badge>Parent–Child</c-badge></c-slot>
+        </c-rel-row>
+      </c-card>
+    </div>
+
+    <div class="grid-2">
       <c-card title="Empty state" flush>
         <c-empty-state icon="inbox" title="No people yet" text="Add your first contact to get started.">
           <c-button variant="primary"><c-icon name="plus" /> New person</c-button>
