@@ -1,0 +1,353 @@
+"""The finance service layer — the ONLY sanctioned way to write to the general ledger.
+
+Future modules (Banking, bills, …) call `post_entry(...)` with a list of `LineInput`s; they never
+create `JournalEntry`/`JournalLine` rows directly. The service enforces double-entry integrity
+(Σ base debits == Σ base credits), converts each line to the household base currency, assigns a
+per-fiscal-year sequential number, links an optional source document idempotently, and resolves the
+fiscal period (auto-creating the Jan–Dec calendar on first use). Posted entries are immutable —
+`reverse_entry()` creates a mirror entry; they are never edited or deleted.
+
+Balance queries (added alongside) compute account balances from posted lines on demand — the single
+source of truth (no materialized balance table).
+"""
+
+from __future__ import annotations
+
+import calendar
+import datetime
+from collections.abc import Sequence
+from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
+
+from django.db import IntegrityError, connection, transaction
+from django.utils import timezone
+
+from apps.finance.exceptions import (
+    EmptyEntry,
+    InvalidLine,
+    MissingExchangeRate,
+    PostedEntryImmutable,
+    UnbalancedEntry,
+    UnknownAccount,
+)
+from apps.finance.models import (
+    ZERO,
+    Account,
+    Currency,
+    ExchangeRate,
+    FiscalYear,
+    JournalEntry,
+    JournalLine,
+)
+
+ONE = Decimal("1")
+
+
+# --- Currency / FX resolvers ----------------------------------------------------------------
+
+def base_currency() -> Currency:
+    """The household functional/base currency (the ledger is kept in it). Reads `Tenant.currency`
+    when available; falls back to USD so posting never crashes on an unconfigured tenant."""
+    code = getattr(getattr(connection, "tenant", None), "currency", "") or ""
+    if not code:
+        code = _tenant_currency_from_table() or "USD"
+    currency, _ = Currency.objects.get_or_create(
+        code=code, defaults={"name": code, "symbol": code, "is_system": True}
+    )
+    return currency
+
+
+def _tenant_currency_from_table() -> str | None:
+    """Fallback for schema_context paths (connection.tenant is a FakeTenant without `.currency`)."""
+    try:
+        from apps.tenants.models import Tenant
+
+        return (
+            Tenant.objects.filter(schema_name=connection.schema_name)
+            .values_list("currency", flat=True)
+            .first()
+        )
+    except Exception:  # noqa: BLE001 — field may not exist yet (pre-localization) / no row
+        return None
+
+
+def _resolve_currency(ref) -> Currency | None:
+    if ref is None:
+        return None
+    if isinstance(ref, Currency):
+        return ref
+    return Currency.objects.get(code=ref)
+
+
+def rate_to_base(currency, on_date: datetime.date, *, explicit=None) -> Decimal:
+    """Units of base per 1 unit of `currency` on/before `on_date`. base→base is 1; an explicit rate
+    wins; otherwise the latest `ExchangeRate` is used, or `MissingExchangeRate` is raised."""
+    base = base_currency()
+    code = currency.code if isinstance(currency, Currency) else str(currency)
+    if code == base.code:
+        return ONE
+    if explicit is not None:
+        return Decimal(explicit)
+    rate = (
+        ExchangeRate.objects.filter(currency_id=code, as_of__lte=on_date)
+        .values_list("rate", flat=True)
+        .first()
+    )
+    if rate is None:
+        raise MissingExchangeRate(f"No exchange rate for {code} on or before {on_date}.")
+    return rate
+
+
+def _round_base(amount: Decimal, base: Currency) -> Decimal:
+    quantum = Decimal(1).scaleb(-base.decimal_places)  # 0.01 for 2dp, 1 for 0dp (JPY)
+    return amount.quantize(quantum, rounding=ROUND_HALF_UP)
+
+
+# --- Fiscal calendar ------------------------------------------------------------------------
+
+def _ensure_periods(fiscal_year: FiscalYear) -> None:
+    from apps.finance.models import FiscalPeriod
+
+    for month in range(1, 13):
+        last_day = calendar.monthrange(fiscal_year.year, month)[1]
+        FiscalPeriod.objects.get_or_create(
+            fiscal_year=fiscal_year,
+            period_no=month,
+            defaults={
+                "name": f"{calendar.month_abbr[month]} {fiscal_year.year}",
+                "start_date": datetime.date(fiscal_year.year, month, 1),
+                "end_date": datetime.date(fiscal_year.year, month, last_day),
+            },
+        )
+
+
+def resolve_period(d: datetime.date, *, create: bool = True):
+    """The FiscalPeriod for date `d` (Jan–Dec). Auto-creates the year + 12 months on first use."""
+    from apps.finance.models import FiscalPeriod
+
+    fiscal_year = FiscalYear.objects.filter(year=d.year).first()
+    if fiscal_year is None:
+        if not create:
+            return None
+        fiscal_year, _ = FiscalYear.objects.get_or_create(
+            year=d.year,
+            defaults={
+                "start_date": datetime.date(d.year, 1, 1),
+                "end_date": datetime.date(d.year, 12, 31),
+            },
+        )
+    period = FiscalPeriod.objects.filter(fiscal_year=fiscal_year, period_no=d.month).first()
+    if period is None and create:
+        _ensure_periods(fiscal_year)
+        period = FiscalPeriod.objects.get(fiscal_year=fiscal_year, period_no=d.month)
+    return period
+
+
+def _next_entry_no(fiscal_year: FiscalYear) -> int:
+    """Next per-year sequential number (monotonic, gap-tolerant). Call inside a transaction."""
+    locked = FiscalYear.objects.select_for_update().get(pk=fiscal_year.pk)
+    locked.last_entry_no += 1
+    locked.save(update_fields=["last_entry_no", "updated_at"])
+    return locked.last_entry_no
+
+
+# --- Account resolution ---------------------------------------------------------------------
+
+def resolve_account(ref) -> Account:
+    """Resolve an Account instance, a COA `code`, or a `system_key` — else UnknownAccount."""
+    if isinstance(ref, Account):
+        return ref
+    account = (
+        Account.objects.filter(system_key=str(ref)).first()
+        or Account.objects.filter(code=str(ref)).first()
+    )
+    if account is None:
+        raise UnknownAccount(f"No account matches {ref!r}.")
+    return account
+
+
+# --- Posting --------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class LineInput:
+    """One posting for `post_entry`. `account` is an Account, a COA code, or a system_key.
+    `currency`/`fx_rate` default to the base currency at rate 1 (resolved from ExchangeRate when a
+    foreign currency is given without an explicit rate). `person`/`organization` are an optional
+    counterparty (at most one)."""
+
+    account: object
+    debit: Decimal = ZERO
+    credit: Decimal = ZERO
+    currency: object | None = None
+    fx_rate: Decimal | None = None
+    memo: str = ""
+    person: object | None = None
+    organization: object | None = None
+
+
+def _existing_by_key(external_key: str):
+    if not external_key:
+        return None
+    return (
+        JournalEntry.objects.filter(external_key=external_key)
+        .exclude(status=JournalEntry.Status.VOID)
+        .first()
+    )
+
+
+def post_entry(
+    *,
+    date: datetime.date,
+    lines: Sequence[LineInput],
+    description: str = "",
+    memo: str = "",
+    reference: str = "",
+    entry_type: str = JournalEntry.EntryType.STANDARD,
+    currency=None,
+    source=None,
+    external_key: str = "",
+    status: str = JournalEntry.Status.POSTED,
+    user=None,
+) -> JournalEntry:
+    """Create a balanced entry. Raises on imbalance/bad lines. Idempotent on external_key."""
+    prior = _existing_by_key(external_key)
+    if prior is not None:
+        return prior
+
+    if len(lines) < 2:
+        raise EmptyEntry("A journal entry needs at least two lines.")
+
+    base = base_currency()
+    entry_currency = _resolve_currency(currency) or base
+
+    total_debit = ZERO
+    total_credit = ZERO
+    prepared = []
+    for li in lines:
+        account = resolve_account(li.account)
+        if not account.is_postable:
+            raise InvalidLine(f"Account {account.code} is a header account; cannot post to it.")
+        if not account.is_active:
+            raise InvalidLine(f"Account {account.code} is inactive.")
+
+        line_currency = _resolve_currency(li.currency) or base
+        if not line_currency.is_active:
+            raise InvalidLine(f"Currency {line_currency.code} is inactive.")
+
+        debit = Decimal(li.debit or 0)
+        credit = Decimal(li.credit or 0)
+        if debit < 0 or credit < 0:
+            raise InvalidLine("Line amounts must be non-negative.")
+        if (debit > 0) == (credit > 0):
+            raise InvalidLine("A line must have exactly one of debit/credit greater than zero.")
+        if li.person is not None and li.organization is not None:
+            raise InvalidLine("A line may reference at most one counterparty (person or org).")
+
+        rate = Decimal(li.fx_rate) if li.fx_rate is not None else rate_to_base(line_currency, date)
+        base_debit = _round_base(debit * rate, base)
+        base_credit = _round_base(credit * rate, base)
+        total_debit += base_debit
+        total_credit += base_credit
+        prepared.append((account, line_currency, debit, credit, rate, base_debit, base_credit, li))
+
+    if total_debit != total_credit:
+        raise UnbalancedEntry(
+            f"Entry unbalanced in {base.code}: debits {total_debit} != credits {total_credit}."
+        )
+
+    with transaction.atomic():
+        period = resolve_period(date)
+        entry = JournalEntry(
+            date=date,
+            period=period,
+            entry_type=entry_type,
+            description=description,
+            memo=memo,
+            reference=reference,
+            status=status,
+            currency=entry_currency,
+            external_key=external_key or "",
+        )
+        if source is not None:
+            entry.source = source
+        if status == JournalEntry.Status.POSTED:
+            entry.posted_at = timezone.now()
+            entry.posted_by = user
+            entry.fiscal_year = period.fiscal_year.year
+            entry.entry_no = _next_entry_no(period.fiscal_year)
+        try:
+            with transaction.atomic():
+                entry.save()
+        except IntegrityError:
+            # Race on external_key: another poster inserted the same source. Reuse theirs.
+            prior = _existing_by_key(external_key)
+            if prior is not None:
+                return prior
+            raise
+
+        for account, line_currency, debit, credit, rate, base_debit, base_credit, li in prepared:
+            JournalLine.objects.create(
+                entry=entry,
+                account=account,
+                currency=line_currency,
+                debit=debit,
+                credit=credit,
+                fx_rate=rate,
+                base_debit=base_debit,
+                base_credit=base_credit,
+                memo=li.memo,
+                person=li.person,
+                organization=li.organization,
+            )
+    return entry
+
+
+def reverse_entry(entry: JournalEntry, *, date=None, memo: str = "", user=None) -> JournalEntry:
+    """Post a mirror-image entry that nets `entry` to zero. The original is kept, not deleted."""
+    if entry.status != JournalEntry.Status.POSTED:
+        raise PostedEntryImmutable("Only a posted entry can be reversed.")
+    reversal_date = date or entry.date
+    with transaction.atomic():
+        period = resolve_period(reversal_date)
+        rev = JournalEntry(
+            date=reversal_date,
+            period=period,
+            entry_type=JournalEntry.EntryType.REVERSAL,
+            description=f"Reversal of JE#{entry.entry_no or entry.pk}",
+            memo=memo,
+            status=JournalEntry.Status.POSTED,
+            currency=entry.currency,
+            reversal_of=entry,
+            external_key=f"{entry.external_key}:rev" if entry.external_key else "",
+            posted_at=timezone.now(),
+            posted_by=user,
+            fiscal_year=period.fiscal_year.year,
+            entry_no=_next_entry_no(period.fiscal_year),
+        )
+        rev.save()
+        for line in entry.lines.all():
+            JournalLine.objects.create(
+                entry=rev,
+                account=line.account,
+                currency=line.currency,
+                debit=line.credit,
+                credit=line.debit,
+                fx_rate=line.fx_rate,
+                base_debit=line.base_credit,
+                base_credit=line.base_debit,
+                memo=line.memo,
+                person=line.person,
+                organization=line.organization,
+            )
+        JournalEntry.objects.filter(pk=entry.pk).update(is_reversed=True)
+        entry.is_reversed = True
+    return rev
+
+
+def void_entry(entry: JournalEntry, *, user=None) -> JournalEntry:
+    """Void a DRAFT entry (never affects balances). A POSTED entry must be reversed instead."""
+    if entry.status == JournalEntry.Status.POSTED:
+        raise PostedEntryImmutable("A posted entry must be reversed, not voided.")
+    entry.status = JournalEntry.Status.VOID
+    entry.save(update_fields=["status", "updated_at"])
+    return entry
