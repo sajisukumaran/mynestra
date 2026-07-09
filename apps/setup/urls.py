@@ -52,4 +52,12 @@ urlpatterns = [
         "recently-deleted/families/<int:pk>/delete/",
         views.family_hard_delete, name="family-hard-delete",
     ),
+    path(
+        "recently-deleted/organizations/<int:pk>/restore/",
+        views.org_restore, name="org-restore",
+    ),
+    path(
+        "recently-deleted/organizations/<int:pk>/delete/",
+        views.org_hard_delete, name="org-hard-delete",
+    ),
 ]

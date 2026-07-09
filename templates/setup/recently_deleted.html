@@ -87,5 +87,46 @@
     text="Families you remove will appear here so you can restore them." />
   {% endif %}
 </c-card>
+
+<c-card title="Organizations" flush>
+  {% if deleted_orgs %}
+  <c-table>
+    <thead><tr><c-th>Name</c-th><c-th>Deleted</c-th><th></th></tr></thead>
+    <tbody>
+      {% for o in deleted_orgs %}
+      <tr>
+        <td>
+          <div class="person-cell">
+            <c-avatar tint="{{ o.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>
+            <div><div class="pc-name">{{ o.display }}</div></div>
+          </div>
+        </td>
+        <td class="muted tnum">{{ o.deleted_at|date:"d M Y, H:i" }}</td>
+        <td>
+          <div class="cell-actions">
+            <form method="post" action="{{ ui_tenant_url }}setup/recently-deleted/organizations/{{ o.pk }}/restore/">{% csrf_token %}
+              <c-button type="submit" size="sm"><c-icon name="rotate-ccw" size="sm" /> Restore</c-button>
+            </form>
+            {% if allow_hard_delete %}
+            <c-confirm-dialog title="Permanently delete {{ o.display }}?" message="This cannot be undone — the organization and its history are removed for good.">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+              <c-slot name="confirm">
+                <form method="post" action="{{ ui_tenant_url }}setup/recently-deleted/organizations/{{ o.pk }}/delete/">{% csrf_token %}
+                  <c-button type="submit" variant="danger">Delete permanently</c-button>
+                </form>
+              </c-slot>
+            </c-confirm-dialog>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+  {% else %}
+  <c-empty-state icon="archive" title="No deleted organizations"
+    text="Organizations you remove will appear here so you can restore them." />
+  {% endif %}
+</c-card>
 </div>
 {% endblock %}

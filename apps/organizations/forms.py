@@ -8,6 +8,10 @@ from apps.organizations.models import Branch, Organization
 
 
 class OrganizationForm(forms.ModelForm):
+    # assume_scheme="https" adopts Django 6.0's URLField default now, without the transitional
+    # setting (which itself warns). Bare domains like "hdfc.example" normalise to https://.
+    website = forms.URLField(required=False, assume_scheme="https")
+
     class Meta:
         model = Organization
         fields = ["name", "display_name", "logo", "website", "notes"]
