@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import PersonOrgRelationshipType, RelationshipType
+from .models import PersonOrgRelationshipType, PersonRelationship, RelationshipType
 
 
 @admin.register(RelationshipType)
@@ -15,3 +15,10 @@ class PersonOrgRelationshipTypeAdmin(admin.ModelAdmin):
     list_display = ("code", "label", "is_system")
     list_filter = ("is_system",)
     search_fields = ("code", "label")
+
+
+@admin.register(PersonRelationship)
+class PersonRelationshipAdmin(admin.ModelAdmin):
+    list_display = ("person_a", "person_b", "type")
+    list_filter = ("type",)
+    raw_id_fields = ("person_a", "person_b")
