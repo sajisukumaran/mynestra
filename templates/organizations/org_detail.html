@@ -1,0 +1,205 @@
+{% extends "organizations/base.html" %}
+{% block org_heading %}{{ org.display }}{% endblock %}
+
+{% block org %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}organizations/">Organizations</a><c-icon name="chevron-right" />
+  <span class="strong">{{ org.display }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      {% if org.logo %}<c-avatar src="{{ org.logo.url }}" size="xl" square alt="{{ org.display }}" />
+      {% else %}<c-avatar size="xl" square tint="{{ org.avatar_tint }}"><c-icon name="building-2" size="xl" /></c-avatar>{% endif %}
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ org.display }}</h1>
+          {% for c in org.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip>{% endfor %}
+        </div>
+        {% if org.display_name and org.display_name != org.name %}<div class="muted">{{ org.name }}</div>{% endif %}
+        <div class="ph-meta">
+          {% if org.website %}<span class="row"><c-icon name="globe" size="sm" class="subtle" /><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.website }}</a></span>{% endif %}
+          {% if org.primary_city %}<span class="row"><c-icon name="map-pin" size="sm" class="subtle" />{{ org.primary_city }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete {{ org.display }}?" message="This moves the organization to Recently deleted. An owner can restore it later.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}organizations/{{ org.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {# Tabs #}
+  <div x-data="{ tab: 'overview' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="contact" size="sm" /> Overview</button>
+      <button type="button" class="tab" :class="{ active: tab === 'branches' }" @click="tab = 'branches'"><c-icon name="building-2" size="sm" /> Branches {% if branch_count %}<span class="tcount tnum">{{ branch_count }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'people' }" @click="tab = 'people'"><c-icon name="users" size="sm" /> Key people {% if key_people %}<span class="tcount tnum">{{ key_people|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# OVERVIEW #}
+    <div x-show="tab === 'overview'">
+      <div class="grid-detail">
+        <div class="stack stack-20">
+          <c-card title="Details">
+            <c-key-value>
+              {% if org.website %}<c-kv-row key="Website" icon="globe"><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.website }}</a></c-kv-row>{% endif %}
+              <c-kv-row key="Branches" icon="building-2">{{ branch_count }}</c-kv-row>
+              <c-kv-row key="Key people" icon="users">{{ key_people|length }}</c-kv-row>
+            </c-key-value>
+          </c-card>
+
+          <c-card title="Identifiers" icon="key-round">
+            <c-slot name="actions"><c-button size="sm" variant="ghost" href="{{ ui_tenant_url }}organizations/{{ org.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+            <c-key-value>
+              {% for idr in org.identifiers.all %}<c-kv-row key="{{ idr.type }}" icon="tag"><span class="tnum">{{ idr.value }}</span></c-kv-row>
+              {% empty %}<span class="subtle">No identifiers yet.</span>{% endfor %}
+            </c-key-value>
+          </c-card>
+
+          <c-card title="Categories">
+            <c-slot name="actions"><c-button size="sm" variant="ghost" href="{{ ui_tenant_url }}organizations/{{ org.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+            <div class="row wrap">
+              {% for c in org.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip>{% empty %}<span class="subtle">No categories yet.</span>{% endfor %}
+            </div>
+          </c-card>
+        </div>
+
+        <div class="stack stack-20">
+          <c-card title="Contact channels" icon="phone">
+            <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}organizations/{{ org.pk }}/edit/"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+            {% for ch in org.channels.all %}
+            <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
+              {% if ch.is_primary %}<c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+            </c-channel-row>
+            {% empty %}<span class="subtle">No contact channels yet.</span>{% endfor %}
+          </c-card>
+
+          <c-card title="Addresses" icon="map-pin">
+            <c-slot name="actions">
+              <c-slide-over title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
+                <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/addresses/new/">{% csrf_token %}
+                  <div class="stack-16">
+                    <c-field label="Label"><div class="control">{{ address_form.label }}</div></c-field>
+                    <c-field label="Address line 1"><div class="control">{{ address_form.line1 }}</div></c-field>
+                    <c-field label="Address line 2"><div class="control">{{ address_form.line2 }}</div></c-field>
+                    <c-field label="City"><div class="control">{{ address_form.city }}</div></c-field>
+                    <c-field label="Region / state"><div class="control">{{ address_form.region }}</div></c-field>
+                    <c-field label="Postal code"><div class="control">{{ address_form.postal_code }}</div></c-field>
+                    <c-field label="Country"><div class="control">{{ address_form.country }}</div></c-field>
+                    <label class="row">{{ address_form.is_primary }} <span class="muted">Primary address</span></label>
+                    <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
+                  </div>
+                </form>
+              </c-slide-over>
+            </c-slot>
+            {% for a in org.addresses.all %}
+            <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
+              <c-slot name="tail">
+                {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
+                <c-slide-over title="Edit address">
+                  <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                  <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
+                    <div class="stack-16">
+                      <c-field label="Label"><c-input name="label" value="{{ a.label }}" /></c-field>
+                      <c-field label="Address line 1"><c-input name="line1" value="{{ a.line1 }}" /></c-field>
+                      <c-field label="Address line 2"><c-input name="line2" value="{{ a.line2 }}" /></c-field>
+                      <c-field label="City"><c-input name="city" value="{{ a.city }}" /></c-field>
+                      <c-field label="Region / state"><c-input name="region" value="{{ a.region }}" /></c-field>
+                      <c-field label="Postal code"><c-input name="postal_code" value="{{ a.postal_code }}" /></c-field>
+                      <c-field label="Country"><c-input name="country" value="{{ a.country }}" /></c-field>
+                      <label class="row"><input type="checkbox" name="is_primary" {% if a.is_primary %}checked{% endif %}> <span class="muted">Primary address</span></label>
+                      <div class="between">
+                        <c-button type="submit" variant="primary">Save</c-button>
+                        <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/addresses/{{ a.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                      </div>
+                    </div>
+                  </form>
+                </c-slide-over>
+              </c-slot>
+            </c-channel-row>
+            {% empty %}<span class="subtle">No addresses yet.</span>{% endfor %}
+          </c-card>
+
+          <c-card title="Key people" icon="users">
+            <c-slot name="actions"><c-button size="sm" @click="tab = 'people'"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+            {% for kp in key_people|slice:":5" %}
+            <c-rel-row name="{{ kp.person.display_name }}" role="{{ kp.role }}{% if kp.since %} · since {{ kp.since }}{% endif %}" href="{{ ui_tenant_url }}contacts/people/{{ kp.person.pk }}/">
+              <c-slot name="avatar"><c-avatar tint="{{ kp.person.avatar_tint }}" size="sm">{{ kp.person.initials }}</c-avatar></c-slot>
+              {% with cat=kp.person.categories.first %}{% if cat %}<c-slot name="tail"><c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip></c-slot>{% endif %}{% endwith %}
+            </c-rel-row>
+            {% empty %}<span class="subtle">No key people linked yet.</span>{% endfor %}
+          </c-card>
+
+          {% if org.notes %}
+          <c-card title="Notes" icon="pencil"><p class="muted">{{ org.notes|linebreaksbr }}</p></c-card>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+
+    {# BRANCHES #}
+    <div x-show="tab === 'branches'" x-cloak>
+      <div class="stack stack-20">
+        {% for b in branches %}
+        <c-card title="{{ b.name }}" icon="building-2">
+          {% if b.is_primary %}<c-slot name="actions"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+          {% for ch in b.channels.all %}
+          <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
+            {% if ch.is_primary %}<c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+          </c-channel-row>
+          {% endfor %}
+          {% for a in b.addresses.all %}
+          <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}" />
+          {% endfor %}
+          {% if not b.channels.all and not b.addresses.all %}<span class="subtle">No contact details for this branch yet.</span>{% endif %}
+        </c-card>
+        {% empty %}
+        <c-card><c-empty-state icon="building-2" title="No branches yet" text="Add branches to record each location's own contact details." /></c-card>
+        {% endfor %}
+      </div>
+    </div>
+
+    {# KEY PEOPLE #}
+    <div x-show="tab === 'people'" x-cloak>
+      <c-card title="Key people" icon="users">
+        {% for kp in key_people %}
+        <c-rel-row name="{{ kp.person.display_name }}" role="{{ kp.role }}{% if kp.since %} · since {{ kp.since }}{% endif %}{% if kp.link.role_note %} · {{ kp.link.role_note }}{% endif %}" href="{{ ui_tenant_url }}contacts/people/{{ kp.person.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ kp.person.avatar_tint }}" size="sm">{{ kp.person.initials }}</c-avatar></c-slot>
+          {% with cat=kp.person.categories.first %}{% if cat %}<c-slot name="tail"><c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip></c-slot>{% endif %}{% endwith %}
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="users" title="No key people yet" text="Link the people who matter at this organization — account managers, doctors, teachers." />
+        {% endfor %}
+      </c-card>
+    </div>
+
+    {# HISTORY #}
+    <div x-show="tab === 'history'" x-cloak>
+      <c-card>
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this organization{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}<span class="subtle">No history yet.</span>{% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

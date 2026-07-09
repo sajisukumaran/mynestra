@@ -575,6 +575,9 @@ textarea.control { min-height:70px; height:auto; align-items:stretch; padding:8p
 .inline-row .rm { color:var(--text-subtle); width:36px; height:34px; display:grid; place-items:center; border-radius:var(--r-sm); }
 .inline-row .rm:hover { color:var(--danger); background:var(--danger-soft); }
 .inline-add { margin-top:8px; }
+/* Two-field variant (e.g. org identifiers: type / value / remove). */
+.inline-repeater.two-col .inline-head,
+.inline-repeater.two-col .inline-row { grid-template-columns:1fr 1fr 36px; }
 
 .form-foot { position:sticky; bottom:0; z-index:20; background:var(--surface); border-top:1px solid var(--border);
   display:flex; align-items:center; gap:10px; justify-content:flex-end; padding:13px 36px;

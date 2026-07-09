@@ -1,0 +1,83 @@
+{% extends "organizations/base.html" %}
+{% block org_heading %}Organizations{% endblock %}
+
+{% block org %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Organizations</span></c-breadcrumb>
+
+<c-page-header title="Organizations" subtitle="{{ total }} {{ total|pluralize:'organization,organizations' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}organizations/new/"><c-icon name="plus" /> New organization</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by name or contact…"></label>
+    {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+    {% if sort != 'name' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}organizations/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not category %} active{% endif %}" href="{% querystring category=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    {% for c in categories %}
+    <a class="fchip{% if category == c.id|stringformat:'s' %} active{% endif %}" href="{% querystring category=c.id page=None %}">{{ c.name }} <span class="cnt tnum">{{ c.n }}</span></a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if orgs %}
+    <c-table>
+      <thead><tr>
+        <c-th sortable {% if sort == 'name' or sort == '-name' %}sorted dir="{% if sort == 'name' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring sort=sort_name_next page=None %}">Name</a></c-th>
+        <c-th>Categories</c-th>
+        <c-th>Primary contact</c-th>
+        <c-th>Location</c-th>
+        <c-th sortable {% if sort == 'added' or sort == '-added' %}sorted dir="{% if sort == 'added' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring sort=sort_added_next page=None %}">Added</a></c-th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for o in orgs %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}organizations/{{ o.pk }}/">
+              {% if o.logo %}<c-avatar src="{{ o.logo.url }}" size="sm" square alt="{{ o.display }}" />{% else %}<c-avatar tint="{{ o.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>{% endif %}
+              <div><div class="pc-name">{{ o.display }}</div>{% if o.website %}<div class="pc-sub">{{ o.website }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td>{% for c in o.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip> {% endfor %}</td>
+          <td>
+            {% with ch=o.primary_channel %}
+            {% if ch %}<div class="row"><c-icon name="{{ ch.icon }}" size="sm" class="subtle" /><span{% if ch.type == 'phone' or ch.type == 'whatsapp' %} class="tnum"{% endif %}>{{ ch.value }}</span></div>
+            {% else %}<span class="subtle">No contact yet</span>{% endif %}
+            {% endwith %}
+          </td>
+          <td class="muted">{{ o.primary_city|default:"—" }}</td>
+          <td class="muted tnum">{{ o.created_at|date:"d M Y" }}</td>
+          <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}organizations/{{ o.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}
+        <a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>
+        {% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="building-2"
+      title="{% if q or category %}No organizations match{% else %}No organizations yet{% endif %}"
+      text="{% if q or category %}Try a different search or filter.{% else %}Add banks, schools, employers and other organizations your household deals with.{% endif %}">
+      {% if not q and not category %}<c-button variant="primary" href="{{ ui_tenant_url }}organizations/new/"><c-icon name="plus" /> New organization</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}
