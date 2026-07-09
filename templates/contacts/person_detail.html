@@ -47,6 +47,8 @@
   <div x-data="{ tab: 'overview' }">
     <c-tabs>
       <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="contact" size="sm" /> Overview</button>
+      <button type="button" class="tab" :class="{ active: tab === 'relationships' }" @click="tab = 'relationships'"><c-icon name="network" size="sm" /> Relationships {% if rel_count %}<span class="tcount tnum">{{ rel_count }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'families' }" @click="tab = 'families'"><c-icon name="house" size="sm" /> Families {% if family_count %}<span class="tcount tnum">{{ family_count }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
     </c-tabs>
 
@@ -132,6 +134,18 @@
             {% empty %}<span class="subtle">No addresses yet.</span>{% endfor %}
           </c-card>
 
+          {# Relationships (top few; full list on the Relationships tab) #}
+          <c-card title="Relationships" icon="network">
+            <c-slot name="actions"><c-button size="sm" @click="tab = 'relationships'"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+            {% for r in rel_rows|slice:":5" %}
+            <c-rel-row name="{{ r.other.display_name }}" role="{{ r.role }}" href="{{ ui_tenant_url }}contacts/people/{{ r.other.pk }}/">
+              <c-slot name="avatar"><c-avatar tint="{{ r.other.avatar_tint }}" size="sm">{{ r.other.initials }}</c-avatar></c-slot>
+              {% with cat=r.other.categories.first %}{% if cat %}<c-slot name="tail"><c-chip tint="{{ cat.color }}" dot>{{ cat.name }}</c-chip></c-slot>{% endif %}{% endwith %}
+            </c-rel-row>
+            {% empty %}<span class="subtle">No relationships yet.</span>{% endfor %}
+            {% if rel_rows %}<c-hint>Labels resolve automatically from each person's gender — stored once per pair.</c-hint>{% endif %}
+          </c-card>
+
           <c-card title="Important dates" icon="calendar-days">
             <c-slot name="actions">
               <c-slide-over title="Add important date" open="{% if reopen == 'date' %}true{% else %}false{% endif %}">
@@ -173,6 +187,16 @@
             </c-key-value>
           </c-card>
 
+          {# Families this person belongs to #}
+          <c-card title="Families" icon="house">
+            {% for fc in family_cards %}
+            <c-rel-row name="{{ fc.family.name }}" role="{{ fc.count }} member{{ fc.count|pluralize }}" href="{{ ui_tenant_url }}contacts/families/{{ fc.family.pk }}/">
+              <c-slot name="avatar"><c-avatar tint="{{ fc.family.avatar_tint }}" size="sm" square><c-icon name="house" size="sm" /></c-avatar></c-slot>
+              <c-slot name="tail"><c-icon name="chevron-right" size="sm" class="subtle" /></c-slot>
+            </c-rel-row>
+            {% empty %}<span class="subtle">Not part of any family yet.</span>{% endfor %}
+          </c-card>
+
           {% if person.notes %}
           <c-card title="Notes" icon="pencil">
             <p class="muted">{{ person.notes|linebreaksbr }}</p>
@@ -180,6 +204,66 @@
           {% endif %}
         </div>
       </div>
+    </div>
+
+    {# RELATIONSHIPS #}
+    <div x-show="tab === 'relationships'" x-cloak>
+      <c-card title="All relationships" icon="network">
+        <c-slot name="actions">
+          {% include "contacts/partials/rel_modal.html" %}
+        </c-slot>
+        {% if rel_rows %}<div class="eyebrow">People</div>{% endif %}
+        {% for r in rel_rows %}
+        <c-rel-row name="{{ r.other.display_name }}" role="{{ r.role }}{% if r.rel.note %} · {{ r.rel.note }}{% endif %}" href="{{ ui_tenant_url }}contacts/people/{{ r.other.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ r.other.avatar_tint }}" size="sm">{{ r.other.initials }}</c-avatar></c-slot>
+          <c-slot name="tail">
+            <span class="row">
+              <c-badge>{{ r.type_name }}</c-badge>
+              <c-slide-over title="Edit relationship">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/{{ r.rel.pk }}/edit/">{% csrf_token %}
+                  <div class="stack-16">
+                    <c-rel-row name="{{ r.other.display_name }}" role="{{ r.other.list_subtitle }}">
+                      <c-slot name="avatar"><c-avatar tint="{{ r.other.avatar_tint }}" size="sm">{{ r.other.initials }}</c-avatar></c-slot>
+                    </c-rel-row>
+                    <c-field label="Relationship" help="Your role — labels adapt to each person's gender.">
+                      <c-select name="typeside">
+                        {% for o in rel_type_options %}<option value="{{ o.value }}" {% if o.value == r.selected_value %}selected{% endif %}>{{ o.label }}</option>{% endfor %}
+                      </c-select>
+                    </c-field>
+                    <c-field label="Note (optional)"><c-input name="note" value="{{ r.rel.note }}" /></c-field>
+                    <div class="between">
+                      <c-button type="submit" variant="primary">Save</c-button>
+                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/{{ r.rel.pk }}/delete/">Remove</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                    </div>
+                  </div>
+                </form>
+              </c-slide-over>
+            </span>
+          </c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="network" title="No relationships yet" text="Link this person to family, friends and colleagues — labels resolve from each person's gender." />
+        {% endfor %}
+      </c-card>
+    </div>
+
+    {# FAMILIES #}
+    <div x-show="tab === 'families'" x-cloak>
+      {% if family_cards %}
+      <div class="grid-halves">
+        {% for fc in family_cards %}
+        <c-family-card name="{{ fc.family.name }}" count="{{ fc.count }}" more="{{ fc.more|default:'' }}"
+                       tint="{{ fc.family.avatar_tint }}" href="{{ ui_tenant_url }}contacts/families/{{ fc.family.pk }}/">
+          {% for m in fc.members %}<c-avatar tint="{{ m.avatar_tint }}" size="sm">{{ m.initials }}</c-avatar>{% endfor %}
+        </c-family-card>
+        {% endfor %}
+      </div>
+      {% else %}
+      <c-card>
+        <c-empty-state icon="house" title="Not part of any family yet" text="Create a family from the Families section, then add this person as a member." />
+      </c-card>
+      {% endif %}
     </div>
 
     {# HISTORY #}
