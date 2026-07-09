@@ -7,7 +7,8 @@ from apps.organizations import views
 app_name = "organizations"
 
 urlpatterns = [
-    path("", views.org_list, name="list"),
+    path("", views.org_dashboard, name="dashboard"),
+    path("all/", views.org_list, name="list"),
     path("new/", views.org_create, name="org-create"),
     path("<int:pk>/", views.org_detail, name="org-detail"),
     path("<int:pk>/edit/", views.org_edit, name="org-edit"),

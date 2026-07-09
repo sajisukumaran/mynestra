@@ -1,0 +1,76 @@
+{% extends "organizations/base.html" %}
+{% block org_heading %}Dashboard{% endblock %}
+
+{% block org %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Organizations</span></c-breadcrumb>
+
+<c-page-header title="Organizations" subtitle="Companies & institutions your household deals with.">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}organizations/new/"><c-icon name="plus" /> New organization</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="building-2" tint="blue" value="{{ orgs_count }}" label="Organizations">
+      <c-slot name="foot">{% if added_this_month %}<c-delta dir="up" value="{{ added_this_month }}" /> added this month{% else %}across the household{% endif %}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="network" tint="violet" value="{{ branches_count }}" label="Branches">
+      <c-slot name="foot">across {{ orgs_count }} {{ orgs_count|pluralize:'organization,organizations' }}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="users" tint="teal" value="{{ key_people }}" label="Key people">
+      <c-slot name="foot">people linked to organizations</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="sparkles" tint="amber" value="{{ recent_count }}" label="Recently added">
+      <c-slot name="foot">in the last 7 days</c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="tag" title="By category">
+      {% if categories %}
+      <div class="row wrap">
+        {% for c in categories %}
+        <a class="fchip" href="{{ ui_tenant_url }}organizations/all/?category={{ c.id }}">{{ c.name }} <span class="cnt tnum">{{ c.n }}</span></a>
+        {% endfor %}
+      </div>
+      {% else %}
+      <c-empty-state icon="tag" title="No categories in use"
+        text="Once you tag organizations (e.g. Bank, Hospital), the breakdown appears here." />
+      {% endif %}
+    </c-card>
+
+    <div class="stack stack-20">
+      <c-card icon="sparkles" title="Recently added">
+        {% for o in recent_added %}
+        <c-rel-row name="{{ o.display }}" role="{{ o.primary_city }}" href="{{ ui_tenant_url }}organizations/{{ o.pk }}/">
+          <c-slot name="avatar">
+            {% if o.logo %}<c-avatar src="{{ o.logo.url }}" size="sm" square alt="{{ o.display }}" />{% else %}<c-avatar tint="{{ o.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>{% endif %}
+          </c-slot>
+          <c-slot name="tail"><span class="subtle">{{ o.created_at|timesince }} ago</span></c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="building-2" title="Nothing added yet"
+          text="Organizations you add show up here.">
+          <c-button variant="primary" href="{{ ui_tenant_url }}organizations/new/"><c-icon name="plus" /> New organization</c-button>
+        </c-empty-state>
+        {% endfor %}
+      </c-card>
+
+      <c-card icon="clock" title="Recently updated">
+        {% for o in recent_updated %}
+        <c-rel-row name="{{ o.display }}" role="{{ o.primary_city }}" href="{{ ui_tenant_url }}organizations/{{ o.pk }}/">
+          <c-slot name="avatar">
+            {% if o.logo %}<c-avatar src="{{ o.logo.url }}" size="sm" square alt="{{ o.display }}" />{% else %}<c-avatar tint="{{ o.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>{% endif %}
+          </c-slot>
+          <c-slot name="tail"><span class="subtle">{{ o.updated_at|timesince }} ago</span></c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="clock" title="No recent edits"
+          text="Changes to organizations show up here." />
+        {% endfor %}
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -44,6 +44,44 @@ def org_context(request, active, **extra):
     return ctx
 
 
+def org_dashboard(request):
+    """Organizations dashboard (DESIGN §8): counts, a by-category breakdown (the Bank seam stays
+    visible), and recents. No mockup — composes the kit in the Contacts idiom."""
+    import datetime
+
+    from django.utils import timezone
+
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    categories = (
+        Category.objects.filter(kind=Category.Kind.ORG)
+        .annotate(
+            n=Count("organizations", filter=Q(organizations__deleted_at__isnull=True), distinct=True)
+        )
+        .filter(n__gt=0)
+        .order_by("-n", "name")
+    )
+    recent_updated = [
+        o
+        for o in Organization.objects.order_by("-updated_at")[:15]
+        if (o.updated_at - o.created_at).total_seconds() >= 2
+    ][:5]
+    ctx = org_context(
+        request, "dashboard",
+        orgs_count=Organization.objects.count(),
+        branches_count=Branch.objects.count(),
+        key_people=PersonOrgRelationship.objects.values("person").distinct().count(),
+        added_this_month=Organization.objects.filter(created_at__gte=month_start).count(),
+        recent_count=Organization.objects.filter(
+            created_at__gte=now - datetime.timedelta(days=7)
+        ).count(),
+        categories=categories,
+        recent_added=list(Organization.objects.order_by("-created_at")[:5]),
+        recent_updated=recent_updated,
+    )
+    return render(request, "organizations/dashboard.html", ctx)
+
+
 def org_list(request):
     qs = Organization.objects.prefetch_related("categories", "channels", "addresses")
 
@@ -144,7 +182,7 @@ def org_delete(request, pk):
     org = get_object_or_404(Organization, pk=pk)
     if request.method == "POST":
         org.delete()  # soft-delete → Setup → Recently deleted
-    return redirect(tenant_url(request, "organizations/"))
+    return redirect(tenant_url(request, "organizations/all/"))
 
 
 # --- Detail (Overview / Branches / Key people / History) ------------------------------------

@@ -50,10 +50,10 @@ def test_org_list_filter_by_bank_category(make_tenant, make_user, client):
         bank_id = bank.id
 
     client.force_login(owner)
-    body = client.get(_o(tenant, f"?category={bank_id}")).content.decode()
+    body = client.get(_o(tenant, f"all/?category={bank_id}")).content.decode()
     assert "HDFC Bank" in body and "Green School" not in body
     # Unfiltered shows both.
-    allbody = client.get(_o(tenant)).content.decode()
+    allbody = client.get(_o(tenant, "all/")).content.decode()
     assert "HDFC Bank" in allbody and "Green School" in allbody
 
 

@@ -12,6 +12,8 @@ from django_tenants.utils import schema_context
 
 from apps.contacts.models import ImportantDate, Person
 from apps.families.models import Family
+from apps.organizations.models import Branch, Organization
+from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
 
@@ -100,3 +102,27 @@ def test_important_dates_empty_state(make_tenant, make_user, client):
     client.force_login(owner)
     body = client.get(f"/t/{tenant.schema_name}/contacts/dates/").content.decode()
     assert "No dates yet" in body
+
+
+# --- Organizations dashboard + URL restructure ----------------------------------------------
+
+def test_org_dashboard_is_landing_with_counts_and_category_seam(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        bank = Category.objects.get(kind="ORG", name="Bank")
+        hdfc = Organization.objects.create(name="HDFC Bank")
+        hdfc.categories.add(bank)
+        Branch.objects.create(organization=hdfc, name="MG Road", is_primary=True)
+        bank_id = bank.id
+
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/organizations/").content.decode()
+    assert "your household deals with" in body                     # dashboard header (landing)
+    assert "HDFC Bank" in body                                     # recently added
+    assert f"organizations/all/?category={bank_id}" in body        # by-category → filtered list
+
+
+def test_org_list_moved_to_all(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    assert client.get(f"/t/{tenant.schema_name}/organizations/all/").status_code == 200

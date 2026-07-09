@@ -2,7 +2,7 @@
 {% block org_heading %}Organizations{% endblock %}
 
 {% block org %}
-<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Organizations</span></c-breadcrumb>
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}organizations/">Organizations</a><c-icon name="chevron-right" /><span class="strong">All</span></c-breadcrumb>
 
 <c-page-header title="Organizations" subtitle="{{ total }} {{ total|pluralize:'organization,organizations' }}">
   <c-slot name="actions">
@@ -15,7 +15,7 @@
     <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by name or contact…"></label>
     {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
     {% if sort != 'name' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
-    {% if q %}<c-button href="{{ ui_tenant_url }}organizations/">Clear</c-button>{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}organizations/all/">Clear</c-button>{% endif %}
   </form>
 
   <div class="row wrap">
