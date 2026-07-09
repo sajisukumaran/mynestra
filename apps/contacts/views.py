@@ -28,8 +28,49 @@ def tenant_url(request, path=""):
 
 
 def contacts_home(request):
-    """Contacts landing → People (the only live section in P4)."""
-    return redirect(tenant_url(request, "contacts/people/"))
+    """Contacts dashboard (DESIGN §8) — the app landing: stat tiles, upcoming dates (partial-date
+    aware), and recents. Composes cotton components only."""
+    import datetime
+
+    from django.utils import timezone
+
+    from apps.contacts.services import (
+        count_birthdays,
+        recent_people,
+        recently_updated,
+        upcoming_dates,
+    )
+
+    now = timezone.now()
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    upcoming = upcoming_dates(30)
+    people_count = Person.objects.count()
+
+    ctx = contacts_context(
+        request, "dashboard",
+        people_count=people_count,
+        families_count=Family.objects.count(),
+        birthdays_30=count_birthdays(30),
+        added_this_month=Person.objects.filter(created_at__gte=month_start).count(),
+        recent_count=Person.objects.filter(
+            created_at__gte=now - datetime.timedelta(days=7)
+        ).count(),
+        upcoming=upcoming[:6],
+        next_birthday=next((r for r in upcoming if r.kind == "birthday"), None),
+        recent_added=recent_people(days=7),
+        recent_updated=recently_updated(),
+    )
+    return render(request, "contacts/dashboard.html", ctx)
+
+def important_dates(request):
+    """Household-wide upcoming dates (DESIGN §8): birthdays, anniversaries and custom important
+    dates for the year ahead, partial-date aware and sorted soonest-first."""
+    from apps.contacts.services import upcoming_dates
+
+    rows = upcoming_dates(365)
+    ctx = contacts_context(request, "dates", rows=rows, total=len(rows))
+    return render(request, "contacts/important_dates.html", ctx)
+
 
 # Sort keys → order_by tuples for the People list column headers.
 SORTS = {
@@ -47,12 +88,15 @@ def _is_owner(request) -> bool:
 
 
 def contacts_context(request, active, **extra):
-    """Shared context for every Contacts page: Contacts sidebar state + owner flag."""
+    """Shared context for every Contacts page: Contacts sidebar state + owner flag + nav counts."""
+    from apps.contacts.services import count_upcoming
+
     ctx = {
         "active": active,
         "is_owner": _is_owner(request),
         "nav_people": Person.objects.count(),
         "nav_families": Family.objects.count(),
+        "nav_dates": count_upcoming(30),
     }
     ctx.update(extra)
     return ctx

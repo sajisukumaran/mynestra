@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from apps.contacts.models import ImportantDate, Person
 from apps.core.dates import Occurrence, next_occurrence
+from apps.core.partialdate import MONTHS
 
 
 def _ordinal(n: int) -> str:
@@ -32,6 +33,25 @@ class UpcomingRow:
     subtitle: str   # e.g. "Turns 17 · Birthday", "19th anniversary", or a custom label
     kind: str       # "birthday" | "anniversary" | "date" — drives the row glyph/tint
     icon: str
+
+    @property
+    def when_display(self) -> str:
+        """Compact 'day Mon' / 'Mon XX' for the row tail (XX = unknown day)."""
+        mon = MONTHS[self.occ.month - 1]
+        return f"{self.occ.day:02d} {mon}" if self.occ.day_known else f"{mon} XX"
+
+    @property
+    def badge_text(self) -> str:
+        d = self.occ.days_away
+        if d == 0:
+            return "this month" if not self.occ.day_known else "today"
+        if d == 1:
+            return "tomorrow"
+        return f"in {d} days"
+
+    @property
+    def badge_variant(self) -> str:
+        return "warning" if self.occ.days_away <= 7 else ""
 
 
 def _birthday_row(p: Person, occ: Occurrence) -> UpcomingRow:
@@ -90,6 +110,12 @@ def count_birthdays(within_days: int = 30, *, on: datetime.date | None = None) -
         for p in Person.objects.filter(is_deceased=False)
         if next_occurrence(p.dob_year, p.dob_month, p.dob_day, on=on, within_days=within_days)
     )
+
+
+def count_upcoming(within_days: int = 30, *, on: datetime.date | None = None) -> int:
+    """All upcoming dates (birthdays + anniversaries + important dates) in the next N days —
+    the Contacts sidebar 'Important dates' badge."""
+    return len(upcoming_dates(within_days, on=on))
 
 
 def recent_people(days: int = 7, limit: int = 5):

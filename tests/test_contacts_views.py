@@ -20,12 +20,13 @@ def _c(tenant, path=""):
     return f"/t/{tenant.schema_name}/contacts/{path}"
 
 
-def test_contacts_root_redirects_to_people(make_tenant, make_user, client):
+def test_contacts_root_renders_dashboard(make_tenant, make_user, client):
     tenant, owner = _owner(make_tenant, make_user)
     client.force_login(owner)
     resp = client.get(_c(tenant))
-    assert resp.status_code == 302
-    assert resp.headers["Location"] == _c(tenant, "people/")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert "Everyone your household keeps in touch with" in body  # dashboard page header
 
 
 def test_people_list_search_filter_sort_paginate(make_tenant, make_user, client):

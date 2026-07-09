@@ -1,0 +1,79 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}Dashboard{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Contacts</span></c-breadcrumb>
+
+<c-page-header title="Contacts" subtitle="Everyone your household keeps in touch with.">
+  <c-slot name="actions">
+    <c-button href="{{ ui_tenant_url }}contacts/families/new/"><c-icon name="house" /> New family</c-button>
+    <c-button variant="primary" href="{{ ui_tenant_url }}contacts/people/new/"><c-icon name="plus" /> New person</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="user-round" tint="teal" value="{{ people_count }}" label="People">
+      <c-slot name="foot">{% if added_this_month %}<c-delta dir="up" value="{{ added_this_month }}" /> added this month{% else %}across the household{% endif %}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="house" tint="violet" value="{{ families_count }}" label="Families">
+      <c-slot name="foot">across {{ people_count }} {{ people_count|pluralize:'person,people' }}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="cake" tint="amber" value="{{ birthdays_30 }}" label="Birthdays · 30 days">
+      <c-slot name="foot">{% if next_birthday %}<span class="strong">{{ next_birthday.title }}</span> · {{ next_birthday.badge_text }}{% else %}none coming up{% endif %}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="sparkles" tint="blue" value="{{ recent_count }}" label="Recently added">
+      <c-slot name="foot">in the last 7 days</c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="calendar-days" title="Upcoming dates">
+      <c-slot name="actions"><c-button size="sm" variant="ghost" href="{{ ui_tenant_url }}contacts/dates/">View all <c-icon name="chevron-right" size="sm" /></c-button></c-slot>
+      {% for row in upcoming %}
+      <c-rel-row name="{{ row.title }}" role="{{ row.subtitle }}" href="{{ ui_tenant_url }}contacts/people/{{ row.person.pk }}/">
+        <c-slot name="avatar">
+          {% if row.person.photo %}<c-avatar src="{{ row.person.photo.url }}" alt="{{ row.title }}" />{% else %}<c-avatar tint="{{ row.person.avatar_tint }}">{{ row.person.initials }}</c-avatar>{% endif %}
+        </c-slot>
+        <c-slot name="tail">
+          <div class="row"><span class="strong tnum">{{ row.when_display }}</span><c-badge variant="{{ row.badge_variant }}">{{ row.badge_text }}</c-badge></div>
+        </c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="calendar-days" title="No dates coming up"
+        text="Birthdays, anniversaries and important dates in the next 30 days appear here." />
+      {% endfor %}
+    </c-card>
+
+    <div class="stack stack-20">
+      <c-card icon="sparkles" title="Recently added">
+        {% for p in recent_added %}
+        <c-rel-row name="{{ p.display_name }}" role="{{ p.occupation }}" href="{{ ui_tenant_url }}contacts/people/{{ p.pk }}/">
+          <c-slot name="avatar">
+            {% if p.photo %}<c-avatar src="{{ p.photo.url }}" size="sm" alt="{{ p.display_name }}" />{% else %}<c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>{% endif %}
+          </c-slot>
+          <c-slot name="tail"><span class="subtle">{{ p.created_at|timesince }} ago</span></c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="user-round-plus" title="Nobody added yet"
+          text="People you add show up here for a week." />
+        {% endfor %}
+      </c-card>
+
+      <c-card icon="clock" title="Recently updated">
+        {% for p in recent_updated %}
+        <c-rel-row name="{{ p.display_name }}" role="{{ p.list_subtitle }}" href="{{ ui_tenant_url }}contacts/people/{{ p.pk }}/">
+          <c-slot name="avatar">
+            {% if p.photo %}<c-avatar src="{{ p.photo.url }}" size="sm" alt="{{ p.display_name }}" />{% else %}<c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>{% endif %}
+          </c-slot>
+          <c-slot name="tail"><span class="subtle">{{ p.updated_at|timesince }} ago</span></c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="clock" title="No recent edits"
+          text="Changes to your people show up here." />
+        {% endfor %}
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

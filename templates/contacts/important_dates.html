@@ -1,0 +1,26 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}Important dates{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}contacts/">Contacts</a><c-icon name="chevron-right" /><span class="strong">Important dates</span></c-breadcrumb>
+
+<c-page-header title="Important dates" subtitle="Birthdays, anniversaries & important dates in the year ahead." />
+
+<c-card icon="calendar-days" title="Upcoming">
+  {% for row in rows %}
+  <c-rel-row name="{{ row.title }}" role="{{ row.subtitle }}" href="{{ ui_tenant_url }}contacts/people/{{ row.person.pk }}/">
+    <c-slot name="avatar">
+      {% if row.person.photo %}<c-avatar src="{{ row.person.photo.url }}" alt="{{ row.title }}" />{% else %}<c-avatar tint="{{ row.person.avatar_tint }}">{{ row.person.initials }}</c-avatar>{% endif %}
+    </c-slot>
+    <c-slot name="tail">
+      <div class="row"><span class="strong tnum">{{ row.when_display }}</span><c-badge variant="{{ row.badge_variant }}">{{ row.badge_text }}</c-badge></div>
+    </c-slot>
+  </c-rel-row>
+  {% empty %}
+  <c-empty-state icon="calendar-days" title="No dates yet"
+    text="Add a birthday, anniversary or important date to a person and it will appear here.">
+    <c-button variant="primary" href="{{ ui_tenant_url }}contacts/people/new/"><c-icon name="plus" /> New person</c-button>
+  </c-empty-state>
+  {% endfor %}
+</c-card>
+{% endblock %}
