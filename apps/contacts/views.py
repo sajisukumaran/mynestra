@@ -10,6 +10,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.contacts.forms import AddressForm, ImportantDateForm, PersonForm
 from apps.contacts.models import Address, ContactChannel, ImportantDate, Person
+from apps.relationships.models import PersonRelationship, RelationshipType
+from apps.relationships.services import label_for, other_side
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
@@ -141,6 +143,63 @@ def _person_form(request, person, mode):
     return render(request, "contacts/person_form.html", ctx)
 
 
+# --- Relationships & families helpers --------------------------------------------------------
+
+def _rel_rows(person):
+    """This person's P2P relationships, each resolved for display on *their* page: the row shows
+    the other endpoint and the label describing that endpoint (by its own gender)."""
+    edges = (
+        PersonRelationship.objects.filter(Q(person_a=person) | Q(person_b=person))
+        .select_related("type", "person_a", "person_b")
+    )
+    rows = [
+        {
+            "rel": e,
+            "other": e.other_of(person),
+            "role": e.label_for_other(person),
+            "type_name": e.type.display_name,
+            "selected_value": f"{e.type_id}:{e.side_of(person)}",  # preselect on the edit form
+        }
+        for e in edges
+    ]
+    rows.sort(key=lambda r: r["other"].display_name.lower())
+    return rows
+
+
+def _directed_type_options(types):
+    """Options for the add/edit relationship <select>. Value is '<type_id>:<side>' where side is
+    the *subject's* side. Symmetric types → one option (the neutral pairing label); asymmetric →
+    two directed options labelled by the subject-side neutral label (e.g. Parent / Child)."""
+    opts = []
+    for t in types:
+        opts.append({"value": f"{t.pk}:a", "label": t.a_label_n})
+        if not t.is_symmetric:
+            opts.append({"value": f"{t.pk}:b", "label": t.b_label_n})
+    return opts
+
+
+def _family_cards(person):
+    """Families this person belongs to, with a small member-avatar preview for the cards."""
+    cards = []
+    for fam in person.families.all():
+        members = list(fam.members.all())
+        cards.append({
+            "family": fam,
+            "members": members[:5],
+            "more": max(0, len(members) - 5),
+            "count": len(members),
+        })
+    return cards
+
+
+def _parse_typeside(raw):
+    """'12:a' -> (RelationshipType|None, 'a'|'b'|None)."""
+    type_id, _, side = raw.partition(":")
+    if side not in ("a", "b") or not type_id.isdigit():
+        return None, None
+    return RelationshipType.objects.filter(pk=type_id).first(), side
+
+
 # --- Detail (Overview + History) ------------------------------------------------------------
 
 def _person_qs():
@@ -162,6 +221,8 @@ def person_delete(request, pk):
 
 
 def _render_detail(request, person, address_form=None, date_form=None, reopen=""):
+    rel_rows = _rel_rows(person)
+    family_cards = _family_cards(person)
     ctx = contacts_context(
         request, "people",
         person=person,
@@ -169,8 +230,98 @@ def _render_detail(request, person, address_form=None, date_form=None, reopen=""
         address_form=address_form or AddressForm(),
         date_form=date_form or ImportantDateForm(),
         reopen=reopen,
+        rel_rows=rel_rows,
+        rel_count=len(rel_rows),
+        family_cards=family_cards,
+        family_count=len(family_cards),
+        rel_type_options=_directed_type_options(RelationshipType.objects.all()),
     )
     return render(request, "contacts/person_detail.html", ctx)
+
+
+# --- Person relationships (P2P), edited from the detail via modal + htmx ---------------------
+
+def relationship_search(request, pk):
+    """htmx: candidate people for the add-relationship modal (excludes self + already-related)."""
+    person = get_object_or_404(Person, pk=pk)
+    related_ids = {
+        pid
+        for e in PersonRelationship.objects.filter(Q(person_a=person) | Q(person_b=person))
+        for pid in (e.person_a_id, e.person_b_id)
+    }
+    related_ids.add(person.pk)
+    qs = Person.objects.exclude(pk__in=related_ids)
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q)
+            | Q(preferred_name__icontains=q)
+        )
+    ctx = {"person": person, "candidates": qs[:8], "q": q}
+    return render(request, "contacts/partials/rel_search.html", ctx)
+
+
+def relationship_preview(request, pk):
+    """htmx: live gender-aware label preview for the current (other, type+side) selection."""
+    person = get_object_or_404(Person, pk=pk)
+    other = Person.objects.filter(pk=request.GET.get("other", "")).first()
+    rel_type, side = _parse_typeside(request.GET.get("typeside", ""))
+    ctx = {"person": person, "other": other}
+    if other and rel_type and side:
+        ctx["subject_label"] = label_for(rel_type, person.gender, side)
+        ctx["other_label"] = label_for(rel_type, other.gender, other_side(side))
+        ctx["ready"] = True
+    return render(request, "contacts/partials/rel_preview.html", ctx)
+
+
+def relationship_create(request, pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        other = Person.objects.filter(pk=request.POST.get("other", "")).first()
+        rel_type, side = _parse_typeside(request.POST.get("typeside", ""))
+        note = request.POST.get("note", "").strip()
+        if other and rel_type and side and other.pk != person.pk:
+            person_a, person_b = (person, other) if side == "a" else (other, person)
+            already = PersonRelationship.objects.filter(
+                Q(person_a=person_a, person_b=person_b)
+                | Q(person_a=person_b, person_b=person_a),
+                type=rel_type,
+            ).exists()
+            if not already:
+                PersonRelationship.objects.create(
+                    person_a=person_a, person_b=person_b, type=rel_type, note=note
+                )
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def relationship_edit(request, pk, rel_pk):
+    """Change an existing edge's type/direction + note (the pair itself is fixed)."""
+    person = get_object_or_404(Person, pk=pk)
+    rel = get_object_or_404(
+        PersonRelationship.objects.filter(Q(person_a=person) | Q(person_b=person)), pk=rel_pk
+    )
+    if request.method == "POST":
+        other = rel.other_of(person)
+        rel_type, side = _parse_typeside(request.POST.get("typeside", ""))
+        if rel_type and side:
+            rel.person_a, rel.person_b = (person, other) if side == "a" else (other, person)
+            rel.type = rel_type
+            rel.note = request.POST.get("note", "").strip()
+            rel.save()
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+def relationship_delete(request, pk, rel_pk):
+    person = get_object_or_404(Person, pk=pk)
+    if request.method == "POST":
+        rel = (
+            PersonRelationship.objects.filter(Q(person_a=person) | Q(person_b=person))
+            .filter(pk=rel_pk)
+            .first()
+        )
+        if rel:
+            rel.delete()  # soft-delete
+    return redirect(tenant_url(request, f"contacts/people/{pk}/"))
 
 
 # --- Addresses & important dates (edited from the detail via slide-over) ---------------------

@@ -1,6 +1,7 @@
-<c-vars name="" role="" class="" />
+<c-vars name="" role="" href="" class="" />
+{% comment %}`href` links the name to the related record; the tail stays interactive (buttons ok).{% endcomment %}
 <div class="rel{% if class %} {{ class }}{% endif %}" {{ attrs }}>
   {% if avatar %}{{ avatar }}{% endif %}
-  <div class="grow"><div class="r-name">{{ name }}</div>{% if role %}<div class="r-role">{{ role }}</div>{% endif %}</div>
+  <div class="grow"><div class="r-name">{% if href %}<a href="{{ href }}">{{ name }}</a>{% else %}{{ name }}{% endif %}</div>{% if role %}<div class="r-role">{{ role }}</div>{% endif %}</div>
   {% if tail %}<div class="r-tail">{{ tail }}</div>{% endif %}
 </div>

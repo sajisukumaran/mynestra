@@ -1,0 +1,9 @@
+{% comment %}htmx fragment: gender-aware label preview, resolved server-side (the engine never runs
+in JS). Empty until both a person and a relationship+direction are chosen.{% endcomment %}
+{% if ready %}
+<div class="rel-preview">
+  <div class="hint"><c-icon name="sparkles" size="sm" /> How this will read</div>
+  <div>{{ other.display_name }} will show as <b>{{ other_label }}</b>.</div>
+  <div>{{ person.display_name }} will show as <b>{{ subject_label }}</b>.</div>
+</div>
+{% endif %}

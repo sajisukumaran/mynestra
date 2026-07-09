@@ -1,0 +1,16 @@
+{% comment %}htmx fragment: candidate people for the add-relationship picker. Each row sets the
+Alpine selection state on the enclosing modal form (presentation only — no domain logic).{% endcomment %}
+{% for p in candidates %}
+<button type="button" class="rel-pick"
+        data-id="{{ p.pk }}" data-name="{{ p.display_name }}"
+        data-tint="{{ p.avatar_tint }}" data-initials="{{ p.initials }}"
+        @click="pick($el.dataset)">
+  <c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>
+  <div class="grow">
+    <div class="r-name">{{ p.display_name }}</div>
+    {% if p.list_subtitle %}<div class="r-role">{{ p.list_subtitle }}</div>{% endif %}
+  </div>
+</button>
+{% empty %}
+<div class="rel-empty">{% if q %}No people match “{{ q }}”.{% else %}No other people to link yet.{% endif %}</div>
+{% endfor %}

@@ -450,6 +450,13 @@ table.tbl { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
 .avatar-more { display:grid; place-items:center; border-radius:50%; width:36px; height:36px; margin-left:-9px;
   border:2px solid var(--surface); background:var(--surface-3); color:var(--text-muted); font-size:var(--fs-xs); font-weight:600; }
 
+/* Family card (families list + a person's families tab) */
+.fam-card { display:block; text-decoration:none; }
+.fam-card:hover { border-color:var(--border-strong); }
+.fam-head { display:flex; align-items:center; gap:12px; }
+.fam-name { font-weight:600; color:var(--text-strong); font-size:var(--fs-lg); }
+.fam-members { margin-top:14px; }
+
 /* =====================================================================
    Tabs / key-value / channel / relationship / timeline
    ===================================================================== */
@@ -481,6 +488,19 @@ table.tbl { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
 .rel .r-role { font-size:var(--fs-sm); color:var(--text-muted); }
 .rel .r-name { font-weight:600; color:var(--text-strong); }
 .rel .r-tail { margin-left:auto; }
+a.rel:hover, a.rel:hover .r-name { color:var(--accent-text); }
+
+/* Relationship add/edit modal: person picker + gender-aware label preview */
+.rel-results { max-height:264px; overflow:auto; display:flex; flex-direction:column; gap:2px; }
+.rel-pick { display:flex; align-items:center; gap:12px; width:100%; text-align:left; cursor:pointer;
+  padding:8px; border-radius:var(--r-sm); }
+.rel-pick:hover { background:var(--surface-2); }
+.rel-pick .r-name { font-weight:600; color:var(--text-strong); }
+.rel-pick .r-role { font-size:var(--fs-sm); color:var(--text-muted); }
+.rel-empty { color:var(--text-subtle); font-size:var(--fs-sm); padding:10px 2px; }
+.rel-preview { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r);
+  padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
+.rel-preview b { color:var(--accent-text); font-weight:600; }
 
 .timeline { display:flex; flex-direction:column; }
 .tl-item { display:flex; gap:14px; padding-bottom:18px; position:relative; }
@@ -622,6 +642,7 @@ textarea.control { min-height:70px; height:auto; align-items:stretch; padding:8p
    Layout helpers + styleguide controls
    ===================================================================== */
 .grid-2 { display:grid; grid-template-columns:2fr 1fr; gap:20px; align-items:start; }
+.grid-halves { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
 .grid-detail { display:grid; grid-template-columns:340px 1fr; gap:22px; align-items:start; }
 .stack { display:flex; flex-direction:column; }
 .stack-16 > * + * { margin-top:16px; }
@@ -685,7 +706,7 @@ textarea.control { min-height:70px; height:auto; align-items:stretch; padding:8p
 @media (max-width:1180px){ .form-grid, .form-grid.g4 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media (max-width:1080px){
   .stat-grid { grid-template-columns:repeat(2,1fr); }
-  .grid-2, .grid-detail { grid-template-columns:1fr; }
+  .grid-2, .grid-halves, .grid-detail { grid-template-columns:1fr; }
   .search { width:200px; }
 }
 @media (max-width:760px){ .form-grid, .form-grid.g4 { grid-template-columns:1fr; }

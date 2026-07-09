@@ -1,0 +1,12 @@
+<c-vars name="" count="0" more="" tint="slate" href="" class="" />
+{% comment %}A clickable family tile: square glyph avatar, name + member count, and a member-avatar
+strip. Caller supplies the member c-avatars in the slot and the overflow via `more`.{% endcomment %}
+<a class="card fam-card{% if class %} {{ class }}{% endif %}" href="{{ href }}" {{ attrs }}>
+  <div class="card-body">
+    <div class="fam-head">
+      <c-avatar tint="{{ tint }}" size="lg" square><c-icon name="house" size="lg" /></c-avatar>
+      <div><div class="fam-name">{{ name }}</div><div class="muted">{{ count }} member{{ count|pluralize }}</div></div>
+    </div>
+    {% if slot %}<c-avatar-group class="fam-members" more="{{ more }}">{{ slot }}</c-avatar-group>{% endif %}
+  </div>
+</a>

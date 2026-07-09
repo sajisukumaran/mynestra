@@ -1,0 +1,46 @@
+{% comment %}Add-relationship modal: htmx person search → type+direction select → live gender-aware
+label preview (resolved server-side). Alpine holds only the selection state (which person is
+picked); it never resolves a label. Included in the Relationships tab's card actions.{% endcomment %}
+<c-modal title="Add relationship">
+  <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="user-round-plus" size="sm" /> Add relationship</c-button></c-slot>
+  <form method="post" action="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/new/"
+        x-data="{ otherId:'', otherName:'', otherTint:'slate', otherInitials:'?', ts:'',
+                  pick(d){ this.otherId=d.id; this.otherName=d.name; this.otherTint=d.tint; this.otherInitials=d.initials; this.ts=''; },
+                  reset(){ this.otherId=''; this.ts=''; } }">
+    {% csrf_token %}
+    <input type="hidden" name="other" :value="otherId">
+    <div class="stack-16">
+      {# Step 1 — find a person #}
+      <div x-show="!otherId">
+        <c-field label="Find a person">
+          <c-input type="search" name="q" autocomplete="off" placeholder="Search people by name…"
+                   hx-get="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/search/"
+                   hx-trigger="input changed delay:200ms, focus"
+                   hx-target="#rel-results" />
+        </c-field>
+        <div id="rel-results" class="rel-results"
+             hx-get="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/search/"
+             hx-trigger="load"></div>
+      </div>
+      {# Step 2 — chosen person + relationship + live preview #}
+      <div x-show="otherId" x-cloak class="stack-16">
+        <div class="rel">
+          <span class="avatar a-sm" :class="'av-'+otherTint" x-text="otherInitials"></span>
+          <div class="grow"><div class="r-name" x-text="otherName"></div></div>
+          <c-button type="button" variant="ghost" size="sm" @click="reset()"><c-icon name="x" size="sm" /> Change</c-button>
+        </div>
+        <c-field label="Relationship" help="Pick your role — labels adapt to each person's gender.">
+          <c-select name="typeside" x-model="ts"
+                    hx-get="{{ ui_tenant_url }}contacts/people/{{ person.pk }}/relationships/preview/"
+                    hx-trigger="change" hx-target="#rel-preview" hx-include="[name='other']">
+            <option value="">Choose relationship…</option>
+            {% for o in rel_type_options %}<option value="{{ o.value }}">{{ o.label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <div id="rel-preview"></div>
+        <c-field label="Note (optional)"><c-input name="note" placeholder="e.g. maternal side" /></c-field>
+        <div class="row"><c-button type="submit" variant="primary" :disabled="!ts">Add relationship</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+      </div>
+    </div>
+  </form>
+</c-modal>

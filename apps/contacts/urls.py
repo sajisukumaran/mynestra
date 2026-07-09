@@ -28,4 +28,22 @@ urlpatterns = [
         "people/<int:pk>/dates/<int:date_pk>/delete/",
         views.importantdate_delete, name="date-delete",
     ),
+    # Relationships (P2P) — modal + htmx search/preview, edited from the Person detail.
+    path(
+        "people/<int:pk>/relationships/search/",
+        views.relationship_search, name="rel-search",
+    ),
+    path(
+        "people/<int:pk>/relationships/preview/",
+        views.relationship_preview, name="rel-preview",
+    ),
+    path("people/<int:pk>/relationships/new/", views.relationship_create, name="rel-create"),
+    path(
+        "people/<int:pk>/relationships/<int:rel_pk>/edit/",
+        views.relationship_edit, name="rel-edit",
+    ),
+    path(
+        "people/<int:pk>/relationships/<int:rel_pk>/delete/",
+        views.relationship_delete, name="rel-delete",
+    ),
 ]
