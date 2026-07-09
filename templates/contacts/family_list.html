@@ -1,0 +1,38 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}Families{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Contacts</span><c-icon name="chevron-right" /><span class="strong">Families</span></c-breadcrumb>
+
+<c-page-header title="Families" subtitle="{{ total }} {{ total|pluralize:'family,families' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}contacts/families/new/"><c-icon name="plus" /> New family</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search families…"></label>
+    {% if q %}<c-button href="{{ ui_tenant_url }}contacts/families/">Clear</c-button>{% endif %}
+  </form>
+
+  {% if cards %}
+  <div class="grid-halves">
+    {% for fc in cards %}
+    <c-family-card name="{{ fc.family.name }}" count="{{ fc.count }}" more="{{ fc.more|default:'' }}"
+                   tint="{{ fc.family.avatar_tint }}" href="{{ ui_tenant_url }}contacts/families/{{ fc.family.pk }}/">
+      {% for m in fc.members %}<c-avatar tint="{{ m.avatar_tint }}" size="sm">{{ m.initials }}</c-avatar>{% endfor %}
+    </c-family-card>
+    {% endfor %}
+  </div>
+  {% else %}
+  <c-card>
+    <c-empty-state icon="house"
+      title="{% if q %}No families match{% else %}No families yet{% endif %}"
+      text="{% if q %}Try a different search.{% else %}Group people into households and circles — the family page shows how its members are related.{% endif %}">
+      {% if not q %}<c-button variant="primary" href="{{ ui_tenant_url }}contacts/families/new/"><c-icon name="plus" /> New family</c-button>{% endif %}
+    </c-empty-state>
+  </c-card>
+  {% endif %}
+</div>
+{% endblock %}

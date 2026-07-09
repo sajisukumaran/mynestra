@@ -1,0 +1,41 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}{% if mode == 'create' %}New family{% else %}Edit family{% endif %}{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}contacts/families/">Families</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/">{{ family.name }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New family{% else %}Edit family{% endif %}" subtitle="Members and relationships are managed on the family page after saving." />
+
+<form method="post" enctype="multipart/form-data">{% csrf_token %}
+  <div class="stack stack-20">
+    <c-card title="Family" icon="house">
+      <div class="photo-row">
+        {% if family.photo %}<c-avatar src="{{ family.photo.url }}" size="lg" square alt="{{ family.name }}" />
+        {% else %}<c-avatar size="lg" square tint="{{ family.avatar_tint|default:'teal' }}"><c-icon name="house" size="lg" /></c-avatar>{% endif %}
+        <div class="stack">
+          <div class="row wrap">
+            <c-file name="photo" accept="image/*" />
+            {% if family.photo %}<label class="row"><input type="checkbox" name="photo-clear"> <span class="muted">Remove</span></label>{% endif %}
+          </div>
+          <span class="help">JPG or PNG. A coloured glyph is used until you add one.</span>
+        </div>
+      </div>
+      <div class="stack stack-16">
+        <c-field label="Name" required error="{{ form.name.errors.0 }}"><div class="control">{{ form.name }}</div></c-field>
+        <c-field label="Notes" error="{{ form.notes.errors.0 }}">
+          <textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea>
+        </c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if form.errors %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}contacts/families/{{ family.pk }}/{% else %}{{ ui_tenant_url }}contacts/families/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create family{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

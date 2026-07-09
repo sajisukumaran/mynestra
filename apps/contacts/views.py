@@ -8,8 +8,9 @@ from django.core.paginator import Paginator
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.contacts.forms import AddressForm, ImportantDateForm, PersonForm
+from apps.contacts.forms import AddressForm, FamilyForm, ImportantDateForm, PersonForm
 from apps.contacts.models import Address, ContactChannel, ImportantDate, Person
+from apps.families.models import Family, FamilyMembership
 from apps.relationships.models import PersonRelationship, RelationshipType
 from apps.relationships.services import label_for, other_side
 from apps.setup.models import Category
@@ -45,6 +46,7 @@ def contacts_context(request, active, **extra):
         "active": active,
         "is_owner": _is_owner(request),
         "nav_people": Person.objects.count(),
+        "nav_families": Family.objects.count(),
     }
     ctx.update(extra)
     return ctx
@@ -382,3 +384,150 @@ def importantdate_delete(request, pk, date_pk):
     if request.method == "POST":
         ImportantDate.objects.filter(pk=date_pk, person=person).delete()
     return redirect(tenant_url(request, f"contacts/people/{pk}/"))
+
+
+# --- Families ------------------------------------------------------------------------------
+# Families are a Contacts-app screen (DESIGN §8). The family page derives the relationships
+# *between* its members from PersonRelationship rather than storing member roles (DESIGN §5).
+
+def _family_url(request, pk, path=""):
+    return tenant_url(request, f"contacts/families/{pk}/{path}")
+
+
+def families_list(request):
+    qs = Family.objects.prefetch_related("memberships__person")
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(name__icontains=q)
+    cards = []
+    for fam in qs:
+        members = list(fam.members.all())
+        cards.append({
+            "family": fam, "members": members[:6], "more": max(0, len(members) - 6),
+            "count": len(members),
+        })
+    ctx = contacts_context(
+        request, "families", cards=cards, q=q, total=Family.objects.count()
+    )
+    return render(request, "contacts/family_list.html", ctx)
+
+
+def _inter_member_edges(members):
+    """PersonRelationship edges whose *both* endpoints are members of this family."""
+    ids = [p.pk for p in members]
+    edges = (
+        PersonRelationship.objects.filter(person_a__in=ids, person_b__in=ids)
+        .select_related("type", "person_a", "person_b")
+    )
+    return [
+        {
+            "a": e.person_a,
+            "b": e.person_b,
+            "a_label": e.label_for_person(e.person_a),
+            "b_label": e.label_for_person(e.person_b),
+            "type_name": e.type.display_name,
+        }
+        for e in edges
+    ]
+
+
+def _family_qs():
+    return Family.objects.prefetch_related("memberships__person", "addresses")
+
+
+def family_detail(request, pk, address_form=None, reopen=""):
+    family = get_object_or_404(_family_qs(), pk=pk)
+    members = list(family.members.all())
+    ctx = contacts_context(
+        request, "families",
+        family=family,
+        members=members,
+        member_count=len(members),
+        inter_edges=_inter_member_edges(members),
+        history=family.history.all()[:60],
+        address_form=address_form or AddressForm(),
+        reopen=reopen,
+    )
+    return render(request, "contacts/family_detail.html", ctx)
+
+
+def _family_form(request, family, mode):
+    form = FamilyForm(request.POST or None, request.FILES or None, instance=family)
+    if request.method == "POST" and form.is_valid():
+        family = form.save()
+        return redirect(_family_url(request, family.pk))
+    ctx = contacts_context(request, "families", form=form, family=family, mode=mode)
+    return render(request, "contacts/family_form.html", ctx)
+
+
+def family_create(request):
+    return _family_form(request, Family(), "create")
+
+
+def family_edit(request, pk):
+    return _family_form(request, get_object_or_404(Family, pk=pk), "edit")
+
+
+def family_delete(request, pk):
+    family = get_object_or_404(Family, pk=pk)
+    if request.method == "POST":
+        family.delete()  # soft-delete → Setup → Recently deleted
+    return redirect(tenant_url(request, "contacts/families/"))
+
+
+def family_member_search(request, pk):
+    """htmx: people who are not yet members of this family (for the add-member picker)."""
+    family = get_object_or_404(Family, pk=pk)
+    member_ids = set(family.members.values_list("id", flat=True))
+    qs = Person.objects.exclude(pk__in=member_ids)
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q)
+            | Q(preferred_name__icontains=q)
+        )
+    return render(request, "contacts/partials/rel_search.html", {"candidates": qs[:8], "q": q})
+
+
+def family_member_add(request, pk):
+    family = get_object_or_404(Family, pk=pk)
+    if request.method == "POST":
+        person = Person.objects.filter(pk=request.POST.get("person", "")).first()
+        if person:
+            FamilyMembership.objects.get_or_create(family=family, person=person)
+    return redirect(_family_url(request, pk))
+
+
+def family_member_remove(request, pk, person_pk):
+    family = get_object_or_404(Family, pk=pk)
+    if request.method == "POST":
+        FamilyMembership.objects.filter(family=family, person_id=person_pk).delete()
+    return redirect(_family_url(request, pk))
+
+
+def family_address_create(request, pk):
+    family = get_object_or_404(Family, pk=pk)
+    if request.method == "POST":
+        form = AddressForm(request.POST)
+        if form.is_valid():
+            address = form.save(commit=False)
+            address.family = family
+            address.save()
+        else:
+            return family_detail(request, pk, address_form=form, reopen="address")
+    return redirect(_family_url(request, pk))
+
+
+def family_address_edit(request, pk, addr_pk):
+    family = get_object_or_404(Family, pk=pk)
+    address = get_object_or_404(Address, pk=addr_pk, family=family)
+    if request.method == "POST":
+        AddressForm(request.POST, instance=address).save()
+    return redirect(_family_url(request, pk))
+
+
+def family_address_delete(request, pk, addr_pk):
+    family = get_object_or_404(Family, pk=pk)
+    if request.method == "POST":
+        Address.objects.filter(pk=addr_pk, family=family).delete()
+    return redirect(_family_url(request, pk))

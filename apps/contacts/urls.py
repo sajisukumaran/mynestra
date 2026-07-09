@@ -46,4 +46,31 @@ urlpatterns = [
         "people/<int:pk>/relationships/<int:rel_pk>/delete/",
         views.relationship_delete, name="rel-delete",
     ),
+    # Families
+    path("families/", views.families_list, name="families"),
+    path("families/new/", views.family_create, name="family-create"),
+    path("families/<int:pk>/", views.family_detail, name="family-detail"),
+    path("families/<int:pk>/edit/", views.family_edit, name="family-edit"),
+    path("families/<int:pk>/delete/", views.family_delete, name="family-delete"),
+    path(
+        "families/<int:pk>/members/search/",
+        views.family_member_search, name="family-member-search",
+    ),
+    path("families/<int:pk>/members/add/", views.family_member_add, name="family-member-add"),
+    path(
+        "families/<int:pk>/members/<int:person_pk>/remove/",
+        views.family_member_remove, name="family-member-remove",
+    ),
+    path(
+        "families/<int:pk>/addresses/new/",
+        views.family_address_create, name="family-address-create",
+    ),
+    path(
+        "families/<int:pk>/addresses/<int:addr_pk>/edit/",
+        views.family_address_edit, name="family-address-edit",
+    ),
+    path(
+        "families/<int:pk>/addresses/<int:addr_pk>/delete/",
+        views.family_address_delete, name="family-address-delete",
+    ),
 ]

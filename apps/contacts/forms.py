@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 
 from apps.contacts.models import Address, ImportantDate, Person
 from apps.core.partialdate import validate_partial_date
+from apps.families.models import Family
 
 PARTIAL_DATES = [("dob", "date of birth"), ("dod", "date of death"), ("anniversary", "anniversary")]
 
@@ -54,6 +55,18 @@ class PersonForm(forms.ModelForm):
     def save(self, commit=True):
         self.instance.languages = self.cleaned_data.get("languages", [])
         return super().save(commit)
+
+
+class FamilyForm(forms.ModelForm):
+    """Create/edit a family. Name required; photo + notes optional."""
+
+    class Meta:
+        model = Family
+        fields = ["name", "photo", "notes"]
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["name"].required = True
 
 
 class AddressForm(forms.ModelForm):

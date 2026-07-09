@@ -1,0 +1,148 @@
+{% extends "contacts/base.html" %}
+{% block contacts_heading %}{{ family.name }}{% endblock %}
+
+{% block contacts %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}contacts/families/">Families</a><c-icon name="chevron-right" />
+  <span class="strong">{{ family.name }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      {% if family.photo %}<c-avatar src="{{ family.photo.url }}" size="xl" square alt="{{ family.name }}" />
+      {% else %}<c-avatar size="xl" square tint="{{ family.avatar_tint }}"><c-icon name="house" size="xl" /></c-avatar>{% endif %}
+      <div class="ph-main">
+        <div class="row wrap"><h1 class="ph-name">{{ family.name }}</h1></div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="users" size="sm" class="subtle" />{{ member_count }} member{{ member_count|pluralize }}</span>
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete {{ family.name }}?" message="This moves the family to Recently deleted. Members and their relationships are left untouched.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  <div class="grid-detail">
+    <div class="stack stack-20">
+      {# Members #}
+      <c-card title="Members" icon="users">
+        <c-slot name="actions">{% include "contacts/partials/family_member_modal.html" %}</c-slot>
+        {% for m in members %}
+        <c-rel-row name="{{ m.display_name }}" role="{{ m.list_subtitle }}" href="{{ ui_tenant_url }}contacts/people/{{ m.pk }}/">
+          <c-slot name="avatar">{% if m.photo %}<c-avatar src="{{ m.photo.url }}" size="sm" alt="{{ m.display_name }}" />{% else %}<c-avatar tint="{{ m.avatar_tint }}" size="sm">{{ m.initials }}</c-avatar>{% endif %}</c-slot>
+          <c-slot name="tail">
+            <c-confirm-dialog title="Remove {{ m.display_name }}?" message="They stay in your contacts; only this family membership is removed.">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Remove"><c-icon name="x" size="sm" /></c-button></c-slot>
+              <c-slot name="confirm">
+                <form method="post" action="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/members/{{ m.pk }}/remove/">{% csrf_token %}
+                  <c-button type="submit" variant="danger"><c-icon name="x" /> Remove</c-button>
+                </form>
+              </c-slot>
+            </c-confirm-dialog>
+          </c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="users" title="No members yet" text="Add people to build this family." />
+        {% endfor %}
+      </c-card>
+
+      {# Address #}
+      <c-card title="Address" icon="map-pin">
+        <c-slot name="actions">
+          <c-slide-over title="Add address" open="{% if reopen == 'address' %}true{% else %}false{% endif %}">
+            <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/addresses/new/">{% csrf_token %}
+              <div class="stack-16">
+                <c-field label="Label"><div class="control">{{ address_form.label }}</div></c-field>
+                <c-field label="Address line 1"><div class="control">{{ address_form.line1 }}</div></c-field>
+                <c-field label="Address line 2"><div class="control">{{ address_form.line2 }}</div></c-field>
+                <c-field label="City"><div class="control">{{ address_form.city }}</div></c-field>
+                <c-field label="Region / state"><div class="control">{{ address_form.region }}</div></c-field>
+                <c-field label="Postal code"><div class="control">{{ address_form.postal_code }}</div></c-field>
+                <c-field label="Country"><div class="control">{{ address_form.country }}</div></c-field>
+                <label class="row">{{ address_form.is_primary }} <span class="muted">Primary address</span></label>
+                <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-slide-over>
+        </c-slot>
+        {% for a in family.addresses.all %}
+        <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
+          <c-slot name="tail">
+            {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
+            <c-slide-over title="Edit address">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+              <form method="post" action="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
+                <div class="stack-16">
+                  <c-field label="Label"><c-input name="label" value="{{ a.label }}" /></c-field>
+                  <c-field label="Address line 1"><c-input name="line1" value="{{ a.line1 }}" /></c-field>
+                  <c-field label="Address line 2"><c-input name="line2" value="{{ a.line2 }}" /></c-field>
+                  <c-field label="City"><c-input name="city" value="{{ a.city }}" /></c-field>
+                  <c-field label="Region / state"><c-input name="region" value="{{ a.region }}" /></c-field>
+                  <c-field label="Postal code"><c-input name="postal_code" value="{{ a.postal_code }}" /></c-field>
+                  <c-field label="Country"><c-input name="country" value="{{ a.country }}" /></c-field>
+                  <label class="row"><input type="checkbox" name="is_primary" {% if a.is_primary %}checked{% endif %}> <span class="muted">Primary address</span></label>
+                  <div class="between">
+                    <c-button type="submit" variant="primary">Save</c-button>
+                    <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}contacts/families/{{ family.pk }}/addresses/{{ a.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                  </div>
+                </div>
+              </form>
+            </c-slide-over>
+          </c-slot>
+        </c-channel-row>
+        {% empty %}<span class="subtle">No address yet.</span>{% endfor %}
+      </c-card>
+    </div>
+
+    <div class="stack stack-20">
+      {# Relationships between members (derived from PersonRelationship) #}
+      <c-card title="Relationships between members" icon="network">
+        {% for e in inter_edges %}
+        <c-rel-row name="{{ e.a.display_name }} &amp; {{ e.b.display_name }}" role="{{ e.a_label }} · {{ e.b_label }}">
+          <c-slot name="avatar">
+            <c-avatar-group>
+              <c-avatar tint="{{ e.a.avatar_tint }}" size="sm">{{ e.a.initials }}</c-avatar>
+              <c-avatar tint="{{ e.b.avatar_tint }}" size="sm">{{ e.b.initials }}</c-avatar>
+            </c-avatar-group>
+          </c-slot>
+          <c-slot name="tail"><c-badge>{{ e.type_name }}</c-badge></c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="network" title="No relationships between members yet"
+          text="Link members from each person's page — the connections between them appear here automatically." />
+        {% endfor %}
+        {% if inter_edges %}<c-hint>Derived from each pair's stored relationship — labels adapt to gender.</c-hint>{% endif %}
+      </c-card>
+
+      {% if family.notes %}
+      <c-card title="Notes" icon="pencil"><p class="muted">{{ family.notes|linebreaksbr }}</p></c-card>
+      {% endif %}
+
+      <c-card title="History" icon="clock">
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this family{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}<span class="subtle">No history yet.</span>{% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}
