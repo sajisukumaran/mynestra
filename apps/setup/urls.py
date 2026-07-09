@@ -44,4 +44,12 @@ urlpatterns = [
         "recently-deleted/people/<int:pk>/delete/",
         views.person_hard_delete, name="person-hard-delete",
     ),
+    path(
+        "recently-deleted/families/<int:pk>/restore/",
+        views.family_restore, name="family-restore",
+    ),
+    path(
+        "recently-deleted/families/<int:pk>/delete/",
+        views.family_hard_delete, name="family-hard-delete",
+    ),
 ]

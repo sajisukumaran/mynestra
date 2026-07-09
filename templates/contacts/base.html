@@ -1,6 +1,6 @@
 {% extends "base.html" %}
-{% comment %}Contacts app shell: topbar + Contacts per-app sidebar. People is live in P4;
-Dashboard / Families / Important dates join in P5/P7.{% endcomment %}
+{% comment %}Contacts app shell: topbar + Contacts per-app sidebar. People (P4) + Families (P5) are
+live; Dashboard / Important dates join in P7.{% endcomment %}
 {% block title %}{% block contacts_heading %}Contacts{% endblock %} · {{ ui_tenant_name }}{% endblock %}
 
 {% block content %}
@@ -11,6 +11,7 @@ Dashboard / Families / Important dates join in P5/P7.{% endcomment %}
   <c-slot name="sidebar">
     <c-sidebar title="Contacts" subtitle="{{ ui_tenant_name }}" glyph="users">
       <c-sidebar-item label="People" icon="user-round" count="{{ nav_people }}" href="{{ ui_tenant_url }}contacts/people/" {% if active == 'people' %}active="true"{% endif %} />
+      <c-sidebar-item label="Families" icon="house" count="{{ nav_families }}" href="{{ ui_tenant_url }}contacts/families/" {% if active == 'families' %}active="true"{% endif %} />
       <c-slot name="foot">
         <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
         {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}

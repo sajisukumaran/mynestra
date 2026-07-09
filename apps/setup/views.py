@@ -15,6 +15,7 @@ from django.utils import timezone
 
 from apps.accounts.decorators import owner_required
 from apps.contacts.models import Person
+from apps.families.models import Family
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.forms import (
     CategoryForm,
@@ -362,9 +363,11 @@ def profile(request):
 @owner_required
 def recently_deleted(request):
     deleted_people = Person.all_objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
+    deleted_families = Family.all_objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
     ctx = setup_context(
         request, "recently-deleted",
         deleted_people=deleted_people,
+        deleted_families=deleted_families,
         allow_hard_delete=settings.ALLOW_HARD_DELETE,
     )
     return render(request, "setup/recently_deleted.html", ctx)
@@ -381,4 +384,18 @@ def person_restore(request, pk):
 def person_hard_delete(request, pk):
     if request.method == "POST" and settings.ALLOW_HARD_DELETE:
         get_object_or_404(Person.all_objects, pk=pk, deleted_at__isnull=False).hard_delete()
+    return redirect(setup_url(request, "recently-deleted/"))
+
+
+@owner_required
+def family_restore(request, pk):
+    if request.method == "POST":
+        get_object_or_404(Family.all_objects, pk=pk, deleted_at__isnull=False).restore()
+    return redirect(setup_url(request, "recently-deleted/"))
+
+
+@owner_required
+def family_hard_delete(request, pk):
+    if request.method == "POST" and settings.ALLOW_HARD_DELETE:
+        get_object_or_404(Family.all_objects, pk=pk, deleted_at__isnull=False).hard_delete()
     return redirect(setup_url(request, "recently-deleted/"))
