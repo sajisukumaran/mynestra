@@ -1,0 +1,55 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Localization{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Localization</span></c-breadcrumb>
+<c-page-header title="Localization" subtitle="Your household's default currency, timezone and display formats." />
+
+<form method="post">{% csrf_token %}
+  <div class="stack-20">
+    <c-card title="Default currency" icon="landmark">
+      <div class="stack-16">
+        <p class="muted">The base currency your finances are kept in. Foreign-currency transactions convert to it.</p>
+        <c-field label="Currency" class="span2">
+          <c-select name="currency">
+            {% for c in currencies %}
+            <option value="{{ c.code }}" {% if c.code == currency %}selected{% endif %}>{{ c.code }} — {{ c.name }}</option>
+            {% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+    </c-card>
+
+    <c-card title="Region & formats" icon="globe">
+      <div class="form-grid">
+        <c-field label="Timezone" class="span2">
+          <c-select name="timezone">
+            {% for tz in timezones %}
+            <option value="{{ tz }}" {% if tz == timezone %}selected{% endif %}>{{ tz }}</option>
+            {% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Date format">
+          <c-select name="date_format">
+            <option value="iso" {% if date_format == 'iso' %}selected{% endif %}>2026-07-09</option>
+            <option value="dmy" {% if date_format == 'dmy' %}selected{% endif %}>09-07-2026</option>
+            <option value="mdy" {% if date_format == 'mdy' %}selected{% endif %}>07/09/2026</option>
+            <option value="long" {% if date_format == 'long' %}selected{% endif %}>09 Jul 2026</option>
+          </c-select>
+        </c-field>
+        <c-field label="Number format">
+          <c-select name="number_format">
+            <option value="plain" {% if number_format == 'plain' %}selected{% endif %}>1234.56</option>
+            <option value="thousands" {% if number_format == 'thousands' %}selected{% endif %}>1,234.56</option>
+            <option value="indian" {% if number_format == 'indian' %}selected{% endif %}>1,23,456.78</option>
+          </c-select>
+        </c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="Currency is the base your ledger is kept in — set it before recording finances.">
+    <c-button type="submit" variant="primary">Save localization</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

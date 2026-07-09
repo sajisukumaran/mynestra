@@ -16,6 +16,7 @@ from django.utils import timezone
 from apps.accounts.decorators import owner_required
 from apps.contacts.models import Person
 from apps.families.models import Family
+from apps.finance.models import Currency
 from apps.organizations.models import Branch, Organization
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.forms import (
@@ -25,7 +26,7 @@ from apps.setup.forms import (
     RelationshipTypeForm,
 )
 from apps.setup.models import Category
-from apps.tenants.models import Invitation, Membership, Role, Tenant
+from apps.tenants.models import CURATED_TIMEZONES, Invitation, Membership, Role, Tenant
 
 # Relationship-type kinds: URL segment -> (model, form, is_p2p). P2P carries gender-aware labels;
 # P2O carries a single label (DESIGN §5).
@@ -331,6 +332,43 @@ def appearance(request):
         theme=request.user.theme or "",
     )
     return render(request, "setup/appearance.html", ctx)
+
+
+# --- Localization ---------------------------------------------------------------------------
+# Household default currency (the finance base/functional currency) + timezone + date/number
+# formats. Tenant scalars are written via queryset update (no TenantMixin.save() schema switch);
+# currency is validated against the tenant-schema Currency catalog. Exposed to templates via the
+# `ui` context processor for money/date formatting.
+
+
+@owner_required
+def localization(request):
+    tenant = request.tenant
+    if request.method == "POST":
+        code = request.POST.get("currency")
+        if code and Currency.objects.filter(code=code, is_active=True).exists():
+            Tenant.objects.filter(pk=tenant.pk).update(currency=code)
+        tz = request.POST.get("timezone")
+        if tz in CURATED_TIMEZONES:
+            Tenant.objects.filter(pk=tenant.pk).update(timezone=tz)
+        date_format = request.POST.get("date_format")
+        if date_format in Tenant.DateFormat.values:
+            Tenant.objects.filter(pk=tenant.pk).update(date_format=date_format)
+        number_format = request.POST.get("number_format")
+        if number_format in Tenant.NumberFormat.values:
+            Tenant.objects.filter(pk=tenant.pk).update(number_format=number_format)
+        return redirect(setup_url(request, "localization/"))
+
+    ctx = setup_context(
+        request, "localization",
+        currencies=Currency.objects.filter(is_active=True).order_by("code"),
+        currency=tenant.currency,
+        timezone=tenant.timezone,
+        timezones=CURATED_TIMEZONES,
+        date_format=tenant.date_format,
+        number_format=tenant.number_format,
+    )
+    return render(request, "setup/localization.html", ctx)
 
 
 # --- Household profile ----------------------------------------------------------------------

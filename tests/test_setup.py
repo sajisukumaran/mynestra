@@ -24,7 +24,7 @@ def _u(tenant, path=""):
 
 SETUP_PAGES = [
     "", "categories/", "relationship-types/", "members/",
-    "appearance/", "profile/", "recently-deleted/",
+    "appearance/", "localization/", "profile/", "recently-deleted/",
 ]
 
 
@@ -191,6 +191,42 @@ def test_invalid_palette_ignored(make_tenant, make_user, client):
     client.post(_u(tenant, "appearance/"), {"palette": "chartreuse", "theme": ""})
     tenant.refresh_from_db()
     assert tenant.palette == "teal"  # unchanged (invalid value rejected)
+
+
+# --- Localization ---------------------------------------------------------------------------
+
+def test_localization_persists(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    resp = client.post(
+        _u(tenant, "localization/"),
+        {"currency": "EUR", "timezone": "Europe/London", "date_format": "dmy",
+         "number_format": "indian"},
+    )
+    assert resp.status_code == 302
+    tenant.refresh_from_db()
+    assert tenant.currency == "EUR"
+    assert tenant.timezone == "Europe/London"
+    assert tenant.date_format == "dmy"
+    assert tenant.number_format == "indian"
+
+
+def test_invalid_currency_ignored(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    client.post(_u(tenant, "localization/"), {"currency": "ZZZ", "timezone": "Mars/Base"})
+    tenant.refresh_from_db()
+    assert tenant.currency == "USD"  # unchanged (not in the Currency catalog)
+    assert tenant.timezone == "UTC"  # unchanged (not in CURATED_TIMEZONES)
+
+
+def test_ui_currency_exposed_to_templates(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    client.post(_u(tenant, "localization/"), {"currency": "GBP"})
+    resp = client.get(_u(tenant, "localization/"))
+    assert resp.status_code == 200
+    assert resp.context["ui_currency"] == "GBP"
 
 
 # --- Tenant isolation (hard gate) -----------------------------------------------------------

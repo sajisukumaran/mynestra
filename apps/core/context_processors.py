@@ -28,6 +28,11 @@ def ui(request):
     # Household palette (DESIGN §7.2): server-authoritative so Appearance changes recolor the app
     # for every member. Empty on public pages so the /styleguide localStorage switcher still works.
     tenant_palette = ""
+    # Localization (Setup → Localization): exposed to every template for money/date formatting.
+    tenant_currency = ""
+    tenant_timezone = ""
+    tenant_date_format = ""
+    tenant_number_format = ""
     if tenant is not None and tenant.schema_name != get_public_schema_name():
         tenant_name = tenant.name
         tenant_initials = _initials(tenant.name, "H")
@@ -35,6 +40,10 @@ def ui(request):
         # in django-tenants); templates build links from this base.
         tenant_url = f"/t/{tenant.schema_name}/"
         tenant_palette = getattr(tenant, "palette", "") or ""
+        tenant_currency = getattr(tenant, "currency", "") or ""
+        tenant_timezone = getattr(tenant, "timezone", "") or ""
+        tenant_date_format = getattr(tenant, "date_format", "") or ""
+        tenant_number_format = getattr(tenant, "number_format", "") or ""
 
     return {
         "ui_user_initials": user_initials,
@@ -43,4 +52,8 @@ def ui(request):
         "ui_tenant_url": tenant_url,
         "ui_palette": tenant_palette,
         "ui_theme": user_theme,
+        "ui_currency": tenant_currency,
+        "ui_timezone": tenant_timezone,
+        "ui_date_format": tenant_date_format,
+        "ui_number_format": tenant_number_format,
     }

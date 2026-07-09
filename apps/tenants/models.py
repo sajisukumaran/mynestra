@@ -13,6 +13,18 @@ from django.db import models
 from django.utils import timezone
 from django_tenants.models import DomainMixin, TenantMixin
 
+# Curated timezone list for Setup → Localization (validated against on save; not free text).
+CURATED_TIMEZONES = [
+    "UTC",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "America/Toronto", "America/Sao_Paulo",
+    "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Moscow",
+    "Africa/Johannesburg",
+    "Asia/Dubai", "Asia/Kolkata", "Asia/Singapore", "Asia/Hong_Kong", "Asia/Shanghai",
+    "Asia/Tokyo",
+    "Australia/Sydney", "Pacific/Auckland",
+]
+
 
 class Tenant(TenantMixin):
     class Palette(models.TextChoices):
@@ -22,12 +34,34 @@ class Tenant(TenantMixin):
         VIOLET = "violet", "Violet"
         GRAPHITE = "graphite", "Graphite"
 
+    class DateFormat(models.TextChoices):
+        ISO = "iso", "2026-07-09"
+        DMY = "dmy", "09-07-2026"
+        MDY = "mdy", "07/09/2026"
+        LONG = "long", "09 Jul 2026"
+
+    class NumberFormat(models.TextChoices):
+        PLAIN = "plain", "1234.56"
+        THOUSANDS = "thousands", "1,234.56"
+        INDIAN = "indian", "1,23,456.78"
+
     # `schema_name` (max 63, unique) comes from TenantMixin and doubles as the slug.
     name = models.CharField(max_length=100)
     # Household accent, chosen by an Owner in Setup → Appearance (P3). Default Teal (DESIGN §7.2).
     palette = models.CharField(max_length=16, choices=Palette.choices, default=Palette.TEAL)
     logo = models.ImageField(upload_to="tenant_logos/", null=True, blank=True)
     created_on = models.DateField(auto_now_add=True)
+
+    # Localization (Setup → Localization, Owner-set). `currency` is the finance base/functional
+    # currency (a code from the tenant-schema Currency catalog); the rest drive money/date display.
+    currency = models.CharField(max_length=3, default="USD")
+    timezone = models.CharField(max_length=64, default="UTC")
+    date_format = models.CharField(
+        max_length=8, choices=DateFormat.choices, default=DateFormat.ISO
+    )
+    number_format = models.CharField(
+        max_length=12, choices=NumberFormat.choices, default=NumberFormat.THOUSANDS
+    )
 
     auto_create_schema = True
     auto_drop_schema = False

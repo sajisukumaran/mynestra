@@ -35,6 +35,8 @@ urlpatterns = [
     path("invitations/<int:pk>/resend/", views.invitation_resend, name="invitation-resend"),
     # Appearance
     path("appearance/", views.appearance, name="appearance"),
+    # Localization (default currency + timezone + formats)
+    path("localization/", views.localization, name="localization"),
     # Household profile
     path("profile/", views.profile, name="profile"),
     # Recently deleted
