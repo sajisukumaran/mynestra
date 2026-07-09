@@ -16,7 +16,7 @@ from django.utils import timezone
 from apps.accounts.decorators import owner_required
 from apps.contacts.models import Person
 from apps.families.models import Family
-from apps.organizations.models import Organization
+from apps.organizations.models import Branch, Organization
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.forms import (
     CategoryForm,
@@ -366,11 +366,17 @@ def recently_deleted(request):
     deleted_people = Person.all_objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
     deleted_families = Family.all_objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
     deleted_orgs = Organization.all_objects.filter(deleted_at__isnull=False).order_by("-deleted_at")
+    deleted_branches = (
+        Branch.all_objects.filter(deleted_at__isnull=False)
+        .select_related("organization")
+        .order_by("-deleted_at")
+    )
     ctx = setup_context(
         request, "recently-deleted",
         deleted_people=deleted_people,
         deleted_families=deleted_families,
         deleted_orgs=deleted_orgs,
+        deleted_branches=deleted_branches,
         allow_hard_delete=settings.ALLOW_HARD_DELETE,
     )
     return render(request, "setup/recently_deleted.html", ctx)
@@ -415,4 +421,18 @@ def org_restore(request, pk):
 def org_hard_delete(request, pk):
     if request.method == "POST" and settings.ALLOW_HARD_DELETE:
         get_object_or_404(Organization.all_objects, pk=pk, deleted_at__isnull=False).hard_delete()
+    return redirect(setup_url(request, "recently-deleted/"))
+
+
+@owner_required
+def branch_restore(request, pk):
+    if request.method == "POST":
+        get_object_or_404(Branch.all_objects, pk=pk, deleted_at__isnull=False).restore()
+    return redirect(setup_url(request, "recently-deleted/"))
+
+
+@owner_required
+def branch_hard_delete(request, pk):
+    if request.method == "POST" and settings.ALLOW_HARD_DELETE:
+        get_object_or_404(Branch.all_objects, pk=pk, deleted_at__isnull=False).hard_delete()
     return redirect(setup_url(request, "recently-deleted/"))

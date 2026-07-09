@@ -2,8 +2,10 @@
 appearance persistence, and tenant isolation."""
 
 import pytest
+from django.test import override_settings
 from django_tenants.utils import schema_context
 
+from apps.organizations.models import Branch, Organization
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.models import Category
 from apps.tenants.models import Invitation, Membership, Role
@@ -238,3 +240,45 @@ def test_new_tenant_seeds_are_present_and_locked(make_tenant, make_user, client)
         assert Category.objects.filter(is_system=True).count() >= 18
         assert RelationshipType.objects.filter(is_system=True).exists()
         assert PersonOrgRelationshipType.objects.filter(is_system=True).exists()
+
+
+# --- Recently deleted: branches (restore + hard-delete gating) -------------------------------
+
+def _deleted_branch(tenant):
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.create(name="HDFC Bank")
+        branch = Branch.objects.create(organization=org, name="MG Road")
+        branch.delete()  # soft
+        return branch.pk
+
+
+def test_recently_deleted_lists_and_restores_branch(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    bid = _deleted_branch(tenant)
+    client.force_login(owner)
+    rd = _u(tenant, "recently-deleted/")
+
+    assert "MG Road" in client.get(rd).content.decode()
+    assert client.post(rd + f"branches/{bid}/restore/").status_code == 302
+    with schema_context(tenant.schema_name):
+        assert Branch.objects.filter(pk=bid).exists()  # back among live rows
+
+
+@override_settings(ALLOW_HARD_DELETE=False)
+def test_branch_hard_delete_blocked_when_disallowed(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    bid = _deleted_branch(tenant)
+    client.force_login(owner)
+    client.post(_u(tenant, f"recently-deleted/branches/{bid}/delete/"))
+    with schema_context(tenant.schema_name):
+        assert Branch.all_objects.filter(pk=bid).exists()  # still soft-deleted, not purged
+
+
+@override_settings(ALLOW_HARD_DELETE=True)
+def test_branch_hard_delete_when_allowed(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    bid = _deleted_branch(tenant)
+    client.force_login(owner)
+    client.post(_u(tenant, f"recently-deleted/branches/{bid}/delete/"))
+    with schema_context(tenant.schema_name):
+        assert not Branch.all_objects.filter(pk=bid).exists()  # purged for good
