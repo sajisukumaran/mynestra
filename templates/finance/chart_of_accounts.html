@@ -1,0 +1,45 @@
+{% extends "finance/base.html" %}
+{% block finance_heading %}Chart of accounts{% endblock %}
+
+{% block finance %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Finance</span></c-breadcrumb>
+
+<c-page-header title="Chart of accounts" subtitle="Balances in {{ base.code }} — {{ base.name }}. Computed from the general ledger." />
+
+<c-card flush>
+  {% if rows %}
+  <c-table>
+    <thead><tr>
+      <c-th>Code</c-th>
+      <c-th>Account</c-th>
+      <c-th>Type</c-th>
+      <th class="col-num">Balance</th>
+    </tr></thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="muted tnum">{{ row.account.code }}</td>
+        <td style="padding-left: calc(15px + {{ row.indent }}px);">
+          {% if row.is_header %}<span class="strong">{{ row.account.name }}</span>{% else %}{{ row.account.name }}{% endif %}
+        </td>
+        <td><c-badge>{{ row.account.get_type_display }}</c-badge></td>
+        <td class="col-num">
+          {% if row.is_header %}
+          <span class="strong"><c-money :amount="row.balance" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></span>
+          {% else %}
+          <c-money :amount="row.balance" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" />
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+  {% else %}
+  <c-empty-state icon="coins" title="No accounts yet" text="The chart of accounts hasn't been set up for this household." />
+  {% endif %}
+</c-card>
+
+{% if not has_postings %}
+<c-hint icon="info">No journal entries have been posted yet, so every balance is zero. Finance is wired for other modules to post to — direct entry comes later.</c-hint>
+{% endif %}
+{% endblock %}

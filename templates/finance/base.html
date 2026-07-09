@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}Finance app shell: topbar + Finance per-app sidebar. The ledger & fiscal calendar are
+invisible (no screens); only the read-only Chart of Accounts + balances surfaces here.{% endcomment %}
+{% block title %}{% block finance_heading %}Finance{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Finance" subtitle="{{ ui_tenant_name }}" glyph="coins">
+      <c-sidebar-item label="Chart of accounts" icon="coins" href="{{ ui_tenant_url }}finance/" {% if active == 'accounts' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block finance %}{% endblock %}
+</c-shell>
+{% endblock %}
