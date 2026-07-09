@@ -180,100 +180,130 @@
           </c-modal>
         </div>
 
-        {% for b in branches %}
-        <c-card title="{{ b.name }}" icon="building-2">
-          <c-slot name="actions">
-            {% if b.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}
-            {% if b.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
-            <c-modal title="Add channel">
-              <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="phone" size="sm" /> Channel</c-button></c-slot>
-              <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/new/">{% csrf_token %}
-                <div class="stack-16">{% include "organizations/partials/channel_fields.html" %}
-                  <div class="row"><c-button type="submit" variant="primary">Save channel</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
-                </div>
-              </form>
-            </c-modal>
-            <c-modal title="Add address">
-              <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="map-pin" size="sm" /> Address</c-button></c-slot>
-              <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/new/">{% csrf_token %}
-                <div class="stack-16">{% include "organizations/partials/address_fields.html" %}
-                  <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
-                </div>
-              </form>
-            </c-modal>
-            <c-modal title="Edit branch" class="modal-wide">
-              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit branch"><c-icon name="pencil" size="sm" /></c-button></c-slot>
-              <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/edit/">{% csrf_token %}
-                <div class="stack-16">
-                  <c-field label="Branch name" required><c-input name="name" value="{{ b.name }}" required /></c-field>
-                  <div class="grid-halves">
-                    <c-field label="Branch number"><c-input name="number" value="{{ b.number }}" placeholder="Branch code / IFSC / number" /></c-field>
-                    <c-field label="Phone"><c-input name="phone" value="{{ b.primary_phone.value|default:'' }}" placeholder="Primary phone" /></c-field>
-                  </div>
-                  <label class="row"><input type="checkbox" name="is_primary" {% if b.is_primary %}checked{% endif %}> <span class="muted">Primary branch</span></label>
-                  <div class="grid-halves">
-                    <c-field label="Opened"><c-partial-date prefix="opened" day="{{ b.opened_day|default:'' }}" month="{{ b.opened_month|default:'' }}" year="{{ b.opened_year|default:'' }}" /></c-field>
-                    <c-field label="Closed"><c-partial-date prefix="closed" day="{{ b.closed_day|default:'' }}" month="{{ b.closed_month|default:'' }}" year="{{ b.closed_year|default:'' }}" /></c-field>
-                  </div>
-                  <div class="eyebrow">Address</div>
-                  {% include "organizations/partials/branch_address_fields.html" with address=b.primary_address %}
-                  <div class="between">
-                    <c-button type="submit" variant="primary">Save</c-button>
-                    <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
-                  </div>
-                </div>
-              </form>
-            </c-modal>
-          </c-slot>
-
-          {% if b.number or b.opened.is_set or b.is_closed %}
-          <div class="row wrap ph-meta">
-            {% if b.number %}<span class="row"><c-icon name="tag" size="sm" class="subtle" /><span class="tnum">{{ b.number }}</span></span>{% endif %}
-            {% if b.opened.is_set %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />Opened {{ b.opened.display }}</span>{% endif %}
-            {% if b.is_closed %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />Closed {{ b.closed.display }}</span>{% endif %}
-          </div>
-          {% endif %}
-          {% for ch in b.channels.all %}
-          <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
-            <c-slot name="tail">
-              {% if ch.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}
-              <c-modal title="Edit channel">
-                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
-                <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/{{ ch.pk }}/edit/">{% csrf_token %}
-                  <div class="stack-16">{% include "organizations/partials/channel_fields.html" with channel=ch %}
-                    <div class="between">
-                      <c-button type="submit" variant="primary">Save</c-button>
-                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/{{ ch.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+        {% if branches %}
+        <c-card flush>
+          <c-table>
+            <thead><tr>
+              <c-th>Branch</c-th>
+              <c-th>Phone</c-th>
+              <c-th>Location</c-th>
+              <c-th>Opened</c-th>
+              <th></th>
+            </tr></thead>
+            {% for b in branches %}
+            <tbody x-data="{ exp: false }">
+              <tr>
+                <td>
+                  <div class="person-cell">
+                    <button type="button" class="row-exp" :class="{ open: exp }" @click="exp = !exp" :aria-expanded="exp" aria-label="Toggle branch contact details"><c-icon name="chevron-right" size="sm" /></button>
+                    <div>
+                      <div class="pc-name branch-name">{{ b.name }}{% if b.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}{% if b.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}</div>
+                      {% if b.number %}<div class="pc-sub tnum">{{ b.number }}</div>{% endif %}
                     </div>
                   </div>
-                </form>
-              </c-modal>
-            </c-slot>
-          </c-channel-row>
-          {% endfor %}
-          {% for a in b.addresses.all %}
-          <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
-            <c-slot name="tail">
-              {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
-              <c-modal title="Edit address">
-                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
-                <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
-                  <div class="stack-16">{% include "organizations/partials/address_fields.html" with address=a %}
-                    <div class="between">
-                      <c-button type="submit" variant="primary">Save</c-button>
-                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/{{ a.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
-                    </div>
+                </td>
+                <td class="tnum">{{ b.primary_phone.value|default:'—' }}{% with n=b.channels.all|length %}{% if n > 1 %} <span class="muted">+{{ n|add:'-1' }}</span>{% endif %}{% endwith %}</td>
+                <td class="muted">{{ b.primary_address.one_line|default:'—' }}{% with n=b.addresses.all|length %}{% if n > 1 %} <span class="muted">+{{ n|add:'-1' }}</span>{% endif %}{% endwith %}</td>
+                <td class="muted tnum">{{ b.opened.display|default:'—' }}{% if b.is_closed %}<div class="pc-sub">Closed {{ b.closed.display }}</div>{% endif %}</td>
+                <td>
+                  <div class="cell-actions">
+                    <c-modal title="Edit branch" class="modal-wide">
+                      <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit branch"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                      <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/edit/">{% csrf_token %}
+                        <div class="stack-16">
+                          <c-field label="Branch name" required><c-input name="name" value="{{ b.name }}" required /></c-field>
+                          <div class="grid-halves">
+                            <c-field label="Branch number"><c-input name="number" value="{{ b.number }}" placeholder="Branch code / IFSC / number" /></c-field>
+                            <c-field label="Phone"><c-input name="phone" value="{{ b.primary_phone.value|default:'' }}" placeholder="Primary phone" /></c-field>
+                          </div>
+                          <label class="row"><input type="checkbox" name="is_primary" {% if b.is_primary %}checked{% endif %}> <span class="muted">Primary branch</span></label>
+                          <div class="grid-halves">
+                            <c-field label="Opened"><c-partial-date prefix="opened" day="{{ b.opened_day|default:'' }}" month="{{ b.opened_month|default:'' }}" year="{{ b.opened_year|default:'' }}" /></c-field>
+                            <c-field label="Closed"><c-partial-date prefix="closed" day="{{ b.closed_day|default:'' }}" month="{{ b.closed_month|default:'' }}" year="{{ b.closed_year|default:'' }}" /></c-field>
+                          </div>
+                          <div class="eyebrow">Address</div>
+                          {% include "organizations/partials/branch_address_fields.html" with address=b.primary_address %}
+                          <div class="between">
+                            <c-button type="submit" variant="primary">Save</c-button>
+                            <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                          </div>
+                        </div>
+                      </form>
+                    </c-modal>
                   </div>
-                </form>
-              </c-modal>
-            </c-slot>
-          </c-channel-row>
-          {% endfor %}
-          {% if not b.channels.all and not b.addresses.all %}<span class="subtle">No contact details for this branch yet.</span>{% endif %}
+                </td>
+              </tr>
+              <tr x-show="exp" x-cloak>
+                <td colspan="5" class="br-detail">
+                  <div class="stack-16">
+                    <div class="between">
+                      <span class="eyebrow">Contact details</span>
+                      <span class="row">
+                        <c-modal title="Add channel">
+                          <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="phone" size="sm" /> Channel</c-button></c-slot>
+                          <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/new/">{% csrf_token %}
+                            <div class="stack-16">{% include "organizations/partials/channel_fields.html" %}
+                              <div class="row"><c-button type="submit" variant="primary">Save channel</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
+                            </div>
+                          </form>
+                        </c-modal>
+                        <c-modal title="Add address">
+                          <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="map-pin" size="sm" /> Address</c-button></c-slot>
+                          <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/new/">{% csrf_token %}
+                            <div class="stack-16">{% include "organizations/partials/address_fields.html" %}
+                              <div class="row"><c-button type="submit" variant="primary">Save address</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
+                            </div>
+                          </form>
+                        </c-modal>
+                      </span>
+                    </div>
+                    {% for ch in b.channels.all %}
+                    <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
+                      <c-slot name="tail">
+                        {% if ch.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}
+                        <c-modal title="Edit channel">
+                          <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                          <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/{{ ch.pk }}/edit/">{% csrf_token %}
+                            <div class="stack-16">{% include "organizations/partials/channel_fields.html" with channel=ch %}
+                              <div class="between">
+                                <c-button type="submit" variant="primary">Save</c-button>
+                                <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/{{ ch.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                              </div>
+                            </div>
+                          </form>
+                        </c-modal>
+                      </c-slot>
+                    </c-channel-row>
+                    {% endfor %}
+                    {% for a in b.addresses.all %}
+                    <c-channel-row icon="house" value="{{ a.one_line|default:'—' }}" label="{{ a.locality }}">
+                      <c-slot name="tail">
+                        {% if a.is_primary %}<c-badge variant="accent">{{ a.label|default:'Primary' }}</c-badge>{% elif a.label %}<c-badge>{{ a.label }}</c-badge>{% endif %}
+                        <c-modal title="Edit address">
+                          <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                          <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/{{ a.pk }}/edit/">{% csrf_token %}
+                            <div class="stack-16">{% include "organizations/partials/address_fields.html" with address=a %}
+                              <div class="between">
+                                <c-button type="submit" variant="primary">Save</c-button>
+                                <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/addresses/{{ a.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
+                              </div>
+                            </div>
+                          </form>
+                        </c-modal>
+                      </c-slot>
+                    </c-channel-row>
+                    {% endfor %}
+                    {% if not b.channels.all and not b.addresses.all %}<span class="subtle">No contact details for this branch yet — add a channel or address.</span>{% endif %}
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+            {% endfor %}
+          </c-table>
         </c-card>
-        {% empty %}
+        {% else %}
         <c-card><c-empty-state icon="building-2" title="No branches yet" text="Add branches to record each location's own contact details." /></c-card>
-        {% endfor %}
+        {% endif %}
       </div>
     </div>
 

@@ -424,6 +424,14 @@ table.tbl { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
 .person-head .ph-meta { display:flex; flex-wrap:wrap; gap:18px; margin-top:14px; color:var(--text-muted); font-size:var(--fs-sm); }
 .cell-actions { display:flex; gap:2px; justify-content:flex-end; opacity:0; }
 .tbl tbody tr:hover .cell-actions { opacity:1; }
+/* Expandable table rows (e.g. branches): a chevron toggle + a subtle detail row */
+.row-exp { display:inline-grid; place-items:center; width:22px; height:22px; flex:none;
+  border-radius:6px; color:var(--text-subtle); }
+.row-exp:hover { background:var(--surface-3); color:var(--text-strong); }
+.row-exp .ic { transition:transform .15s; }
+.row-exp.open .ic { transform:rotate(90deg); }
+.branch-name { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.tbl tbody td.br-detail { background:var(--surface-2); padding:14px 16px 18px 46px; }
 .pager { display:flex; align-items:center; gap:5px; }
 .pager .pg { min-width:34px; height:34px; padding:0 8px; border-radius:8px; display:inline-flex;
   align-items:center; justify-content:center; font-weight:600; font-size:var(--fs-sm); color:var(--text-muted); border:1px solid transparent; }
