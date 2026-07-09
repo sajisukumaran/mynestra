@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
 from django.db import IntegrityError, connection, transaction
+from django.db.models import Sum
 from django.utils import timezone
 
 from apps.finance.exceptions import (
@@ -31,8 +32,10 @@ from apps.finance.exceptions import (
     UnknownAccount,
 )
 from apps.finance.models import (
+    DEBIT_NORMAL_TYPES,
     ZERO,
     Account,
+    AccountType,
     Currency,
     ExchangeRate,
     FiscalYear,
@@ -351,3 +354,126 @@ def void_entry(entry: JournalEntry, *, user=None) -> JournalEntry:
     entry.status = JournalEntry.Status.VOID
     entry.save(update_fields=["status", "updated_at"])
     return entry
+
+
+# --- Balances (computed from posted lines — the single source of truth) ---------------------
+
+@dataclass(frozen=True)
+class TrialBalanceRow:
+    account: Account
+    debit_total: Decimal
+    credit_total: Decimal
+    balance: Decimal  # natural balance (signed by the account's normal side)
+
+
+def _posted_lines(as_of=None):
+    qs = JournalLine.objects.filter(entry__status=JournalEntry.Status.POSTED)
+    if as_of is not None:
+        qs = qs.filter(entry__date__lte=as_of)
+    return qs
+
+
+def _raw(qs) -> Decimal:
+    """Σ base_debit − Σ base_credit over a line queryset."""
+    agg = qs.aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+    return (agg["d"] or ZERO) - (agg["c"] or ZERO)
+
+
+def _descendant_ids(account: Account) -> list[int]:
+    """Account subtree (self + all descendants) — small tree, walked in Python."""
+    ids = [account.pk]
+    stack = [account.pk]
+    while stack:
+        parent_id = stack.pop()
+        for child_id in Account.objects.filter(parent_id=parent_id).values_list("pk", flat=True):
+            ids.append(child_id)
+            stack.append(child_id)
+    return ids
+
+
+def account_raw_balance(account, *, as_of=None) -> Decimal:
+    """Signed (debit − credit) base balance of the account's subtree (rolls up header accounts)."""
+    account = account if isinstance(account, Account) else resolve_account(account)
+    return _raw(_posted_lines(as_of).filter(account_id__in=_descendant_ids(account)))
+
+
+def account_balance(account, *, as_of=None) -> Decimal:
+    """Natural balance (positive in the account's normal direction), with header rollups."""
+    account = account if isinstance(account, Account) else resolve_account(account)
+    return account_raw_balance(account, as_of=as_of) * account.normal_sign
+
+
+def account_native_balance(account, *, as_of=None) -> Decimal | None:
+    """A currency-tagged account's balance in its OWN currency (from txn amounts); else None."""
+    account = account if isinstance(account, Account) else resolve_account(account)
+    if account.currency_id is None:
+        return None
+    qs = _posted_lines(as_of).filter(account=account)
+    agg = qs.aggregate(d=Sum("debit"), c=Sum("credit"))
+    raw = (agg["d"] or ZERO) - (agg["c"] or ZERO)
+    return raw * account.normal_sign
+
+
+def trial_balance(*, as_of=None) -> list[TrialBalanceRow]:
+    """One row per account with posted activity; Σ debit_total == Σ credit_total (base)."""
+    grouped = (
+        _posted_lines(as_of)
+        .values("account")
+        .annotate(d=Sum("base_debit"), c=Sum("base_credit"))
+    )
+    totals = {row["account"]: (row["d"] or ZERO, row["c"] or ZERO) for row in grouped}
+    rows = []
+    for account in Account.objects.filter(pk__in=totals).order_by("code"):
+        debit_total, credit_total = totals[account.pk]
+        balance = (debit_total - credit_total) * account.normal_sign
+        rows.append(TrialBalanceRow(account, debit_total, credit_total, balance))
+    return rows
+
+
+# --- Derived close: equity/net worth computed by date, never physically closed --------------
+
+def _type_total(account_type: str, *, start=None, end=None, as_of=None) -> Decimal:
+    """Natural (positive) base total for all accounts of a type over a date window."""
+    qs = _posted_lines(as_of if end is None else None).filter(account__type=account_type)
+    if start is not None:
+        qs = qs.filter(entry__date__gte=start)
+    if end is not None:
+        qs = qs.filter(entry__date__lte=end)
+    sign = 1 if account_type in DEBIT_NORMAL_TYPES else -1
+    return _raw(qs) * sign
+
+
+def net_income(*, start=None, end=None) -> Decimal:
+    """Revenue − expense (base) over the date window."""
+    revenue = _type_total(AccountType.REVENUE, start=start, end=end)
+    expense = _type_total(AccountType.EXPENSE, start=start, end=end)
+    return revenue - expense
+
+
+def current_year_earnings(*, as_of=None) -> Decimal:
+    """Net income for the as-of fiscal year, to date."""
+    as_of = as_of or datetime.date.today()
+    return net_income(start=datetime.date(as_of.year, 1, 1), end=as_of)
+
+
+def retained_earnings(*, as_of=None) -> Decimal:
+    """Cumulative net income of all prior fiscal years (base)."""
+    as_of = as_of or datetime.date.today()
+    return net_income(end=datetime.date(as_of.year - 1, 12, 31))
+
+
+def net_worth(*, as_of=None) -> Decimal:
+    """Assets − liabilities (base) — the household's net worth."""
+    return _type_total(AccountType.ASSET, as_of=as_of) - _type_total(
+        AccountType.LIABILITY, as_of=as_of
+    )
+
+
+def party_balance(*, person=None, organization=None, as_of=None) -> Decimal:
+    """Signed base total (debit − credit) of ledger lines with the given counterparty."""
+    qs = _posted_lines(as_of)
+    if person is not None:
+        qs = qs.filter(person=person)
+    if organization is not None:
+        qs = qs.filter(organization=organization)
+    return _raw(qs)
