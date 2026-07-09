@@ -3,23 +3,28 @@
 Compact partial date: one MM/DD/YYYY field (XX / XXXX for unknown parts) with a small
 pop-up editor of the three parts. Any part may be blank. The three real inputs
 ({prefix}_day/_month/_year) live inside the popover and submit whether it is open or not
-(display:none inputs still POST), so views need no change. Pass invalid="1" to open the
-editor on load (e.g. after a validation error). Display + validation engine live in
-apps/core/partialdate.py.
+(display:none inputs still POST). Fields render + submit natively (server `selected` /
+`value=`); Alpine only READS them to compute the compact display — no x-model, so the
+saved value always shows even before/without JS. Pass invalid="1" to open the editor and
+ring the field after a validation error. Engine + display in apps/core/partialdate.py.
 {% endcomment %}
 <div class="pdate{% if class %} {{ class }}{% endif %}"
      x-data="{
        open: {% if invalid %}true{% else %}false{% endif %},
-       month: '{{ month }}', day: '{{ day }}', year: '{{ year }}',
-       pad(v, n) { return v ? String(v).padStart(n, '0') : 'X'.repeat(n); }
+       disp: '',
+       sync() {
+         const p = (v, n) => v ? String(v).padStart(n, '0') : 'X'.repeat(n);
+         this.disp = p(this.$refs.mo.value, 2) + '/' + p(this.$refs.da.value, 2) + '/' + p(this.$refs.yr.value, 4);
+       },
+       clear() { this.$refs.mo.value = ''; this.$refs.da.value = ''; this.$refs.yr.value = ''; this.sync(); }
      }"
-     @keydown.escape.window="open = false">
+     x-init="sync()" @keydown.escape.window="open = false">
   <button type="button" class="control pdate-trigger{% if invalid %} is-err{% endif %}"
           @click="open = !open" :aria-expanded="open" aria-haspopup="dialog"
           aria-label="Edit date (month / day / year)">
     <c-icon name="calendar-days" size="sm" class="subtle" />
     <span class="tnum pdate-value"
-          x-text="pad(month, 2) + '/' + pad(day, 2) + '/' + pad(year, 4)">{{ month|default:'XX' }}/{{ day|default:'XX' }}/{{ year|default:'XXXX' }}</span>
+          x-text="disp">{{ month|default:'XX' }}/{{ day|default:'XX' }}/{{ year|default:'XXXX' }}</span>
     <c-icon name="pencil" size="sm" class="subtle" />
   </button>
   <div class="pdate-pop" x-show="open" x-cloak x-transition.opacity.duration.120ms
@@ -28,7 +33,7 @@ apps/core/partialdate.py.
       <label>Month
         <div class="control is-select">
           {% with m=month|stringformat:'s' %}
-          <select name="{{ prefix }}_month" x-model="month" aria-label="Month">
+          <select name="{{ prefix }}_month" x-ref="mo" @change="sync()" aria-label="Month">
             <option value="">MM</option>
             <option value="1"{% if m == '1' %} selected{% endif %}>Jan</option>
             <option value="2"{% if m == '2' %} selected{% endif %}>Feb</option>
@@ -48,16 +53,16 @@ apps/core/partialdate.py.
         </div>
       </label>
       <label>Day
-        <div class="control"><input name="{{ prefix }}_day" x-model="day" inputmode="numeric"
-             maxlength="2" placeholder="DD" aria-label="Day"></div>
+        <div class="control"><input name="{{ prefix }}_day" x-ref="da" value="{{ day }}" @input="sync()"
+             inputmode="numeric" maxlength="2" placeholder="DD" aria-label="Day"></div>
       </label>
       <label>Year
-        <div class="control"><input name="{{ prefix }}_year" x-model="year" inputmode="numeric"
-             maxlength="4" placeholder="YYYY" aria-label="Year"></div>
+        <div class="control"><input name="{{ prefix }}_year" x-ref="yr" value="{{ year }}" @input="sync()"
+             inputmode="numeric" maxlength="4" placeholder="YYYY" aria-label="Year"></div>
       </label>
     </div>
     <div class="pdate-foot">
-      <button type="button" class="pdate-clear" @click="month = ''; day = ''; year = ''">Clear</button>
+      <button type="button" class="pdate-clear" @click="clear()">Clear</button>
       <c-button size="sm" @click="open = false"><c-icon name="check" size="sm" /> Done</c-button>
     </div>
   </div>
