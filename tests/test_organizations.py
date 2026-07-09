@@ -103,6 +103,34 @@ def test_org_hard_delete_when_allowed(make_tenant, make_user, client):
         assert not Organization.all_objects.filter(pk=oid).exists()
 
 
+def test_org_lifecycle_dates_and_closed_badge(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+
+    client.post(_o(tenant, "new/"), {
+        "name": "Old Mill Co",
+        "established_year": "1952", "established_month": "4", "established_day": "",
+    })
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.get(name="Old Mill Co")
+        assert (org.established_year, org.established_month) == (1952, 4)
+        assert not org.is_closed
+        oid = org.pk
+
+    client.post(_o(tenant, f"{oid}/edit/"), {
+        "name": "Old Mill Co",
+        "established_year": "1952", "established_month": "4", "established_day": "",
+        "closed_year": "2015", "closed_month": "", "closed_day": "",
+    })
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.get(pk=oid)
+        assert org.is_closed and org.closed_year == 2015
+
+    detail = client.get(_o(tenant, f"{oid}/")).content.decode()
+    assert "XX-Apr-1952" in detail and "XX-XX-2015" in detail   # established + closed displays
+    assert "badge-warning" in client.get(_o(tenant, "all/")).content.decode()  # Closed badge
+
+
 def test_detail_sub_edits_use_popups_not_drawers(make_tenant, make_user, client):
     """Detail sub-edits (address / branch / etc.) are centered popups (overlay center), not side
     drawers (overlay right) — applied app-wide across Organization, Person and Family details."""

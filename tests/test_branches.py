@@ -76,3 +76,45 @@ def test_branch_channel_and_address_edit_delete(make_tenant, make_user, client):
     with schema_context(tenant.schema_name):
         assert ContactChannel.objects.filter(pk=chid).count() == 0
         assert Address.objects.filter(pk=aid).count() == 0
+
+
+def test_branch_popup_number_dates_and_folded_address(make_tenant, make_user, client):
+    """The branch popup carries a number, Opened/Closed PartialDates, and a folded primary
+    address (created on add, updated in place on edit)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    with schema_context(tenant.schema_name):
+        oid = Organization.objects.create(name="HDFC Bank").pk
+    base = f"/t/{tenant.schema_name}/organizations/{oid}/"
+
+    client.post(base + "branches/new/", {
+        "name": "MG Road", "number": "HDFC0001234", "is_primary": "on",
+        "opened_year": "1998", "opened_month": "6", "opened_day": "",
+        "line1": "12 MG Road", "city": "Bengaluru", "label": "Branch office",
+    })
+    with schema_context(tenant.schema_name):
+        b = Branch.objects.get(name="MG Road")
+        assert b.number == "HDFC0001234"
+        assert (b.opened_year, b.opened_month, b.opened_day) == (1998, 6, None)
+        assert not b.is_closed
+        addr = b.addresses.get()
+        assert addr.is_primary and addr.city == "Bengaluru" and addr.line1 == "12 MG Road"
+        bid = b.pk
+
+    # Edit: set a closed date and update the folded primary address in place (no duplicate row).
+    client.post(f"{base}branches/{bid}/edit/", {
+        "name": "MG Road", "number": "HDFC0001234", "is_primary": "on",
+        "opened_year": "1998", "opened_month": "6", "opened_day": "",
+        "closed_year": "2020", "closed_month": "3", "closed_day": "",
+        "line1": "12 MG Road", "city": "Mysuru", "label": "Branch office",
+    })
+    with schema_context(tenant.schema_name):
+        b = Branch.objects.get(pk=bid)
+        assert b.is_closed and b.closed_year == 2020
+        assert b.addresses.count() == 1
+        assert b.addresses.get().city == "Mysuru"
+
+    # The branch card surfaces the closed date + a Closed badge.
+    body = client.get(base).content.decode()
+    assert "XX-Mar-2020" in body        # closed date display on the branch card
+    assert "badge-warning" in body      # the Closed badge (only warning badge on this page)

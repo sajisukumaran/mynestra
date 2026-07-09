@@ -29,6 +29,8 @@
         <c-field label="Name" required error="{{ form.name.errors.0 }}"><div class="control">{{ form.name }}</div></c-field>
         <c-field label="Display name" help="Shown across the app instead of the legal name." error="{{ form.display_name.errors.0 }}"><div class="control">{{ form.display_name }}</div></c-field>
         <c-field label="Website" class="span-all" error="{{ form.website.errors.0 }}"><div class="control">{{ form.website }}</div></c-field>
+        <c-field label="Established" help="When the organization was founded."><c-partial-date prefix="established" day="{{ org.established_day|default:'' }}" month="{{ org.established_month|default:'' }}" year="{{ org.established_year|default:'' }}" /></c-field>
+        <c-field label="Closed" help="Leave blank unless it has closed."><c-partial-date prefix="closed" day="{{ org.closed_day|default:'' }}" month="{{ org.closed_month|default:'' }}" year="{{ org.closed_year|default:'' }}" /></c-field>
       </div>
     </c-card>
 

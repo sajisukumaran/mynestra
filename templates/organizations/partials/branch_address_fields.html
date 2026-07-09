@@ -1,0 +1,11 @@
+{% comment %}The branch's primary address, folded into the branch popup. Text fields only — no
+is_primary checkbox (the folded address is always the branch's primary, and its `name` would clash
+with the branch's own is_primary). Pass `address` (the branch's primary address) to prefill on edit.
+{% endcomment %}
+<c-field label="Address label"><c-input name="label" value="{{ address.label|default:'' }}" placeholder="e.g. Head office" /></c-field>
+<c-field label="Address line 1"><c-input name="line1" value="{{ address.line1|default:'' }}" /></c-field>
+<c-field label="Address line 2"><c-input name="line2" value="{{ address.line2|default:'' }}" /></c-field>
+<c-field label="City"><c-input name="city" value="{{ address.city|default:'' }}" /></c-field>
+<c-field label="Region / state"><c-input name="region" value="{{ address.region|default:'' }}" /></c-field>
+<c-field label="Postal code"><c-input name="postal_code" value="{{ address.postal_code|default:'' }}" /></c-field>
+<c-field label="Country"><c-input name="country" value="{{ address.country|default:'' }}" /></c-field>

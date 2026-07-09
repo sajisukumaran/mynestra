@@ -18,6 +18,7 @@
         <div class="row wrap">
           <h1 class="ph-name">{{ org.display }}</h1>
           {% for c in org.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip>{% endfor %}
+          {% if org.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
         </div>
         {% if org.display_name and org.display_name != org.name %}<div class="muted">{{ org.name }}</div>{% endif %}
         <div class="ph-meta">
@@ -55,6 +56,8 @@
           <c-card title="Details">
             <c-key-value>
               {% if org.website %}<c-kv-row key="Website" icon="globe"><a href="{{ org.website }}" target="_blank" rel="noopener">{{ org.website }}</a></c-kv-row>{% endif %}
+              {% if org.established.is_set %}<c-kv-row key="Established" icon="calendar-days"><span class="tnum">{{ org.established.display }}</span></c-kv-row>{% endif %}
+              {% if org.is_closed %}<c-kv-row key="Closed" icon="calendar-days"><span class="tnum">{{ org.closed.display }}</span></c-kv-row>{% endif %}
               <c-kv-row key="Branches" icon="building-2">{{ branch_count }}</c-kv-row>
               <c-kv-row key="Key people" icon="users">{{ key_people|length }}</c-kv-row>
             </c-key-value>
@@ -160,7 +163,14 @@
             <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/new/">{% csrf_token %}
               <div class="stack-16">
                 <c-field label="Branch name" required><c-input name="name" required /></c-field>
+                <c-field label="Branch number"><c-input name="number" placeholder="Branch code / IFSC / number" /></c-field>
                 <label class="row"><input type="checkbox" name="is_primary"> <span class="muted">Primary branch</span></label>
+                <div class="grid-halves">
+                  <c-field label="Opened"><c-partial-date prefix="opened" /></c-field>
+                  <c-field label="Closed"><c-partial-date prefix="closed" /></c-field>
+                </div>
+                <div class="eyebrow">Address</div>
+                {% include "organizations/partials/branch_address_fields.html" %}
                 <div class="row"><c-button type="submit" variant="primary">Save branch</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></div>
               </div>
             </form>
@@ -171,6 +181,7 @@
         <c-card title="{{ b.name }}" icon="building-2">
           <c-slot name="actions">
             {% if b.is_primary %}<c-badge variant="accent">Primary</c-badge>{% endif %}
+            {% if b.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
             <c-modal title="Add channel">
               <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="phone" size="sm" /> Channel</c-button></c-slot>
               <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/channels/new/">{% csrf_token %}
@@ -192,7 +203,14 @@
               <form method="post" action="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/edit/">{% csrf_token %}
                 <div class="stack-16">
                   <c-field label="Branch name" required><c-input name="name" value="{{ b.name }}" required /></c-field>
+                  <c-field label="Branch number"><c-input name="number" value="{{ b.number }}" placeholder="Branch code / IFSC / number" /></c-field>
                   <label class="row"><input type="checkbox" name="is_primary" {% if b.is_primary %}checked{% endif %}> <span class="muted">Primary branch</span></label>
+                  <div class="grid-halves">
+                    <c-field label="Opened"><c-partial-date prefix="opened" day="{{ b.opened_day|default:'' }}" month="{{ b.opened_month|default:'' }}" year="{{ b.opened_year|default:'' }}" /></c-field>
+                    <c-field label="Closed"><c-partial-date prefix="closed" day="{{ b.closed_day|default:'' }}" month="{{ b.closed_month|default:'' }}" year="{{ b.closed_year|default:'' }}" /></c-field>
+                  </div>
+                  <div class="eyebrow">Address</div>
+                  {% include "organizations/partials/branch_address_fields.html" with address=b.primary_address %}
                   <div class="between">
                     <c-button type="submit" variant="primary">Save</c-button>
                     <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}organizations/{{ org.pk }}/branches/{{ b.pk }}/delete/">Delete</c-button><c-button variant="ghost" @click="open = false">Cancel</c-button></span>
@@ -202,6 +220,13 @@
             </c-modal>
           </c-slot>
 
+          {% if b.number or b.opened.is_set or b.is_closed %}
+          <div class="row wrap ph-meta">
+            {% if b.number %}<span class="row"><c-icon name="tag" size="sm" class="subtle" /><span class="tnum">{{ b.number }}</span></span>{% endif %}
+            {% if b.opened.is_set %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />Opened {{ b.opened.display }}</span>{% endif %}
+            {% if b.is_closed %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />Closed {{ b.closed.display }}</span>{% endif %}
+          </div>
+          {% endif %}
           {% for ch in b.channels.all %}
           <c-channel-row icon="{{ ch.icon }}" value="{{ ch.value }}" label="{{ ch.label }}">
             <c-slot name="tail">

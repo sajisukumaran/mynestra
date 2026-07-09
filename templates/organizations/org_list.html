@@ -45,7 +45,7 @@
               <div><div class="pc-name">{{ o.display }}</div>{% if o.website %}<div class="pc-sub">{{ o.website }}</div>{% endif %}</div>
             </a>
           </td>
-          <td>{% for c in o.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip> {% endfor %}</td>
+          <td>{% for c in o.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip> {% endfor %}{% if o.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}</td>
           <td>
             {% with ch=o.primary_channel %}
             {% if ch %}<div class="row"><c-icon name="{{ ch.icon }}" size="sm" class="subtle" /><span{% if ch.type == 'phone' or ch.type == 'whatsapp' %} class="tnum"{% endif %}>{{ ch.value }}</span></div>

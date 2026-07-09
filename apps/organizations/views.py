@@ -153,7 +153,10 @@ def org_edit(request, pk):
 def _org_form(request, org, mode):
     form = OrganizationForm(request.POST or None, request.FILES or None, instance=org)
     if request.method == "POST" and form.is_valid():
-        org = form.save()
+        org = form.save(commit=False)
+        for field, value in parse_partial_dates(request.POST, "established", "closed").items():
+            setattr(org, field, value)
+        org.save()
         _save_channels(request, org)
         _save_identifiers(request, org)
         org.categories.set(request.POST.getlist("categories"))
@@ -259,6 +262,29 @@ def org_address_delete(request, pk, addr_pk):
 
 # --- Branches (managed on the org detail Branches tab; each owns its channels/addresses) -----
 
+_BRANCH_ADDR_FIELDS = ("label", "line1", "line2", "city", "region", "postal_code", "country")
+
+
+def _upsert_branch_primary_address(request, branch):
+    """Create/update the branch's primary Address from the address fields folded into the branch
+    popup. No-op when every field is blank; extra (non-primary) addresses are left untouched."""
+    data = {f: request.POST.get(f, "").strip() for f in _BRANCH_ADDR_FIELDS}
+    if not any(data.values()):
+        return
+    address = branch.addresses.filter(is_primary=True).first()
+    if address:
+        for field, value in data.items():
+            setattr(address, field, value)
+        address.save()
+    else:
+        Address.objects.create(branch=branch, is_primary=True, **data)
+
+
+def _set_branch_dates(request, branch):
+    for field, value in parse_partial_dates(request.POST, "opened", "closed").items():
+        setattr(branch, field, value)
+
+
 def branch_create(request, pk):
     org = get_object_or_404(Organization, pk=pk)
     if request.method == "POST":
@@ -266,14 +292,21 @@ def branch_create(request, pk):
         if form.is_valid():
             branch = form.save(commit=False)
             branch.organization = org
+            _set_branch_dates(request, branch)
             branch.save()
+            _upsert_branch_primary_address(request, branch)
     return redirect(tenant_url(request, f"organizations/{pk}/"))
 
 
 def branch_edit(request, pk, branch_pk):
     branch = get_object_or_404(Branch, pk=branch_pk, organization_id=pk)
     if request.method == "POST":
-        BranchForm(request.POST, instance=branch).save()
+        form = BranchForm(request.POST, instance=branch)
+        if form.is_valid():
+            branch = form.save(commit=False)
+            _set_branch_dates(request, branch)
+            branch.save()
+            _upsert_branch_primary_address(request, branch)
     return redirect(tenant_url(request, f"organizations/{pk}/"))
 
 

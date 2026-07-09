@@ -22,11 +22,12 @@ class OrganizationForm(forms.ModelForm):
 
 
 class BranchForm(forms.ModelForm):
-    """Edited from the org detail via a slide-over."""
+    """Edited from the org detail via a popup. Opened/Closed PartialDates + the folded primary
+    address are parsed in the view (like the P2O dates / Person channels)."""
 
     class Meta:
         model = Branch
-        fields = ["name", "is_primary"]
+        fields = ["name", "number", "is_primary"]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

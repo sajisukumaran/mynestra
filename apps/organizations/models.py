@@ -12,6 +12,7 @@ from django.db import models
 from simple_history.models import HistoricalRecords
 
 from apps.core.models import SoftDeleteModel, TimeStampedModel
+from apps.core.partialdate import PartialDate
 
 # Curated avatar tints (match .av-* in app.css); chosen deterministically from the name.
 ORG_TINTS = [
@@ -25,6 +26,14 @@ class Organization(SoftDeleteModel):
     logo = models.ImageField(upload_to="org_logos/", null=True, blank=True)
     website = models.URLField(blank=True)
     notes = models.TextField(blank=True)
+
+    # Lifecycle (PartialDate): when the organization was established and, if it has closed, when.
+    established_year = models.SmallIntegerField(null=True, blank=True)
+    established_month = models.SmallIntegerField(null=True, blank=True)
+    established_day = models.SmallIntegerField(null=True, blank=True)
+    closed_year = models.SmallIntegerField(null=True, blank=True)
+    closed_month = models.SmallIntegerField(null=True, blank=True)
+    closed_day = models.SmallIntegerField(null=True, blank=True)
 
     categories = models.ManyToManyField(
         "setup.Category", related_name="organizations", blank=True,
@@ -63,6 +72,18 @@ class Organization(SoftDeleteModel):
         addr = self.addresses.filter(is_primary=True).first() or self.addresses.first()
         return addr.city if addr else ""
 
+    @property
+    def established(self) -> PartialDate:
+        return PartialDate.from_instance(self, "established")
+
+    @property
+    def closed(self) -> PartialDate:
+        return PartialDate.from_instance(self, "closed")
+
+    @property
+    def is_closed(self) -> bool:
+        return self.closed.is_set
+
 
 class OrgIdentifier(TimeStampedModel):
     """A registration/tax identifier for an organization (e.g. GST, Tax ID). Many per org."""
@@ -88,7 +109,17 @@ class Branch(SoftDeleteModel):
         Organization, on_delete=models.CASCADE, related_name="branches"
     )
     name = models.CharField(max_length=160)
+    number = models.CharField(max_length=40, blank=True)  # branch code / IFSC / internal number
     is_primary = models.BooleanField(default=False)
+
+    # Lifecycle (PartialDate): when the branch opened and, if it has closed, when.
+    opened_year = models.SmallIntegerField(null=True, blank=True)
+    opened_month = models.SmallIntegerField(null=True, blank=True)
+    opened_day = models.SmallIntegerField(null=True, blank=True)
+    closed_year = models.SmallIntegerField(null=True, blank=True)
+    closed_month = models.SmallIntegerField(null=True, blank=True)
+    closed_day = models.SmallIntegerField(null=True, blank=True)
+
     history = HistoricalRecords()
 
     class Meta:
@@ -102,3 +133,19 @@ class Branch(SoftDeleteModel):
     def primary_city(self) -> str:
         addr = self.addresses.filter(is_primary=True).first() or self.addresses.first()
         return addr.city if addr else ""
+
+    @property
+    def primary_address(self):
+        return self.addresses.filter(is_primary=True).first() or self.addresses.first()
+
+    @property
+    def opened(self) -> PartialDate:
+        return PartialDate.from_instance(self, "opened")
+
+    @property
+    def closed(self) -> PartialDate:
+        return PartialDate.from_instance(self, "closed")
+
+    @property
+    def is_closed(self) -> bool:
+        return self.closed.is_set
