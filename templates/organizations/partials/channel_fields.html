@@ -1,0 +1,14 @@
+{% comment %}Contact-channel form fields (type/value/label/primary). Pass `channel` for edit
+prefill; omit it for the add form.{% endcomment %}
+<c-field label="Type">
+  <c-select name="type">
+    <option value="phone" {% if not channel or channel.type == 'phone' %}selected{% endif %}>Phone</option>
+    <option value="email" {% if channel.type == 'email' %}selected{% endif %}>Email</option>
+    <option value="whatsapp" {% if channel.type == 'whatsapp' %}selected{% endif %}>WhatsApp</option>
+    <option value="url" {% if channel.type == 'url' %}selected{% endif %}>Website</option>
+    <option value="other" {% if channel.type == 'other' %}selected{% endif %}>Other</option>
+  </c-select>
+</c-field>
+<c-field label="Value"><c-input name="value" value="{{ channel.value|default:'' }}" /></c-field>
+<c-field label="Label"><c-input name="label" value="{{ channel.label|default:'' }}" /></c-field>
+<label class="row"><input type="checkbox" name="is_primary" {% if channel.is_primary %}checked{% endif %}> <span class="muted">Primary</span></label>

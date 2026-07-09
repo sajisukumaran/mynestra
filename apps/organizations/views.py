@@ -9,8 +9,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.contacts.forms import AddressForm
 from apps.contacts.models import Address, ContactChannel
-from apps.organizations.forms import OrganizationForm
-from apps.organizations.models import Organization, OrgIdentifier
+from apps.organizations.forms import BranchForm, OrganizationForm
+from apps.organizations.models import Branch, Organization, OrgIdentifier
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
@@ -214,4 +214,95 @@ def org_address_delete(request, pk, addr_pk):
     org = get_object_or_404(Organization, pk=pk)
     if request.method == "POST":
         Address.objects.filter(pk=addr_pk, organization=org).delete()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+# --- Branches (managed on the org detail Branches tab; each owns its channels/addresses) -----
+
+def branch_create(request, pk):
+    org = get_object_or_404(Organization, pk=pk)
+    if request.method == "POST":
+        form = BranchForm(request.POST)
+        if form.is_valid():
+            branch = form.save(commit=False)
+            branch.organization = org
+            branch.save()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_edit(request, pk, branch_pk):
+    branch = get_object_or_404(Branch, pk=branch_pk, organization_id=pk)
+    if request.method == "POST":
+        BranchForm(request.POST, instance=branch).save()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_delete(request, pk, branch_pk):
+    if request.method == "POST":
+        get_object_or_404(Branch, pk=branch_pk, organization_id=pk).delete()  # soft
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def _channel_kwargs(request):
+    return {
+        "type": request.POST.get("type", "phone"),
+        "value": request.POST.get("value", "").strip(),
+        "label": request.POST.get("label", "").strip(),
+        "is_primary": request.POST.get("is_primary") in ("on", "1", "true"),
+    }
+
+
+def branch_channel_create(request, pk, branch_pk):
+    branch = get_object_or_404(Branch, pk=branch_pk, organization_id=pk)
+    if request.method == "POST":
+        kw = _channel_kwargs(request)
+        if kw["value"]:
+            ContactChannel.objects.create(branch=branch, **kw)
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_channel_edit(request, pk, branch_pk, ch_pk):
+    channel = get_object_or_404(
+        ContactChannel, pk=ch_pk, branch__pk=branch_pk, branch__organization_id=pk
+    )
+    if request.method == "POST":
+        for field, value in _channel_kwargs(request).items():
+            setattr(channel, field, value)
+        channel.save()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_channel_delete(request, pk, branch_pk, ch_pk):
+    if request.method == "POST":
+        ContactChannel.objects.filter(
+            pk=ch_pk, branch__pk=branch_pk, branch__organization_id=pk
+        ).delete()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_address_create(request, pk, branch_pk):
+    branch = get_object_or_404(Branch, pk=branch_pk, organization_id=pk)
+    if request.method == "POST":
+        form = AddressForm(request.POST)
+        if form.is_valid():
+            address = form.save(commit=False)
+            address.branch = branch
+            address.save()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_address_edit(request, pk, branch_pk, addr_pk):
+    address = get_object_or_404(
+        Address, pk=addr_pk, branch__pk=branch_pk, branch__organization_id=pk
+    )
+    if request.method == "POST":
+        AddressForm(request.POST, instance=address).save()
+    return redirect(tenant_url(request, f"organizations/{pk}/"))
+
+
+def branch_address_delete(request, pk, branch_pk, addr_pk):
+    if request.method == "POST":
+        Address.objects.filter(
+            pk=addr_pk, branch__pk=branch_pk, branch__organization_id=pk
+        ).delete()
     return redirect(tenant_url(request, f"organizations/{pk}/"))

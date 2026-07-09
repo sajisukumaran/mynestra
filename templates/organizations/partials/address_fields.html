@@ -1,0 +1,9 @@
+{% comment %}Address form fields. Pass `address` for edit prefill; omit it for the add form.{% endcomment %}
+<c-field label="Label"><c-input name="label" value="{{ address.label|default:'' }}" /></c-field>
+<c-field label="Address line 1"><c-input name="line1" value="{{ address.line1|default:'' }}" /></c-field>
+<c-field label="Address line 2"><c-input name="line2" value="{{ address.line2|default:'' }}" /></c-field>
+<c-field label="City"><c-input name="city" value="{{ address.city|default:'' }}" /></c-field>
+<c-field label="Region / state"><c-input name="region" value="{{ address.region|default:'' }}" /></c-field>
+<c-field label="Postal code"><c-input name="postal_code" value="{{ address.postal_code|default:'' }}" /></c-field>
+<c-field label="Country"><c-input name="country" value="{{ address.country|default:'' }}" /></c-field>
+<label class="row"><input type="checkbox" name="is_primary" {% if address.is_primary %}checked{% endif %}> <span class="muted">Primary address</span></label>

@@ -21,4 +21,32 @@ urlpatterns = [
         "<int:pk>/addresses/<int:addr_pk>/delete/",
         views.org_address_delete, name="org-address-delete",
     ),
+    # Branches (+ their own channels/addresses)
+    path("<int:pk>/branches/new/", views.branch_create, name="branch-create"),
+    path("<int:pk>/branches/<int:branch_pk>/edit/", views.branch_edit, name="branch-edit"),
+    path("<int:pk>/branches/<int:branch_pk>/delete/", views.branch_delete, name="branch-delete"),
+    path(
+        "<int:pk>/branches/<int:branch_pk>/channels/new/",
+        views.branch_channel_create, name="branch-channel-create",
+    ),
+    path(
+        "<int:pk>/branches/<int:branch_pk>/channels/<int:ch_pk>/edit/",
+        views.branch_channel_edit, name="branch-channel-edit",
+    ),
+    path(
+        "<int:pk>/branches/<int:branch_pk>/channels/<int:ch_pk>/delete/",
+        views.branch_channel_delete, name="branch-channel-delete",
+    ),
+    path(
+        "<int:pk>/branches/<int:branch_pk>/addresses/new/",
+        views.branch_address_create, name="branch-address-create",
+    ),
+    path(
+        "<int:pk>/branches/<int:branch_pk>/addresses/<int:addr_pk>/edit/",
+        views.branch_address_edit, name="branch-address-edit",
+    ),
+    path(
+        "<int:pk>/branches/<int:branch_pk>/addresses/<int:addr_pk>/delete/",
+        views.branch_address_delete, name="branch-address-delete",
+    ),
 ]
