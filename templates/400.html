@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Bad request · MyNestra{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  <div class="error-card">
+    <div class="error-code tnum">400</div>
+    <c-empty-state icon="triangle-alert" title="Bad request"
+      text="That request couldn't be processed. Please check the address and try again.">
+      <c-button variant="primary" href="/"><c-icon name="house" /> Back to home</c-button>
+    </c-empty-state>
+  </div>
+</div>
+{% endblock %}

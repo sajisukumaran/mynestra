@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Page not found · MyNestra{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  <div class="error-card">
+    <div class="error-code tnum">404</div>
+    <c-empty-state icon="map" title="Page not found"
+      text="We couldn't find that page. It may have been moved or deleted.">
+      <c-button variant="primary" href="/"><c-icon name="house" /> Back to home</c-button>
+    </c-empty-state>
+  </div>
+</div>
+{% endblock %}

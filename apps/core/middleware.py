@@ -7,7 +7,7 @@ request.tenant, which is first in MIDDLEWARE).
 """
 
 from django.contrib.auth.views import redirect_to_login
-from django.http import HttpResponseForbidden
+from django.core.exceptions import PermissionDenied
 from django_tenants.utils import get_public_schema_name
 
 
@@ -28,6 +28,7 @@ class MembershipMiddleware:
         from apps.tenants.models import Membership
 
         if not Membership.objects.filter(user=user, tenant=tenant).exists():
-            return HttpResponseForbidden("You are not a member of this household.")
+            # PermissionDenied routes through handler403 → the on-brand 403 page (P7).
+            raise PermissionDenied("You are not a member of this household.")
 
         return self.get_response(request)

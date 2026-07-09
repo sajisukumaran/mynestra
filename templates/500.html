@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% comment %}handler500 renders this with an EMPTY context (no request, no context processors), so it
+must stay fully static: no {% url %}, no request/ui_* reliance. base.html tolerates the missing
+ui_* values, {% static %} resolves, and the link is a plain "/".{% endcomment %}
+{% block title %}Something went wrong · MyNestra{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  <div class="error-card">
+    <div class="error-code tnum">500</div>
+    <c-empty-state icon="triangle-alert" title="Something went wrong"
+      text="An unexpected error occurred on our end. Please try again in a moment.">
+      <c-button variant="primary" href="/"><c-icon name="house" /> Back to home</c-button>
+    </c-empty-state>
+  </div>
+</div>
+{% endblock %}

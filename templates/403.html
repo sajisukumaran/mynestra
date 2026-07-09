@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Access denied · MyNestra{% endblock %}
+
+{% block content %}
+<div class="error-page">
+  <div class="error-card">
+    <div class="error-code tnum">403</div>
+    <c-empty-state icon="shield-check" title="Access denied"
+      text="You don't have permission to view this page. If you think this is a mistake, ask a household owner.">
+      <c-button variant="primary" href="/"><c-icon name="house" /> Back to home</c-button>
+    </c-empty-state>
+  </div>
+</div>
+{% endblock %}

@@ -26,8 +26,8 @@ urlpatterns = [
 
 # Error handlers must be defined on the tenant urlconf: django-tenants' urlconf wrapper raises
 # ImportError (instead of falling back to Django's defaults) when these are absent, so an Http404
-# raised in a tenant view would 500 under DEBUG=False. Default views for now; on-brand styled
-# 403/404/500 pages (empty-state) land in P7.
+# raised in a tenant view would 500 under DEBUG=False. The default views render our on-brand
+# templates/{400,403,404,500}.html (P7); MembershipMiddleware raises PermissionDenied → handler403.
 handler400 = "django.views.defaults.bad_request"
 handler403 = "django.views.defaults.permission_denied"
 handler404 = "django.views.defaults.page_not_found"
