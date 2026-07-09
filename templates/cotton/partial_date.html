@@ -27,21 +27,23 @@ apps/core/partialdate.py.
     <div class="pdate-grid">
       <label>Month
         <div class="control is-select">
+          {% with m=month|stringformat:'s' %}
           <select name="{{ prefix }}_month" x-model="month" aria-label="Month">
             <option value="">MM</option>
-            <option value="1">Jan</option>
-            <option value="2">Feb</option>
-            <option value="3">Mar</option>
-            <option value="4">Apr</option>
-            <option value="5">May</option>
-            <option value="6">Jun</option>
-            <option value="7">Jul</option>
-            <option value="8">Aug</option>
-            <option value="9">Sep</option>
-            <option value="10">Oct</option>
-            <option value="11">Nov</option>
-            <option value="12">Dec</option>
+            <option value="1"{% if m == '1' %} selected{% endif %}>Jan</option>
+            <option value="2"{% if m == '2' %} selected{% endif %}>Feb</option>
+            <option value="3"{% if m == '3' %} selected{% endif %}>Mar</option>
+            <option value="4"{% if m == '4' %} selected{% endif %}>Apr</option>
+            <option value="5"{% if m == '5' %} selected{% endif %}>May</option>
+            <option value="6"{% if m == '6' %} selected{% endif %}>Jun</option>
+            <option value="7"{% if m == '7' %} selected{% endif %}>Jul</option>
+            <option value="8"{% if m == '8' %} selected{% endif %}>Aug</option>
+            <option value="9"{% if m == '9' %} selected{% endif %}>Sep</option>
+            <option value="10"{% if m == '10' %} selected{% endif %}>Oct</option>
+            <option value="11"{% if m == '11' %} selected{% endif %}>Nov</option>
+            <option value="12"{% if m == '12' %} selected{% endif %}>Dec</option>
           </select>
+          {% endwith %}
           <c-icon name="chevron-down" size="sm" class="subtle" />
         </div>
       </label>
