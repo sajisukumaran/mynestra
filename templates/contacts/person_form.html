@@ -39,8 +39,8 @@
     {# Life events #}
     <c-card title="Life events" icon="cake">
       <div class="stack-16" x-data="{ deceased: {{ form.is_deceased.value|yesno:'true,false' }} }">
-        <div class="form-grid">
-          <c-field label="Date of birth" help="Leave any part blank if unknown — renders as XX / XXXX." error="{{ form.dob_day.errors.0 }}">
+        <div class="form-grid g4">
+          <c-field label="Date of birth" help="Blank parts show as XX / XXXX." error="{{ form.dob_day.errors.0 }}">
             <c-partial-date prefix="dob" day="{{ form.dob_day.value|default:'' }}" month="{{ form.dob_month.value|default:'' }}" year="{{ form.dob_year.value|default:'' }}" invalid="{{ form.dob_day.errors|yesno:'1,' }}" />
           </c-field>
           <c-field label="Marital status" error="{{ form.marital_status.errors.0 }}"><div class="control is-select">{{ form.marital_status }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
@@ -54,7 +54,7 @@
           <input type="hidden" name="is_deceased" :value="deceased ? 'true' : 'false'">
           <div class="sw-txt"><div class="t">Deceased</div><div class="d">Turn on to record a date of death.</div></div>
         </div>
-        <div class="form-grid" x-show="deceased" x-cloak>
+        <div class="form-grid g4" x-show="deceased" x-cloak>
           <c-field label="Date of death" error="{{ form.dod_day.errors.0 }}">
             <c-partial-date prefix="dod" day="{{ form.dod_day.value|default:'' }}" month="{{ form.dod_month.value|default:'' }}" year="{{ form.dod_year.value|default:'' }}" invalid="{{ form.dod_day.errors|yesno:'1,' }}" />
           </c-field>
