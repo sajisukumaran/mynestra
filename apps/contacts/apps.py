@@ -8,7 +8,8 @@ class ContactsConfig(AppConfig):
     verbose_name = "Contacts"
 
     # Launcher module metadata (DESIGN §9). Read by apps.core.registry / the launcher.
-    module = {
+    # (Not `module`: AppConfig already binds that to the app's Python module.)
+    launcher_module = {
         "name": "Contacts",
         "description": "People, families & relationships",
         "glyph": "users",

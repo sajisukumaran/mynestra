@@ -16,24 +16,15 @@
       </div>
 
       <div class="tiles">
-        <c-app-tile name="Contacts" description="People, families & relationships" glyph="users" tint="contacts" href="contacts/">
-          <c-tile-stat n="0" label="People" />
-          <c-tile-stat n="0" label="Families" />
-          <c-tile-stat n="0" label="Birthdays" />
+        {% for m in modules %}
+        <c-app-tile name="{{ m.meta.name }}" description="{{ m.meta.description }}" glyph="{{ m.meta.glyph }}" tint="{{ m.meta.tint }}" href="{{ m.meta.url }}">
+          {% for c in m.counts %}<c-tile-stat n="{{ c.n }}" label="{{ c.label }}" />{% endfor %}
         </c-app-tile>
+        {% endfor %}
 
-        <c-app-tile name="Organizations" description="Companies, branches & key people" glyph="building-2" tint="orgs" href="organizations/">
-          <c-tile-stat n="0" label="Organizations" />
-          <c-tile-stat n="0" label="Branches" />
-          <c-tile-stat n="0" label="Key people" />
-        </c-app-tile>
-
-        <c-app-tile soon name="Banking" description="Accounts, cards & bills" glyph="landmark" />
-        <c-app-tile soon name="Health" description="Records, visits & medications" glyph="activity" />
-        <c-app-tile soon name="Documents" description="Files, IDs & certificates" glyph="file-text" />
-        <c-app-tile soon name="Reminders" description="Tasks & important dates" glyph="calendar-days" />
-        <c-app-tile soon name="Vehicles" description="Cars, service & insurance" glyph="car" />
-        <c-app-tile soon name="Travel" description="Trips, bookings & documents" glyph="plane" />
+        {% for s in coming_soon %}
+        <c-app-tile soon name="{{ s.name }}" description="{{ s.description }}" glyph="{{ s.glyph }}" />
+        {% endfor %}
       </div>
     </div>
   </div>

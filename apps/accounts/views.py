@@ -37,12 +37,26 @@ def chooser(request):
 
 
 def tenant_home(request):
-    """Minimal tenant landing (membership already enforced by MembershipMiddleware)."""
+    """Launcher (DESIGN §7.4/§9): a live infolet per enabled module + muted 'coming soon' tiles.
+    Counts come from each module's AppConfig and run in the current tenant schema."""
+    from apps.core.registry import COMING_SOON, enabled_modules
+
     is_owner = Membership.objects.filter(
         user=request.user, tenant=request.tenant, role=Role.OWNER
     ).exists()
+    modules = [
+        {"meta": cfg.launcher_module, "counts": cfg.launcher_counts()}
+        for cfg in enabled_modules()
+    ]
     return render(
-        request, "accounts/tenant_home.html", {"tenant": request.tenant, "is_owner": is_owner}
+        request,
+        "accounts/tenant_home.html",
+        {
+            "tenant": request.tenant,
+            "is_owner": is_owner,
+            "modules": modules,
+            "coming_soon": COMING_SOON,
+        },
     )
 
 

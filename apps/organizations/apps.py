@@ -8,7 +8,8 @@ class OrganizationsConfig(AppConfig):
     verbose_name = "Organizations"
 
     # Launcher module metadata (DESIGN §9). Read by apps.core.registry / the launcher.
-    module = {
+    # (Not `module`: AppConfig already binds that to the app's Python module.)
+    launcher_module = {
         "name": "Organizations",
         "description": "Companies, branches & key people",
         "glyph": "building-2",
