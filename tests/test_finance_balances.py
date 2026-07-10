@@ -28,11 +28,11 @@ JAN = datetime.date(2026, 1, 15)
 
 # (target account, side that increases it, balancing account, balancing side)
 NORMAL_CASES = [
-    ("1120", "debit", "3100", "credit"),   # Asset — increases on debit
-    ("2100", "credit", "1120", "debit"),   # Liability — increases on credit
-    ("3100", "credit", "1120", "debit"),   # Equity — increases on credit
-    ("4100", "credit", "1120", "debit"),   # Revenue — increases on credit
-    ("5200", "debit", "1120", "credit"),   # Expense — increases on debit
+    ("1110", "debit", "3100", "credit"),   # Asset — increases on debit
+    ("2100", "credit", "1110", "debit"),   # Liability — increases on credit
+    ("3100", "credit", "1110", "debit"),   # Equity — increases on credit
+    ("4100", "credit", "1110", "debit"),   # Revenue — increases on credit
+    ("5200", "debit", "1110", "credit"),   # Expense — increases on debit
 ]
 
 
@@ -63,7 +63,7 @@ def test_contra_account_reports_flipped_sign(make_tenant):
         )
         post_entry(
             date=JAN,
-            lines=[LineInput("3300", debit=D("40")), LineInput("1120", credit=D("40"))],
+            lines=[LineInput("3300", debit=D("40")), LineInput("1110", credit=D("40"))],
         )
         # Debit-normal → a debit balance reads positive (opposite of a normal equity account).
         assert account_balance(drawings) == D("40")
@@ -75,11 +75,11 @@ def test_header_account_rolls_up_children(make_tenant):
     with schema_context(tenant.schema_name):
         post_entry(
             date=JAN,
-            lines=[LineInput("1120", debit=D("100")), LineInput("3100", credit=D("100"))],
+            lines=[LineInput("1110", debit=D("100")), LineInput("3100", credit=D("100"))],
         )
         post_entry(
             date=JAN,
-            lines=[LineInput("1130", debit=D("50")), LineInput("3100", credit=D("50"))],
+            lines=[LineInput("1150", debit=D("50")), LineInput("3100", credit=D("50"))],
         )
         assert account_balance("1100") == D("150")  # Cash & Bank header
         assert account_balance("1000") == D("150")  # Assets header
@@ -90,20 +90,20 @@ def test_balance_excludes_draft_and_void(make_tenant):
     with schema_context(tenant.schema_name):
         post_entry(
             date=JAN,
-            lines=[LineInput("1120", debit=D("100")), LineInput("3100", credit=D("100"))],
+            lines=[LineInput("1110", debit=D("100")), LineInput("3100", credit=D("100"))],
         )
         post_entry(
             date=JAN,
             status=JournalEntry.Status.DRAFT,
-            lines=[LineInput("1120", debit=D("999")), LineInput("3100", credit=D("999"))],
+            lines=[LineInput("1110", debit=D("999")), LineInput("3100", credit=D("999"))],
         )
         voided = post_entry(
             date=JAN,
             status=JournalEntry.Status.DRAFT,
-            lines=[LineInput("1120", debit=D("5")), LineInput("3100", credit=D("5"))],
+            lines=[LineInput("1110", debit=D("5")), LineInput("3100", credit=D("5"))],
         )
         void_entry(voided)
-        assert account_balance("1120") == D("100")
+        assert account_balance("1110") == D("100")
 
 
 def test_trial_balance_totals_equal(make_tenant):
@@ -111,15 +111,15 @@ def test_trial_balance_totals_equal(make_tenant):
     with schema_context(tenant.schema_name):
         post_entry(
             date=JAN,
-            lines=[LineInput("1120", debit=D("100")), LineInput("4100", credit=D("100"))],
+            lines=[LineInput("1110", debit=D("100")), LineInput("4100", credit=D("100"))],
         )
         post_entry(
             date=JAN,
-            lines=[LineInput("5200", debit=D("30")), LineInput("1120", credit=D("30"))],
+            lines=[LineInput("5200", debit=D("30")), LineInput("1110", credit=D("30"))],
         )
         rows = trial_balance()
         assert sum(r.debit_total for r in rows) == sum(r.credit_total for r in rows)
-        assert {r.account.code for r in rows} == {"1120", "4100", "5200"}
+        assert {r.account.code for r in rows} == {"1110", "4100", "5200"}
 
 
 def test_derived_close_and_net_worth(make_tenant):
@@ -128,22 +128,22 @@ def test_derived_close_and_net_worth(make_tenant):
         post_entry(
             date=datetime.date(2026, 1, 1),
             lines=[
-                LineInput("1120", debit=D("1000")),
+                LineInput("1110", debit=D("1000")),
                 LineInput("opening_balance_equity", credit=D("1000")),
             ],
         )
         post_entry(  # salary
             date=datetime.date(2026, 2, 1),
-            lines=[LineInput("1120", debit=D("500")), LineInput("4100", credit=D("500"))],
+            lines=[LineInput("1110", debit=D("500")), LineInput("4100", credit=D("500"))],
         )
         post_entry(  # groceries
             date=datetime.date(2026, 3, 1),
-            lines=[LineInput("5200", debit=D("200")), LineInput("1120", credit=D("200"))],
+            lines=[LineInput("5200", debit=D("200")), LineInput("1110", credit=D("200"))],
         )
         as_of = datetime.date(2026, 12, 31)
         assert net_income(start=datetime.date(2026, 1, 1), end=as_of) == D("300")  # 500 − 200
         assert current_year_earnings(as_of=as_of) == D("300")
-        assert net_worth(as_of=as_of) == D("1300")  # checking 1300, no liabilities
+        assert net_worth(as_of=as_of) == D("1300")  # cash 1300, no liabilities
         assert retained_earnings(as_of=as_of) == D("0")  # no prior-year activity
 
 
@@ -152,7 +152,7 @@ def test_retained_earnings_rolls_prior_years_forward(make_tenant):
     with schema_context(tenant.schema_name):
         post_entry(
             date=datetime.date(2025, 6, 1),
-            lines=[LineInput("1120", debit=D("400")), LineInput("4100", credit=D("400"))],
+            lines=[LineInput("1110", debit=D("400")), LineInput("4100", credit=D("400"))],
         )
         assert retained_earnings(as_of=datetime.date(2026, 3, 1)) == D("400")
         assert current_year_earnings(as_of=datetime.date(2026, 3, 1)) == D("0")
@@ -168,14 +168,14 @@ def test_party_balance_aggregates_counterparty(make_tenant):
             date=JAN,
             lines=[
                 LineInput("5400", debit=D("60"), person=person),
-                LineInput("1120", credit=D("60")),
+                LineInput("1110", credit=D("60")),
             ],
         )
         post_entry(
             date=JAN,
             lines=[
                 LineInput("5400", debit=D("40"), person=person),
-                LineInput("1120", credit=D("40")),
+                LineInput("1110", credit=D("40")),
             ],
         )
         assert party_balance(person=person) == D("100")
@@ -204,4 +204,4 @@ def test_native_balance_for_currency_tagged_account(make_tenant):
         )
         assert account_native_balance(eur_savings) == D("100")  # own currency
         assert account_balance(eur_savings) == D("110")  # base
-        assert account_native_balance(Account.objects.get(code="1120")) is None  # untagged
+        assert account_native_balance(Account.objects.get(code="1110")) is None  # untagged

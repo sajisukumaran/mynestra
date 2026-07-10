@@ -105,7 +105,7 @@ def test_finance_ledger_source_and_party_are_isolated(make_tenant):
             source=org,
             lines=[
                 LineInput("5400", debit=Decimal("100"), person=person),
-                LineInput("1120", credit=Decimal("100")),
+                LineInput("1110", credit=Decimal("100")),
             ],
         )
         assert entry.source == org  # source GenericFK resolves within this tenant

@@ -27,14 +27,14 @@ def test_foreign_line_converts_to_base_at_explicit_rate(make_tenant):
             date=JAN,
             currency="EUR",
             lines=[
-                LineInput("1120", debit=D("100"), currency="EUR", fx_rate=D("1.2")),
+                LineInput("1110", debit=D("100"), currency="EUR", fx_rate=D("1.2")),
                 LineInput("opening_balance_equity", credit=D("120")),  # base USD
             ],
         )
-        line = entry.lines.get(account__code="1120")
+        line = entry.lines.get(account__code="1110")
         assert line.currency_id == "EUR" and line.debit == D("100")
         assert line.base_debit == D("120.00")  # 100 EUR × 1.2
-        assert account_raw_balance("1120") == D("120.00")  # in base
+        assert account_raw_balance("1110") == D("120.00")  # in base
 
 
 def test_rate_resolved_from_exchange_rate_table(make_tenant):
@@ -46,11 +46,11 @@ def test_rate_resolved_from_exchange_rate_table(make_tenant):
         entry = post_entry(  # JAN=15th → latest on/before is 1.15
             date=JAN,
             lines=[
-                LineInput("1120", debit=D("200"), currency="EUR"),  # no explicit rate
+                LineInput("1110", debit=D("200"), currency="EUR"),  # no explicit rate
                 LineInput("opening_balance_equity", credit=D("230")),  # 200 × 1.15
             ],
         )
-        line = entry.lines.get(account__code="1120")
+        line = entry.lines.get(account__code="1110")
         assert line.fx_rate == D("1.15") and line.base_debit == D("230.00")
 
 
@@ -61,7 +61,7 @@ def test_missing_exchange_rate_raises(make_tenant):
             post_entry(
                 date=JAN,
                 lines=[
-                    LineInput("1120", debit=D("50"), currency="GBP"),  # no rate, no table row
+                    LineInput("1110", debit=D("50"), currency="GBP"),  # no rate, no table row
                     LineInput("opening_balance_equity", credit=D("60")),
                 ],
             )
@@ -85,11 +85,11 @@ def test_base_amount_rounds_half_up(make_tenant):
         entry = post_entry(
             date=JAN,
             lines=[
-                LineInput("1120", debit=D("33.33"), currency="EUR", fx_rate=D("1.005")),
+                LineInput("1110", debit=D("33.33"), currency="EUR", fx_rate=D("1.005")),
                 LineInput("opening_balance_equity", credit=D("33.50")),
             ],
         )
-        assert entry.lines.get(account__code="1120").base_debit == D("33.50")
+        assert entry.lines.get(account__code="1110").base_debit == D("33.50")
 
 
 def test_multi_currency_entry_balances_in_base(make_tenant):
@@ -100,13 +100,13 @@ def test_multi_currency_entry_balances_in_base(make_tenant):
             date=JAN,
             description="FX transfer",
             lines=[
-                LineInput("1130", debit=D("96"), currency="GBP", fx_rate=D("1.25")),
-                LineInput("1120", credit=D("100"), currency="EUR", fx_rate=D("1.20")),
+                LineInput("1150", debit=D("96"), currency="GBP", fx_rate=D("1.25")),
+                LineInput("1110", credit=D("100"), currency="EUR", fx_rate=D("1.20")),
             ],
         )
         assert entry.lines.count() == 2
-        assert account_raw_balance("1130") == D("120.00")
-        assert account_raw_balance("1120") == D("-120.00")
+        assert account_raw_balance("1150") == D("120.00")
+        assert account_raw_balance("1110") == D("-120.00")
 
 
 def test_round_base_respects_currency_precision(make_tenant):

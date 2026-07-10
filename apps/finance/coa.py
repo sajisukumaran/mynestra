@@ -37,8 +37,10 @@ CHART_OF_ACCOUNTS = [
     ("1000", "Assets", ASSET, None, False, ""),
     ("1100", "Cash & Bank", ASSET, "1000", False, ""),
     ("1110", "Cash on Hand", ASSET, "1100", True, ""),
-    ("1120", "Checking Account", ASSET, "1100", True, ""),
-    ("1130", "Savings Account", ASSET, "1100", True, ""),
+    # 1120/1130 are group headers: the Banking module nests one postable sub-account per real
+    # bank account beneath them, so per-account balances roll up here (never posted to directly).
+    ("1120", "Checking Account", ASSET, "1100", False, ""),
+    ("1130", "Savings Account", ASSET, "1100", False, ""),
     ("1150", "Inter-account Transfer", ASSET, "1100", True, "transfer_clearing"),
     ("1200", "Investments", ASSET, "1000", False, ""),
     ("1210", "Brokerage", ASSET, "1200", True, ""),
@@ -88,5 +90,6 @@ CHART_OF_ACCOUNTS = [
     ("5600", "Education", EXPENSE, "5000", True, ""),
     ("5700", "Personal & Lifestyle", EXPENSE, "5000", True, ""),
     ("5800", "Taxes", EXPENSE, "5000", True, ""),
+    ("5850", "Bank Charges", EXPENSE, "5000", True, "bank_charges"),
     ("5900", "Other Expenses", EXPENSE, "5000", True, ""),
 ]

@@ -47,13 +47,13 @@ def test_posted_balance_shows_on_page(make_tenant, make_user, client):
         post_entry(
             date=datetime.date(2026, 1, 10),
             lines=[
-                LineInput("1120", debit=D("1500")),
+                LineInput("1110", debit=D("1500")),
                 LineInput("opening_balance_equity", credit=D("1500")),
             ],
         )
     client.force_login(user)
     body = client.get(_url(tenant)).content.decode()
-    assert "1,500.00" in body  # checking balance rendered via c-money
+    assert "1,500.00" in body  # cash balance rendered via c-money
     assert 'class="amount' in body  # the money component is used
 
 
@@ -70,7 +70,7 @@ def test_launcher_counts_are_live(make_tenant):
     with schema_context(tenant.schema_name):
         config = django_apps.get_app_config("finance")
         counts = {c["label"]: c["n"] for c in config.launcher_counts()}
-    # Seeded catalogs: 40 postable accounts, 16 currencies, no journal entries yet.
+    # Seeded catalogs: postable accounts present, 16 currencies, no journal entries yet.
     assert counts["Currencies"] == 16
     assert counts["Journal entries"] == 0
     assert counts["Accounts"] > 0
