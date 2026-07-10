@@ -350,6 +350,7 @@ def account_detail(request, pk):
         expense_accounts=_expense_accounts(),
         cash_account=Account.objects.filter(code="1110").first(),
         other_accounts=BankAccount.objects.exclude(pk=account.pk),
+        debit_cards=account.debit_cards.all(),
     )
     return render(request, "banking/account_detail.html", ctx)
 
@@ -396,6 +397,15 @@ def _apply_txn_post(request, txn):
             txn.payee_person = Person.objects.filter(pk=pid).first()
         elif oid:
             txn.payee_organization = Organization.objects.filter(pk=oid).first()
+
+    # Optional debit-card tag on a withdrawal (Cards module attributes per-card spend).
+    txn.card = None
+    if txn_type == TxnType.WITHDRAWAL:
+        from apps.cards.models import DebitCard
+
+        txn.card = DebitCard.objects.filter(
+            pk=request.POST.get("card") or 0, bank_account=txn.account
+        ).first()
 
     txn.save()
     return txn

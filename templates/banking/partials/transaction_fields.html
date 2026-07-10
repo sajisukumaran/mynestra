@@ -44,6 +44,21 @@ expense_accounts, cash_account, other_accounts. Pass `txn` (edit prefill) + a un
   </c-field>
 </div>
 
+{# Debit card used — withdrawals only (tags per-card spend for the Cards module) #}
+{% if debit_cards %}
+<div x-show="type === 'withdrawal'" x-cloak>
+  <c-field label="Card used (optional)" help="Tag which debit card made this withdrawal.">
+    <div class="control is-select">
+      <select name="card" :disabled="type !== 'withdrawal'">
+        <option value="">— none —</option>
+        {% for dc in debit_cards %}<option value="{{ dc.pk }}"{% if txn.card_id == dc.pk %} selected{% endif %}>{{ dc.nickname }}{% if dc.masked_number %} · {{ dc.masked_number }}{% endif %}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+{% endif %}
+
 {# Payee — deposits & withdrawals #}
 <div x-show="type === 'deposit' || type === 'withdrawal'" x-cloak>
   <c-field label="Payee (optional)" help="A person or organization on the other side.">

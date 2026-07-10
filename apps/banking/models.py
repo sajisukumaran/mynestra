@@ -216,6 +216,17 @@ class BankTransaction(SoftDeleteModel):
         related_name="bank_txns",
     )
 
+    # Optional debit card used for this withdrawal — lets the Cards module attribute per-card spend
+    # (a debit card has no ledger of its own; its spending IS a bank withdrawal). Nullable string
+    # ref so banking doesn't import cards; the reverse relation is `DebitCard.bank_txns`.
+    card = models.ForeignKey(
+        "cards.DebitCard",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bank_txns",
+    )
+
     memo = models.CharField(max_length=255, blank=True)
     reference = models.CharField(max_length=60, blank=True)
     cleared = models.BooleanField(default=False)  # reconciliation-lite; never affects the GL
