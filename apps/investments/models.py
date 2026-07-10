@@ -396,12 +396,18 @@ class InvTxnType(models.TextChoices):
     RETURN_OF_CAPITAL = "return_of_capital", "Return of capital"
     FEE = "fee", "Fee"
     SPLIT = "split", "Stock split"
+    IN_KIND_IN = "in_kind_in", "Securities transfer in (in-kind)"
+    IN_KIND_OUT = "in_kind_out", "Securities transfer out (in-kind)"
+    WORTHLESS = "worthless", "Worthless write-off"      # bankruptcy: whole position → capital loss
+    CASH_MERGER = "cash_merger", "Cash buyout / merger"  # going private: cash check for the shares
 
 
 # Types that require a security (the rest are cash-only / account-level).
 SECURITY_TYPES = frozenset({
     InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST,
     InvTxnType.RETURN_OF_CAPITAL, InvTxnType.SPLIT,
+    InvTxnType.IN_KIND_IN, InvTxnType.IN_KIND_OUT,
+    InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
 })
 
 TXN_GLYPHS = {
@@ -419,6 +425,10 @@ TXN_GLYPHS = {
     InvTxnType.RETURN_OF_CAPITAL: "arrow-down",
     InvTxnType.FEE: "arrow-up",
     InvTxnType.SPLIT: "network",
+    InvTxnType.IN_KIND_IN: "download",
+    InvTxnType.IN_KIND_OUT: "upload",
+    InvTxnType.WORTHLESS: "trending-down",
+    InvTxnType.CASH_MERGER: "banknote",
 }
 
 
@@ -470,6 +480,28 @@ class InvestmentTransaction(SoftDeleteModel):
     )
     counter_external = models.CharField(max_length=160, blank=True)
 
+    # In-kind securities transfer to/from the household's OTHER tracked investment account. Null →
+    # external (gift/inheritance/RSU/ACATS from outside), which posts against opening equity instead
+    # of the 1150 clearing account. On an OUT leg this is the destination; on the mirror IN leg, the
+    # source.
+    counter_investment_account = models.ForeignKey(
+        InvestmentAccount,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="in_kind_transfers",
+    )
+    # The exact paired leg (OUT↔IN) of an internal in-kind transfer, so a re-sync targets the right
+    # IN leg even when several transfers exist between the same two accounts.
+    paired_txn = models.OneToOneField(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    # Tax lots moved by an in-kind transfer, as a snapshot preserving each lot's original
+    # acquisition date + cost: [{"acquired_date": "YYYY-MM-DD", "quantity": "<dec>", "cost":
+    # "<dec>"}]. On an OUT leg the engine materializes it (the lots actually consumed); on an
+    # internal IN leg it is mirrored from the paired OUT leg; on an external IN leg it is user-set.
+    lot_carry = models.JSONField(null=True, blank=True)
+
     payee_person = models.ForeignKey(
         "contacts.Person",
         on_delete=models.PROTECT,
@@ -516,6 +548,10 @@ class InvestmentTransaction(SoftDeleteModel):
             models.CheckConstraint(
                 condition=models.Q(amount__gte=0), name="investmenttransaction_amount_nonneg"
             ),
+            models.CheckConstraint(
+                condition=~models.Q(counter_investment_account=models.F("account")),
+                name="investmenttransaction_no_self_inkind",
+            ),
         ]
 
     def __str__(self) -> str:
@@ -541,15 +577,16 @@ class InvestmentTransaction(SoftDeleteModel):
         if t == InvTxnType.OPENING:
             return self.amount if self.security_id is None else ZERO
         if t in (InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
-                 InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL):
-            return self.amount
+                 InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL,
+                 InvTxnType.CASH_MERGER):
+            return self.amount  # CASH_MERGER: the buyout check comes in as cash
         if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE):
             return -self.amount
         if t == InvTxnType.BUY:
             return -(self.amount + self.fee)
         if t == InvTxnType.SELL:
             return self.net_proceeds
-        # DIVIDEND_REINVEST and SPLIT are cash-neutral.
+        # DIVIDEND_REINVEST, SPLIT, both in-kind transfers and WORTHLESS are cash-neutral.
         return ZERO
 
     @property
@@ -572,6 +609,16 @@ class InvestmentTransaction(SoftDeleteModel):
             old = self.split_ratio_old.normalize()
             return f"{new}-for-{old}"
         return ""
+
+    @property
+    def is_managed_in_leg(self) -> bool:
+        """True for the auto-created IN leg of an *internal* in-kind transfer — it is a managed
+        mirror of its paired OUT leg, so the UI blocks editing/deleting it directly (external
+        in-kind INs, which the user does enter by hand, have no counter account)."""
+        return (
+            self.txn_type == InvTxnType.IN_KIND_IN
+            and self.counter_investment_account_id is not None
+        )
 
 
 class Lot(TimeStampedModel):
