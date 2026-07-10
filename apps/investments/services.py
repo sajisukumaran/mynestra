@@ -626,6 +626,30 @@ def allocation(accounts=None, *, by: str = "asset_class") -> list[Slice]:
     return slices
 
 
+DONUT_RADIUS = 52
+DONUT_CIRC = 326.7256  # 2 · π · 52, precomputed (templates can't do arithmetic)
+
+
+def donut_segments(slices) -> list[dict]:
+    """Precompute stroke-dasharray/offset arcs for the c-donut SVG from a list of Slices."""
+    total = sum((s.value for s in slices), ZERO)
+    segs = []
+    cum = 0.0
+    for s in slices:
+        frac = float(s.value) / float(total) if total else 0.0
+        length = frac * DONUT_CIRC
+        segs.append({
+            "tint": s.tint,
+            "label": s.label,
+            "value": s.value,
+            "pct": s.pct_of(total),
+            "dasharray": f"{length:.3f} {DONUT_CIRC - length:.3f}",
+            "dashoffset": f"{-cum * DONUT_CIRC:.3f}",
+        })
+        cum += frac
+    return segs
+
+
 def register(account) -> list[dict]:
     """The account's transactions with a running settlement-cash balance, newest-first."""
     running = ZERO

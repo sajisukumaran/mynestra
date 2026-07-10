@@ -1,0 +1,19 @@
+<c-vars items="" total="" symbol="" dp="0" grouping="thousands" empty_text="No data yet" class="" />
+{% comment %}Labeled horizontal bars for a breakdown. `items` = list of dicts {tint,label,value};
+`total` sets each bar's width (value ÷ total). Colors come from the .tint-<name> palette. Values
+render as money when `symbol` is given.{% endcomment %}
+<div class="bar-list{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% for it in items %}
+  <div class="bar-row">
+    <div class="bar-head">
+      <span class="bar-name">{{ it.label }}</span>
+      <span class="bar-val"><c-money :amount="it.value" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></span>
+    </div>
+    <div class="bar-track">
+      <div class="bar-fill tint-{{ it.tint }}" style="width:{% widthratio it.value total 100 %}%;"></div>
+    </div>
+  </div>
+  {% empty %}
+  <p class="muted">{{ empty_text }}</p>
+  {% endfor %}
+</div>

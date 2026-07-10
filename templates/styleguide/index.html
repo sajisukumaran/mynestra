@@ -10,6 +10,7 @@
       <c-sidebar-item label="Badges & chips" icon="tag" href="#badges" count="12" />
       <c-sidebar-item label="Forms" icon="contact" href="#forms" />
       <c-sidebar-item label="Data" icon="network" href="#data" />
+      <c-sidebar-item label="Charts" icon="pie-chart" href="#charts" />
       <c-sidebar-item label="Money" icon="coins" href="#money" />
       <c-sidebar-item label="Overlays" icon="inbox" href="#overlays" />
       <c-slot name="foot">
@@ -200,6 +201,20 @@
         <c-meter value="180" max="1000"><span>Utilization</span><span>18%</span></c-meter>
         <c-meter value="720" max="1000" tint="warning"><span>Utilization</span><span>72%</span></c-meter>
         <c-meter value="960" max="1000" tint="danger"><span>Utilization</span><span>96%</span></c-meter>
+      </div>
+    </c-card>
+
+    {# ---- Charts (c-donut / c-bar-list — allocation + breakdown) ---- #}
+    <c-card title="Charts" id="charts" icon="pie-chart">
+      <div class="stack-20">
+        <div>
+          <p class="muted stack-8">Allocation donut (c-donut) — server-rendered SVG, theme-aware, no JS.</p>
+          <c-donut :segments="donut_segments" :total="donut_total" total_label="Portfolio" symbol="$" dp="0" />
+        </div>
+        <div style="max-width:460px;">
+          <p class="muted stack-8">Breakdown bars (c-bar-list) — proportion of a total.</p>
+          <c-bar-list :items="bar_items" :total="bar_total" symbol="$" dp="0" />
+        </div>
       </div>
     </c-card>
 

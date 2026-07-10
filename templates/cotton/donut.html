@@ -1,0 +1,38 @@
+<c-vars segments="" total="" total_label="Total" symbol="" dp="0" grouping="thousands"
+        radius="52" circumference="326.7256" empty_text="Nothing to show yet" class="" />
+{% comment %}Server-rendered SVG allocation donut + legend. `segments` = a list of dicts
+{tint,label,value,pct,dasharray,dashoffset} from services.donut_segments; `total` is the center
+figure. No JS — arcs are precomputed stroke-dasharrays. Colors come from the .tint-<name> palette.
+{% endcomment %}
+<div class="donut{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if segments %}
+  <div class="donut-ring">
+    <svg class="donut-svg" width="132" height="132" viewBox="0 0 132 132" aria-hidden="true">
+      <circle class="donut-track" cx="66" cy="66" r="{{ radius }}" stroke-width="16" />
+      {% for s in segments %}
+      <circle class="donut-seg tint-{{ s.tint }}" cx="66" cy="66" r="{{ radius }}" stroke-width="16"
+              stroke-linecap="butt" stroke-dasharray="{{ s.dasharray }}"
+              stroke-dashoffset="{{ s.dashoffset }}" />
+      {% endfor %}
+    </svg>
+    <div class="donut-hole">
+      <div>
+        <div class="donut-total"><c-money :amount="total" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></div>
+        <div class="donut-total-label">{{ total_label }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="donut-legend">
+    {% for s in segments %}
+    <div class="donut-legend-item">
+      <span class="legend-dot tint-{{ s.tint }}"></span>
+      <span class="legend-name">{{ s.label }}</span>
+      <span class="legend-val"><c-money :amount="s.value" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></span>
+      <span class="legend-pct">{{ s.pct|floatformat:0 }}%</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">{{ empty_text }}</p>
+  {% endif %}
+</div>

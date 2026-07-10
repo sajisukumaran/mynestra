@@ -391,6 +391,8 @@ img { max-width:100%; display:block; }
 :root[data-theme="dark"] .tile-glyph.banking { background:rgba(99,102,241,.18); color:#a5b4fc; }
 .tile-glyph.cards { background:#fef3c7; color:#b45309; }
 :root[data-theme="dark"] .tile-glyph.cards { background:rgba(245,158,11,.18); color:#fcd34d; }
+.tile-glyph.investments { background:#ede9fe; color:#6d28d9; }
+:root[data-theme="dark"] .tile-glyph.investments { background:rgba(139,92,246,.18); color:#c4b5fd; }
 .tile-glyph.soon { background:var(--surface-3); color:var(--text-subtle); }
 
 /* Meter — a thin utilization/progress bar (c-meter), e.g. credit-limit usage. */
@@ -401,6 +403,41 @@ img { max-width:100%; display:block; }
 .meter-fill.meter-danger { background:var(--danger); }
 .meter-fill.meter-warning { background:var(--warning); }
 .meter-fill.meter-success { background:var(--success); }
+
+/* Chart palette — one saturated hue per chip tint, exposed as --c so a donut segment (stroke),
+   a legend dot (background) and a bar fill (background) all read the same color from one class. */
+.tint-teal    { --c:#14b8a6; } .tint-blue   { --c:#3b82f6; } .tint-violet { --c:#8b5cf6; }
+.tint-amber   { --c:#f59e0b; } .tint-rose   { --c:#f43f5e; } .tint-emerald{ --c:#10b981; }
+.tint-sky     { --c:#38bdf8; } .tint-slate  { --c:#94a3b8; } .tint-orange { --c:#f97316; }
+.tint-fuchsia { --c:#d946ef; }
+
+/* Donut (c-donut) — a server-rendered SVG allocation ring + legend. Segments are precomputed
+   stroke-dasharray arcs (services.donut_segments); no JS, no build step. */
+.donut { display:flex; align-items:center; gap:22px; flex-wrap:wrap; }
+.donut-ring { position:relative; width:132px; height:132px; flex:none; }
+.donut-svg { transform:rotate(-90deg); }
+.donut-track { fill:none; stroke:var(--surface-3); }
+.donut-seg { fill:none; stroke:var(--c); transition:stroke-dasharray .4s ease; }
+.donut-hole { position:absolute; inset:0; display:grid; place-items:center; text-align:center; }
+.donut-total { font-size:var(--fs-xl); font-weight:700; line-height:1.1; }
+.donut-total-label { font-size:var(--fs-xs); color:var(--text-muted); }
+.donut-legend { display:flex; flex-direction:column; gap:9px; min-width:0; flex:1; }
+.donut-legend-item { display:flex; align-items:center; gap:9px; font-size:var(--fs-sm); }
+.legend-dot { width:10px; height:10px; border-radius:3px; background:var(--c); flex:none; }
+.legend-name { color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.legend-val { margin-left:auto; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+.legend-pct { color:var(--text-subtle); font-size:var(--fs-xs); width:42px; text-align:right;
+  font-variant-numeric:tabular-nums; }
+
+/* Bar list (c-bar-list) — labeled horizontal bars for a breakdown (reuses the meter track look). */
+.bar-list { display:flex; flex-direction:column; gap:13px; }
+.bar-row { display:flex; flex-direction:column; gap:5px; }
+.bar-head { display:flex; align-items:baseline; gap:8px; font-size:var(--fs-sm); }
+.bar-name { color:var(--text); }
+.bar-val { margin-left:auto; color:var(--text-muted); font-variant-numeric:tabular-nums; }
+.bar-track { height:8px; border-radius:999px; background:var(--surface-3); overflow:hidden; }
+.bar-fill { height:100%; border-radius:999px; background:var(--c); max-width:100%;
+  transition:width .3s ease; }
 
 /* Money — right-aligned tabular figures; negatives in danger + parentheses (accounting style). */
 .amount { font-variant-numeric:tabular-nums; white-space:nowrap; }
