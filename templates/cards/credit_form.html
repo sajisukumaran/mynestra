@@ -1,0 +1,204 @@
+{% extends "cards/base.html" %}
+{% block cards_heading %}{% if mode == 'create' %}New credit card{% else %}Edit card{% endif %}{% endblock %}
+
+{% block cards %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}cards/">Cards</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}cards/credit/">Credit cards</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}cards/credit/{{ card.pk }}/">{{ card.nickname }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New credit card{% else %}Edit card{% endif %}" subtitle="Fields marked * are required." />
+
+{% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
+
+<form method="post">{% csrf_token %}
+  <div class="stack stack-20">
+
+    <c-card title="Card" icon="credit-card">
+      <div x-data="{ newIssuer: {% if issuers %}false{% else %}true{% endif %} }">
+        <div class="form-grid">
+          <c-field label="Issuer" required>
+            <div x-show="!newIssuer" class="stack-8">
+              <c-select name="issuer" :disabled="newIssuer">
+                <option value="">Choose issuer…</option>
+                {% for i in issuers %}<option value="{{ i.pk }}"{% if card.issuer_id == i.pk %} selected{% endif %}>{{ i.display }}</option>{% endfor %}
+              </c-select>
+              <c-button variant="ghost" size="sm" @click="newIssuer = true"><c-icon name="plus" size="sm" /> Add a new issuer</c-button>
+            </div>
+            <div x-show="newIssuer" x-cloak class="stack-8">
+              <div class="control"><input name="new_issuer_name" placeholder="e.g. American Express"></div>
+              <c-button variant="ghost" size="sm" @click="newIssuer = false"><c-icon name="chevron-left" size="sm" /> Choose an existing issuer</c-button>
+            </div>
+          </c-field>
+          <c-field label="City" help="Optional — the new issuer's city." x-show="newIssuer" x-cloak>
+            <div class="control"><input name="new_issuer_city" placeholder="City"></div>
+          </c-field>
+          <c-field label="Network" required>
+            <c-select name="network">
+              {% for val, label in networks %}<option value="{{ val }}"{% if card.network == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </c-select>
+          </c-field>
+          <c-field label="Nickname" required><div class="control"><input name="nickname" value="{{ card.nickname|default:'' }}" placeholder="e.g. Amex Gold"></div></c-field>
+          <c-field label="Card number"><div class="control"><input name="number" value="{{ card.number|default:'' }}" placeholder="•••• last 4"></div></c-field>
+          <c-field label="Currency" required>
+            <c-select name="currency">
+              {% for c in currencies %}<option value="{{ c.code }}"{% if card.currency_id == c.code %} selected{% elif not card.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+            </c-select>
+          </c-field>
+          <c-field label="Credit limit" help="Optional."><div class="control"><input name="credit_limit" inputmode="decimal" value="{% if card.credit_limit != None %}{{ card.credit_limit|floatformat:'-2' }}{% endif %}" placeholder="0.00"></div></c-field>
+          <c-field label="APR %" help="Optional."><div class="control"><input name="apr" inputmode="decimal" value="{% if card.apr != None %}{{ card.apr|floatformat:'-2' }}{% endif %}" placeholder="e.g. 19.99"></div></c-field>
+          <c-field label="Statement day" help="Day of month (1–31)."><div class="control"><input name="statement_day" inputmode="numeric" value="{{ card.statement_day|default:'' }}" placeholder="e.g. 5"></div></c-field>
+          <c-field label="Payment due day" help="Day of month (1–31)."><div class="control"><input name="due_day" inputmode="numeric" value="{{ card.due_day|default:'' }}" placeholder="e.g. 25"></div></c-field>
+        </div>
+        <label class="row"><input type="checkbox" name="is_active"{% if card.is_active %} checked{% endif %}> <span class="muted">Active card</span></label>
+      </div>
+    </c-card>
+
+    <c-card title="Holders" icon="users">
+      <div class="stack stack-16"
+           x-data="{
+             extras: JSON.parse(document.getElementById('holder-extras-data').textContent),
+             primaryId: '{{ primary_holder }}',
+             addExtra(d){ if(!this.extras.some(e => String(e.id) === String(d.id))){ this.extras.push({ id: d.id, name: d.name, tint: d.tint || 'slate', initials: d.initials || '?' }); } if(this.$refs.holderQ){ this.$refs.holderQ.value = ''; } },
+             removeExtra(id){ this.extras = this.extras.filter(e => String(e.id) !== String(id)); if(String(this.primaryId) === String(id)){ this.primaryId = ''; } }
+           }">
+        <c-field label="Household members" help="Tap to add the members who hold this card (joint / authorized users allowed).">
+          <div class="row wrap">
+            {% for p in people %}{% with pid=p.pk|stringformat:'s' %}
+            <label class="fchip{% if pid in selected_holders %} active{% endif %}" x-data="{ on: {% if pid in selected_holders %}true{% else %}false{% endif %} }" :class="{ active: on }">
+              <input type="checkbox" name="holders" value="{{ p.pk }}" x-model="on" hidden>{{ p.display_name }}
+            </label>
+            {% endwith %}{% empty %}<span class="subtle">No household members yet — <a href="{{ ui_tenant_url }}setup/household-members/">add household members</a> (or search below).</span>{% endfor %}
+          </div>
+        </c-field>
+
+        <div x-show="extras.length" x-cloak class="stack-8">
+          <template x-for="e in extras" :key="e.id">
+            <div class="rel">
+              <span class="avatar a-sm" :class="'av-'+e.tint" x-text="e.initials"></span>
+              <div class="grow"><div class="r-name" x-text="e.name"></div><div class="r-role">Co-holder (not a household member)</div></div>
+              <c-button type="button" variant="ghost" size="sm" @click="removeExtra(e.id)"><c-icon name="x" size="sm" /> Remove</c-button>
+              <input type="hidden" name="holders" :value="e.id">
+            </div>
+          </template>
+        </div>
+
+        <c-field label="Add someone else" help="Search any contact to add as a co-holder.">
+          <c-input type="search" name="holder_q" x-ref="holderQ" autocomplete="off" placeholder="Search people…"
+                   hx-get="{{ ui_tenant_url }}cards/holder-search/"
+                   hx-trigger="input changed delay:200ms" hx-target="#holder-results" />
+          <div id="holder-results" class="rel-results"></div>
+        </c-field>
+
+        <c-field label="Primary holder" help="Optional — who to show first.">
+          <div class="control is-select">
+            <select name="primary_holder" x-model="primaryId">
+              <option value="">— none —</option>
+              {% for p in people %}<option value="{{ p.pk }}">{{ p.display_name }}</option>{% endfor %}
+              <template x-for="e in extras" :key="e.id"><option :value="e.id" x-text="e.name"></option></template>
+            </select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+      </div>
+      {{ holder_extras|json_script:"holder-extras-data" }}
+    </c-card>
+
+    {% if mode == 'create' %}
+    <c-card title="Opening balance" icon="pin">
+      <div class="form-grid">
+        <c-field label="Balance owed" help="Optional. Posts a dated opening entry (Cr this card / Dr Opening Balance Equity).">
+          <div class="control"><input name="opening_balance" inputmode="decimal" placeholder="0.00"></div>
+        </c-field>
+        <c-field label="As of"><div class="control"><input type="date" name="opening_date" value="{% now 'Y-m-d' %}"></div></c-field>
+      </div>
+    </c-card>
+    {% endif %}
+
+    {% if ui_expert %}
+    <c-card title="Accounting" icon="sliders-horizontal">
+      <div class="stack stack-16">
+        <p class="muted">Expert mode: choose exactly which ledger accounts this card uses. Leave a row on <span class="strong">Default</span> to let MyNestra decide.</p>
+
+        {% if mode == 'create' %}
+        <div x-data="{ glMode: 'auto' }">
+          <c-field label="This card's ledger node" help="Where the card's balance owed lives in your Chart of Accounts.">
+            <div class="control is-select">
+              <select name="gl_mode" x-model="glMode">
+                <option value="auto">Auto — nest under Credit Cards (recommended)</option>
+                <option value="parent">Create under a specific header…</option>
+                <option value="existing">Use an existing account…</option>
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+          </c-field>
+          <div x-show="glMode === 'parent'" x-cloak style="margin-top:10px;">
+            <c-field label="Parent header">
+              <div class="control is-select">
+                <select name="gl_parent">
+                  {% for h in liability_headers %}<option value="{{ h.pk }}">{{ h.code }} — {{ h.name }}</option>{% endfor %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+          </div>
+          <div x-show="glMode === 'existing'" x-cloak style="margin-top:10px;">
+            <c-field label="Existing account" help="A postable liability account you've created that isn't linked to another card yet.">
+              <div class="control is-select">
+                <select name="gl_existing">
+                  <option value="">Choose an account…</option>
+                  {% for a in adoptable_accounts %}<option value="{{ a.pk }}">{{ a.code }} — {{ a.name }}</option>{% endfor %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+          </div>
+        </div>
+        {% elif card.gl_account_id %}
+        <c-field label="This card's ledger node">
+          <div class="control" style="display:flex;align-items:center;">{{ card.gl_account.code }} — {{ card.gl_account.name }}</div>
+        </c-field>
+        {% endif %}
+
+        <c-field label="Which account each activity posts to">
+          <div class="form-grid">
+            {% for act in posting_activities %}
+            <c-field label="{{ act.label }}">
+              <div class="control is-select">
+                <select name="map_{{ act.key }}">
+                  <option value="">Default</option>
+                  {% if act.kind == 'income' %}
+                    {% for a in income_accounts %}<option value="{{ a.pk }}"{% if a.pk == act.current %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+                  {% else %}
+                    {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if a.pk == act.current %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+                  {% endif %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+            {% endfor %}
+          </div>
+        </c-field>
+      </div>
+    </c-card>
+    {% endif %}
+
+    <c-card title="Details" icon="calendar-days">
+      <div class="stack stack-16">
+        <div class="grid-halves">
+          <c-field label="Opened"><c-partial-date prefix="opened" day="{{ card.opened_day|default:'' }}" month="{{ card.opened_month|default:'' }}" year="{{ card.opened_year|default:'' }}" /></c-field>
+          <c-field label="Closed" help="Leave blank unless it has closed."><c-partial-date prefix="closed" day="{{ card.closed_day|default:'' }}" month="{{ card.closed_month|default:'' }}" year="{{ card.closed_year|default:'' }}" /></c-field>
+        </div>
+        <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ card.notes|default:'' }}</textarea></c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if error %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}cards/credit/{{ card.pk }}/{% else %}{{ ui_tenant_url }}cards/credit/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create card{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

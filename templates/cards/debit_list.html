@@ -1,0 +1,69 @@
+{% extends "cards/base.html" %}
+{% block cards_heading %}Debit cards{% endblock %}
+
+{% block cards %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}cards/">Cards</a><c-icon name="chevron-right" /><span class="strong">Debit cards</span></c-breadcrumb>
+
+<c-page-header title="Debit cards" subtitle="{{ total }} {{ total|pluralize:'card,cards' }} — instruments on your bank accounts">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}cards/debit/new/"><c-icon name="plus" /> New debit card</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by nickname, number or account…"></label>
+    {% if q %}<c-button href="{{ ui_tenant_url }}cards/debit/">Clear</c-button>{% endif %}
+  </form>
+
+  <c-card flush>
+    {% if cards %}
+    <c-table>
+      <thead><tr>
+        <c-th>Card</c-th>
+        <c-th>Linked account</c-th>
+        <c-th>Network</c-th>
+        <c-th>Holder</c-th>
+        <c-th>Expiry</c-th>
+        <th class="col-num">Balance</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for c in cards %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}cards/debit/{{ c.pk }}/">
+              <c-avatar tint="teal" size="sm" square><c-icon name="wallet" size="sm" /></c-avatar>
+              <div><div class="pc-name">{{ c.nickname }}</div>{% if c.masked_number %}<div class="pc-sub tnum">{{ c.masked_number }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td class="muted">{{ c.bank_account.nickname }} · {{ c.bank_account.bank.display }}</td>
+          <td><c-badge>{{ c.network_label }}</c-badge></td>
+          <td class="muted">{% if c.holder %}{{ c.holder.display_name }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+          <td class="muted tnum">{{ c.expiry_display|default:"—" }}</td>
+          <td class="col-num"><c-money :amount="c.bank_account.display_balance" symbol="{{ c.bank_account.currency.symbol }}" dp="{{ c.bank_account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+          <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}cards/debit/{{ c.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="wallet"
+      title="{% if q %}No cards match{% else %}No debit cards yet{% endif %}"
+      text="{% if q %}Try a different search.{% else %}Register a debit card that's attached to one of your bank accounts.{% endif %}">
+      {% if not q %}<c-button variant="primary" href="{{ ui_tenant_url }}cards/debit/new/"><c-icon name="plus" /> New debit card</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

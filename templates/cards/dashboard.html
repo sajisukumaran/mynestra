@@ -1,0 +1,56 @@
+{% extends "cards/base.html" %}
+{% block cards_heading %}Dashboard{% endblock %}
+
+{% block cards %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Cards</span></c-breadcrumb>
+
+<c-page-header title="Cards" subtitle="Your household's credit &amp; debit cards.">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}cards/credit/new/"><c-icon name="plus" /> New credit card</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="credit-card" tint="rose" value="{{ credit_count }}" label="Credit cards">
+      <c-slot name="foot">{% if txns_this_month %}{{ txns_this_month }} {{ txns_this_month|pluralize:'transaction,transactions' }} this month{% else %}across the household{% endif %}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="wallet" tint="teal" value="{{ debit_count }}" label="Debit cards">
+      <c-slot name="foot">on your bank accounts</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="coins" tint="amber" value="" label="Total owed">
+      <c-slot name="foot"><span class="strong"><c-money :amount="total_owed" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></span> {{ base.code }}</c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="credit-card" title="Your credit cards">
+      <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}cards/credit/"><c-icon name="chevron-right" size="sm" /> All</c-button></c-slot>
+      {% for c in credit_cards %}
+      <c-rel-row name="{{ c.nickname }}" role="{{ c.issuer.display }} · {{ c.network_label }}" href="{{ ui_tenant_url }}cards/credit/{{ c.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ c.issuer.avatar_tint }}" size="sm" square><c-icon name="credit-card" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="c.display_balance" symbol="{{ c.currency.symbol }}" dp="{{ c.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="credit-card" title="No credit cards yet"
+        text="Add a credit card to track balances, charges and payments.">
+        <c-button variant="primary" href="{{ ui_tenant_url }}cards/credit/new/"><c-icon name="plus" /> New credit card</c-button>
+      </c-empty-state>
+      {% endfor %}
+    </c-card>
+
+    <c-card icon="clock" title="Recent activity">
+      {% for t in recent %}
+      <c-rel-row name="{{ t.card.nickname }}" role="{{ t.type_label }}{% if t.memo %} · {{ t.memo }}{% endif %}" href="{{ ui_tenant_url }}cards/credit/{{ t.card_id }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ t.card.issuer.avatar_tint }}" size="sm"><c-icon name="{{ t.type_glyph }}" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail">
+          <span class="{% if t.increases_balance %}amount-neg{% else %}amount-pos{% endif %}"><c-money :amount="t.signed_amount" symbol="{{ t.card.currency.symbol }}" dp="{{ t.card.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>
+        </c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="clock" title="No transactions yet" text="Charges, payments and fees show up here." />
+      {% endfor %}
+    </c-card>
+  </div>
+</div>
+{% endblock %}

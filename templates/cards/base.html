@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% comment %}Cards app shell: topbar + Cards per-app sidebar (Dashboard / Credit cards / Debit
+cards). Child templates fill the `cards` block. Links build from ui_tenant_url.{% endcomment %}
+{% block title %}{% block cards_heading %}Cards{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Cards" subtitle="{{ ui_tenant_name }}" glyph="credit-card">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}cards/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Credit cards" icon="credit-card" count="{{ nav_credit }}" href="{{ ui_tenant_url }}cards/credit/" {% if active == 'credit' %}active="true"{% endif %} />
+      <c-sidebar-item label="Debit cards" icon="wallet" count="{{ nav_debit }}" href="{{ ui_tenant_url }}cards/debit/" {% if active == 'debit' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block cards %}{% endblock %}
+</c-shell>
+{% endblock %}

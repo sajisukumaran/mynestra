@@ -1,0 +1,56 @@
+{% extends "cards/base.html" %}
+{% block cards_heading %}{% if mode == 'create' %}New debit card{% else %}Edit debit card{% endif %}{% endblock %}
+
+{% block cards %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}cards/">Cards</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}cards/debit/">Debit cards</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}cards/debit/{{ card.pk }}/">{{ card.nickname }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New debit card{% else %}Edit debit card{% endif %}" subtitle="A debit card is an instrument on a bank account — its spending is recorded in Banking." />
+
+{% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
+
+<form method="post">{% csrf_token %}
+  <div class="stack stack-20">
+    <c-card title="Debit card" icon="wallet">
+      <div class="form-grid">
+        <c-field label="Linked bank account" required help="The account this card draws from.">
+          <c-select name="bank_account">
+            <option value="">Choose account…</option>
+            {% for ba in bank_accounts %}<option value="{{ ba.pk }}"{% if card.bank_account_id == ba.pk %} selected{% endif %}>{{ ba.nickname }} · {{ ba.bank.display }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Network" required>
+          <c-select name="network">
+            {% for val, label in networks %}<option value="{{ val }}"{% if card.network == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Nickname" required><div class="control"><input name="nickname" value="{{ card.nickname|default:'' }}" placeholder="e.g. Everyday debit"></div></c-field>
+        <c-field label="Card number"><div class="control"><input name="number" value="{{ card.number|default:'' }}" placeholder="•••• last 4"></div></c-field>
+        <c-field label="Holder" help="Who this card is issued to.">
+          <c-select name="holder">
+            <option value="">— none —</option>
+            {% for p in people %}<option value="{{ p.pk }}"{% if card.holder_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Daily limit" help="Optional."><div class="control"><input name="daily_limit" inputmode="decimal" value="{% if card.daily_limit != None %}{{ card.daily_limit|floatformat:'-2' }}{% endif %}" placeholder="0.00"></div></c-field>
+        <c-field label="Expiry month" help="1–12."><div class="control"><input name="expiry_month" inputmode="numeric" value="{{ card.expiry_month|default:'' }}" placeholder="MM"></div></c-field>
+        <c-field label="Expiry year"><div class="control"><input name="expiry_year" inputmode="numeric" value="{{ card.expiry_year|default:'' }}" placeholder="YYYY"></div></c-field>
+      </div>
+      <label class="row"><input type="checkbox" name="is_active"{% if card.is_active %} checked{% endif %}> <span class="muted">Active card</span></label>
+    </c-card>
+
+    <c-card title="Notes" icon="file-text">
+      <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ card.notes|default:'' }}</textarea></c-field>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if error %}Some fields need attention before saving.{% else %}Registered to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}cards/debit/{{ card.pk }}/{% else %}{{ ui_tenant_url }}cards/debit/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Register card{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

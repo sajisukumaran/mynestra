@@ -1,0 +1,57 @@
+{% extends "cards/base.html" %}
+{% block cards_heading %}{{ card.nickname }}{% endblock %}
+
+{% block cards %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}cards/">Cards</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}cards/debit/">Debit cards</a><c-icon name="chevron-right" />
+  <span class="strong">{{ card.nickname }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="teal"><c-icon name="wallet" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ card.nickname }}</h1>
+          <c-badge>{{ card.network_label }}</c-badge>
+          {% if not card.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
+        </div>
+        <div class="muted">Linked to <a href="{{ ui_tenant_url }}banking/accounts/{{ card.bank_account_id }}/">{{ card.bank_account.nickname }}</a> · {{ card.bank_account.bank.display }}{% if card.masked_number %} · <span class="tnum">{{ card.masked_number }}</span>{% endif %}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="coins" size="sm" class="subtle" /><span class="strong"><c-money :amount="card.bank_account.display_balance" symbol="{{ card.bank_account.currency.symbol }}" dp="{{ card.bank_account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> {{ card.bank_account.currency.code }} available</span>
+          {% if card.holder %}<span class="row"><c-icon name="user-round" size="sm" class="subtle" />{{ card.holder.display_name }}</span>{% endif %}
+          {% if card.expiry_display %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />Expires {{ card.expiry_display }}</span>{% endif %}
+          {% if card.daily_limit %}<span class="row"><c-icon name="activity" size="sm" class="subtle" />Daily limit <c-money :amount="card.daily_limit" symbol="{{ card.bank_account.currency.symbol }}" dp="{{ card.bank_account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete {{ card.nickname }}?" message="This moves the debit card to Recently deleted. Bank transactions tagged with it are unaffected.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}cards/debit/{{ card.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}cards/debit/{{ card.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  <c-card title="Spending on this card" icon="arrow-up">
+    <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}banking/accounts/{{ card.bank_account_id }}/"><c-icon name="landmark" size="sm" /> Open account</c-button></c-slot>
+    {% for t in spend %}
+    <c-rel-row name="{{ t.type_label }}{% if t.payee %} · {{ t.payee }}{% endif %}" role="{{ t.date|date:'d M Y' }}{% if t.memo %} · {{ t.memo }}{% endif %}" href="{{ ui_tenant_url }}banking/accounts/{{ t.account_id }}/">
+      <c-slot name="avatar"><c-avatar tint="slate" size="sm"><c-icon name="{{ t.type_glyph }}" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><span class="amount-neg"><c-money :amount="t.signed_amount" symbol="{{ t.account.currency.symbol }}" dp="{{ t.account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></c-slot>
+    </c-rel-row>
+    {% empty %}
+    <c-empty-state icon="wallet" title="No tagged spending yet"
+      text="When you record a withdrawal in Banking, tag it with this card to see per-card spending here." />
+    {% endfor %}
+  </c-card>
+</div>
+{% endblock %}

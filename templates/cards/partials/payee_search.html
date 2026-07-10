@@ -1,0 +1,20 @@
+{% comment %}htmx fragment: people + organizations for the merchant picker (charges/refunds).{% endcomment %}
+{% for p in people %}
+<button type="button" class="rel-pick" data-kind="person" data-id="{{ p.pk }}"
+        data-name="{{ p.display_name }}" data-tint="{{ p.avatar_tint }}" data-initials="{{ p.initials }}"
+        @click="pickPayee($el.dataset)">
+  <c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>
+  <div class="grow"><div class="r-name">{{ p.display_name }}</div><div class="r-role">Person</div></div>
+</button>
+{% endfor %}
+{% for o in orgs %}
+<button type="button" class="rel-pick" data-kind="org" data-id="{{ o.pk }}"
+        data-name="{{ o.display }}" data-tint="{{ o.avatar_tint }}" data-initials="{{ o.initials }}"
+        @click="pickPayee($el.dataset)">
+  <c-avatar tint="{{ o.avatar_tint }}" size="sm" square>{{ o.initials }}</c-avatar>
+  <div class="grow"><div class="r-name">{{ o.display }}</div><div class="r-role">Organization</div></div>
+</button>
+{% endfor %}
+{% if not people and not orgs %}
+<div class="rel-empty">{% if q %}No matches for “{{ q }}”.{% else %}Type to search people or organizations.{% endif %}</div>
+{% endif %}

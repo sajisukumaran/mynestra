@@ -1,0 +1,69 @@
+{% comment %}Credit-card transaction add/edit fields. Included inside a <form> whose Alpine x-data
+provides `type` + payee picker state (see credit_detail.html). Needs: card, picker_types,
+expense_accounts, bank_accounts. Pass `txn` (edit prefill) + a unique `suffix`.{% endcomment %}
+<div class="form-grid">
+  <c-field label="Type" required>
+    <div class="control is-select">
+      <select name="txn_type" @change="type = $event.target.value">
+        {% if txn.txn_type == 'opening' %}<option value="opening" selected>Opening balance</option>{% endif %}
+        {% for val, label in picker_types %}<option value="{{ val }}"{% if txn.txn_type == val or not txn and val == 'charge' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+  <c-field label="Amount" required help="In {{ card.currency.code }}."><div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div></c-field>
+</div>
+
+{# Category — charges & refunds (expense) #}
+<div x-show="type === 'charge' || type === 'refund'" x-cloak>
+  <c-field label="Category" help="What was purchased (charges) or refunded.">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'charge' && type !== 'refund'">
+        <option value="">Uncategorized (Other Expenses)</option>
+        {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Payee — charges & refunds (the merchant) #}
+<div x-show="type === 'charge' || type === 'refund'" x-cloak>
+  <c-field label="Merchant (optional)" help="Who you paid / who refunded you.">
+    <div x-show="!payeeId">
+      <c-input type="search" name="payee_q" autocomplete="off" placeholder="Search people or organizations…"
+               hx-get="{{ ui_tenant_url }}cards/payee-search/" hx-trigger="input changed delay:200ms, focus"
+               hx-target="#payee-results-{{ suffix }}" />
+      <div id="payee-results-{{ suffix }}" class="rel-results"></div>
+    </div>
+    <div x-show="payeeId" x-cloak class="rel">
+      <span class="avatar a-sm" :class="'av-'+payeeTint" x-text="payeeInit"></span>
+      <div class="grow"><div class="r-name" x-text="payeeName"></div></div>
+      <c-button type="button" variant="ghost" size="sm" @click="clearPayee()"><c-icon name="x" size="sm" /> Change</c-button>
+    </div>
+  </c-field>
+</div>
+<input type="hidden" name="payee_person" :value="payeeKind === 'person' ? payeeId : ''">
+<input type="hidden" name="payee_organization" :value="payeeKind === 'org' ? payeeId : ''">
+
+{# Payment — the paying bank account #}
+<div x-show="type === 'payment'" x-cloak>
+  <div class="grid-halves">
+    <c-field label="Paid from" help="A tracked bank account, or leave blank for an external source.">
+      <c-select name="counter_account">
+        <option value="">— external / untracked —</option>
+        {% for ba in bank_accounts %}<option value="{{ ba.pk }}"{% if txn.counter_account_id == ba.pk %} selected{% endif %}>{{ ba.nickname }} · {{ ba.bank.display }}</option>{% endfor %}
+      </c-select>
+    </c-field>
+    <c-field label="External source" help="If you paid from an untracked account."><c-input name="counter_external" value="{{ txn.counter_external|default:'' }}" placeholder="e.g. External bank" /></c-field>
+  </div>
+  {% if not txn %}<label class="row"><input type="checkbox" name="auto_match" checked> <span class="muted">Also record the withdrawal in the paying bank account</span></label>{% endif %}
+</div>
+
+{# Always #}
+<c-field label="Memo"><c-input name="memo" value="{{ txn.memo|default:'' }}" placeholder="Optional note" /></c-field>
+<div class="grid-halves">
+  <c-field label="Reference"><c-input name="reference" value="{{ txn.reference|default:'' }}" placeholder="Ref / confirmation no." /></c-field>
+  <label class="row"><input type="checkbox" name="cleared"{% if txn.cleared %} checked{% endif %}> <span class="muted">Cleared / reconciled</span></label>
+</div>
