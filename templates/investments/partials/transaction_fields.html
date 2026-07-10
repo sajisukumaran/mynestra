@@ -1,0 +1,124 @@
+{% comment %}Investment transaction add/edit fields. Included inside a <form> whose Alpine x-data
+provides `type` (selected txn type) + the payee picker state (payeeKind/payeeId/payeeName/payeeTint/
+payeeInit + pickPayee/clearPayee). Fields reveal per type via x-show. Needs: account, picker_types,
+securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit prefill) + unique
+`suffix`. Sells draw lots first-in, first-out.{% endcomment %}
+<div class="form-grid">
+  <c-field label="Type" required>
+    <div class="control is-select">
+      <select name="txn_type" @change="type = $event.target.value">
+        {% for val, label in picker_types %}<option value="{{ val }}"{% if txn.txn_type == val or not txn and val == 'buy' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+  <c-field label="Amount" required help="In {{ account.currency.code }}.">
+    <div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
+  </c-field>
+</div>
+
+{# Security — for holdings-related types #}
+<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening'].includes(type)" x-cloak>
+  <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest).">
+    <div class="control is-select">
+      <select name="security">
+        <option value="">— none / cash —</option>
+        {% for s in securities %}<option value="{{ s.pk }}"{% if txn.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Quantity + price — buy / sell / reinvest / opening-holding #}
+<div x-show="['buy','sell','dividend_reinvest','opening'].includes(type)" x-cloak>
+  <div class="grid-halves">
+    <c-field label="Quantity" help="Shares / units."><div class="control"><input name="quantity" inputmode="decimal" value="{% if txn and txn.quantity %}{{ txn.quantity|floatformat:'-6' }}{% endif %}" placeholder="0"></div></c-field>
+    <c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field>
+  </div>
+</div>
+
+{# Commission — buy / sell (capitalized into cost basis) #}
+<div x-show="type === 'buy' || type === 'sell'" x-cloak>
+  <c-field label="Commission" help="Added to cost basis on a buy; nets out of proceeds on a sell.">
+    <div class="control"><input name="fee" inputmode="decimal" value="{% if txn and txn.fee %}{{ txn.fee|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
+  </c-field>
+</div>
+
+{# Sell — cost basis note #}
+<div x-show="type === 'sell'" x-cloak><c-hint icon="info">Lots are sold first-in, first-out; the realized gain posts to Realized Capital Gain/Loss.</c-hint></div>
+
+{# Split ratio #}
+<div x-show="type === 'split'" x-cloak>
+  <div class="grid-halves">
+    <c-field label="New shares" help="e.g. 2 for a 2-for-1 split."><div class="control"><input name="split_ratio_new" inputmode="decimal" value="{{ txn.split_ratio_new|default:'' }}" placeholder="2"></div></c-field>
+    <c-field label="Per old shares" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
+  </div>
+</div>
+
+{# Contribution — optional income category (e.g. employer match) #}
+<div x-show="type === 'contribution'" x-cloak>
+  <c-field label="Treat as income?" help="Leave blank for a transfer of your own funds; pick an income account for e.g. an employer match.">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'contribution'">
+        <option value="">Own funds (Opening Balance Equity)</option>
+        {% for a in income_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Fee — expense category #}
+<div x-show="type === 'fee'" x-cloak>
+  <c-field label="Fee category">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'fee'">
+        <option value="">Default (Investment Fees)</option>
+        {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Transfer — the tracked bank account on the other side #}
+<div x-show="type === 'transfer_in' || type === 'transfer_out'" x-cloak>
+  <div class="grid-halves">
+    <c-field label="Bank account">
+      <c-select name="counter_account">
+        <option value="">— external / untracked —</option>
+        {% for ba in bank_accounts %}<option value="{{ ba.pk }}"{% if txn.counter_account_id == ba.pk %} selected{% endif %}>{{ ba.nickname }} · {{ ba.bank.display }}</option>{% endfor %}
+      </c-select>
+    </c-field>
+    <c-field label="External name" help="If the other side isn't tracked here."><c-input name="counter_external" value="{{ txn.counter_external|default:'' }}" placeholder="e.g. External bank" /></c-field>
+  </div>
+  {% if not txn %}<label class="row"><input type="checkbox" name="auto_match" checked> <span class="muted">Also record the matching leg in the bank account</span></label>{% endif %}
+</div>
+
+{# Payee — income / cash-in / cash-out #}
+<div x-show="['contribution','withdrawal','dividend','interest','cap_gain_dist'].includes(type)" x-cloak>
+  <c-field label="Payee (optional)" help="A person or organization on the other side.">
+    <div x-show="!payeeId">
+      <c-input type="search" name="payee_q" autocomplete="off" placeholder="Search people or organizations…"
+               hx-get="{{ ui_tenant_url }}investments/payee-search/" hx-trigger="input changed delay:200ms, focus"
+               hx-target="#payee-results-{{ suffix }}" />
+      <div id="payee-results-{{ suffix }}" class="rel-results"></div>
+    </div>
+    <div x-show="payeeId" x-cloak class="rel">
+      <span class="avatar a-sm" :class="'av-'+payeeTint" x-text="payeeInit"></span>
+      <div class="grow"><div class="r-name" x-text="payeeName"></div></div>
+      <c-button type="button" variant="ghost" size="sm" @click="clearPayee()"><c-icon name="x" size="sm" /> Change</c-button>
+    </div>
+  </c-field>
+</div>
+<input type="hidden" name="payee_person" :value="payeeKind === 'person' ? payeeId : ''">
+<input type="hidden" name="payee_organization" :value="payeeKind === 'org' ? payeeId : ''">
+
+{# Always #}
+<c-field label="Memo"><c-input name="memo" value="{{ txn.memo|default:'' }}" placeholder="Optional note" /></c-field>
+<div class="grid-halves">
+  <c-field label="Reference"><c-input name="reference" value="{{ txn.reference|default:'' }}" placeholder="Confirmation / ref" /></c-field>
+  <label class="row"><input type="checkbox" name="cleared"{% if txn.cleared %} checked{% endif %}> <span class="muted">Cleared / reconciled</span></label>
+</div>

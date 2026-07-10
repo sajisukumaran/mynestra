@@ -1,0 +1,202 @@
+{% extends "investments/base.html" %}
+{% block inv_heading %}{{ account.nickname }}{% endblock %}
+
+{% block inv %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/accounts/">Accounts</a><c-icon name="chevron-right" />
+  <span class="strong">{{ account.nickname }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ account.group_tint }}"><c-icon name="briefcase" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ account.nickname }}</h1>
+          <c-badge>{{ account.registration_label }}</c-badge>
+          {% if not account.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
+          {% if account.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
+        </div>
+        <div class="muted">{{ account.institution.display }}{% if account.branch %} · {{ account.branch.name }}{% endif %}{% if account.masked_number %} · <span class="tnum">{{ account.masked_number }}</span>{% endif %}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="trending-up" size="sm" class="subtle" /><span class="strong"><c-money :amount="account.total_value" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> value</span>
+          <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><c-money :amount="account.cash_balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> cash</span>
+          <span class="row"><c-icon name="percent" size="sm" class="subtle" />{% if account.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="account.unrealized_gain" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> unrealized</span>
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete {{ account.nickname }}?" message="This moves the account to Recently deleted. Its ledger entries stay posted.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {# Tabs #}
+  <div x-data="{ tab: 'holdings' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'holdings' }" @click="tab = 'holdings'"><c-icon name="briefcase" size="sm" /> Holdings {% if holdings %}<span class="tcount tnum">{{ holdings|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="coins" size="sm" /> Register {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'holders' }" @click="tab = 'holders'"><c-icon name="users" size="sm" /> Holders {% if holders %}<span class="tcount tnum">{{ holders|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# HOLDINGS #}
+    <div x-show="tab === 'holdings'">
+      <c-card flush>
+        {% if holdings %}
+        <c-table>
+          <thead><tr>
+            <c-th>Security</c-th>
+            <th class="col-num">Quantity</th>
+            <th class="col-num">Avg cost</th>
+            <th class="col-num">Price</th>
+            <th class="col-num">Market value</th>
+            <th class="col-num">Unrealized</th>
+          </tr></thead>
+          <tbody>
+            {% for h in holdings %}
+            <tr>
+              <td>
+                <a class="person-cell" href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/holdings/{{ h.security.id }}/">
+                  <c-avatar tint="{{ h.security.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar>
+                  <div><div class="pc-name">{{ h.security.display }}</div><div class="pc-sub">{{ h.security.asset_class_label }}</div></div>
+                </a>
+              </td>
+              <td class="col-num tnum">{{ h.quantity|floatformat:'-4' }}</td>
+              <td class="col-num"><c-money :amount="h.avg_cost" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+              <td class="col-num">{% if h.price %}<c-money :amount="h.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+              <td class="col-num"><c-money :amount="h.market_value" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+              <td class="col-num">{% if h.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="h.unrealized_gain" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="briefcase" title="No holdings yet" text="Record a buy (or an opening / existing holding) in the register to build positions." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# REGISTER #}
+    <div x-show="tab === 'register'" x-cloak>
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Transactions</span>
+          <c-modal title="Add transaction" class="modal-wide">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add transaction</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/new/"
+                  x-data="{ type:'buy', payeeKind:'', payeeId:'', payeeName:'', payeeTint:'slate', payeeInit:'?', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
+              <div class="stack-16">
+                {% include "investments/partials/transaction_fields.html" with suffix='new' %}
+                <div class="row"><c-button type="submit" variant="primary">Add transaction</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-modal>
+        </div>
+
+        {% if rows %}
+        <c-card flush>
+          <c-table>
+            <thead><tr>
+              <c-th>Date</c-th>
+              <c-th>Type</c-th>
+              <c-th>Details</c-th>
+              <c-th>Cleared</c-th>
+              <th class="col-num">Cash</th>
+              <th class="col-num">Balance</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {% for r in rows %}{% with t=r.txn %}
+              <tr>
+                <td class="muted tnum">{{ t.date|date:"d M Y" }}</td>
+                <td><span class="row"><c-icon name="{{ t.type_glyph }}" size="sm" class="subtle" /><c-badge>{{ t.type_label }}</c-badge></span></td>
+                <td>
+                  <div class="pc-name">{% if t.security %}{{ t.security.display }}{% elif t.counter_account %}{{ t.counter_account.nickname }}{% elif t.counter_external %}{{ t.counter_external }}{% else %}{{ t.type_label }}{% endif %}</div>
+                  <div class="pc-sub">
+                    {% if t.quantity %}{{ t.quantity|floatformat:'-4' }} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
+                    {% if t.txn_type == 'sell' and t.realized_gain %} · realized <c-money :amount="t.realized_gain" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
+                    {% if t.split_ratio_display %}{{ t.split_ratio_display }}{% endif %}
+                    {% if t.payee %}{% if t.quantity %} · {% endif %}{{ t.payee }}{% endif %}{% if t.memo %} · {{ t.memo }}{% endif %}
+                  </div>
+                </td>
+                <td>
+                  <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/cleared/">{% csrf_token %}
+                    <c-button type="submit" icon_only size="sm" variant="ghost" title="{% if t.cleared %}Cleared — click to unmark{% else %}Not cleared — click to mark{% endif %}"><c-icon name="{% if t.cleared %}circle-check{% else %}clock{% endif %}" size="sm" /></c-button>
+                  </form>
+                </td>
+                <td class="col-num">{% if t.signed_cash %}<span class="{% if t.direction == 'in' %}amount-pos{% elif t.direction == 'out' %}amount-neg{% endif %}"><c-money :amount="t.signed_cash" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>{% else %}<span class="subtle">—</span>{% endif %}</td>
+                <td class="col-num"><c-money :amount="r.balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td>
+                  <div class="cell-actions">
+                    <c-modal title="Edit transaction" class="modal-wide">
+                      <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                      <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/edit/"
+                            x-data="{ type:'{{ t.txn_type }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
+                        <div class="stack-16">
+                          {% include "investments/partials/transaction_fields.html" with txn=t suffix=t.pk %}
+                          <div class="between">
+                            <c-button type="submit" variant="primary">Save</c-button>
+                            <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                          </div>
+                        </div>
+                      </form>
+                    </c-modal>
+                  </div>
+                </td>
+              </tr>
+              {% endwith %}{% endfor %}
+            </tbody>
+          </c-table>
+        </c-card>
+        {% else %}
+        <c-card><c-empty-state icon="coins" title="No transactions yet" text="Record buys, sells, dividends, interest, transfers and fees to build the register." /></c-card>
+        {% endif %}
+      </div>
+    </div>
+
+    {# HOLDERS #}
+    <div x-show="tab === 'holders'" x-cloak>
+      <c-card title="Account holders" icon="users">
+        <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/edit/"><c-icon name="pencil" size="sm" /> Manage</c-button></c-slot>
+        {% for h in holders %}
+        <c-rel-row name="{{ h.person.display_name }}" role="{{ h.person.list_subtitle }}" href="{{ ui_tenant_url }}contacts/people/{{ h.person.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ h.person.avatar_tint }}" size="sm">{{ h.person.initials }}</c-avatar></c-slot>
+          {% if h.is_primary %}<c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="users" title="No holders yet" text="Add the household members who hold this account.">
+          <c-button variant="primary" href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/edit/"><c-icon name="pencil" /> Manage holders</c-button>
+        </c-empty-state>
+        {% endfor %}
+      </c-card>
+    </div>
+
+    {# HISTORY #}
+    <div x-show="tab === 'history'" x-cloak>
+      <c-card>
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this account{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}<span class="subtle">No history yet.</span>{% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

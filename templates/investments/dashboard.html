@@ -1,0 +1,99 @@
+{% extends "investments/base.html" %}
+{% load money %}
+{% block inv_heading %}Dashboard{% endblock %}
+
+{% block inv %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Investments</span></c-breadcrumb>
+
+<c-page-header title="Investments" subtitle="Your household's portfolio, holdings &amp; activity.">
+  <c-slot name="actions">
+    <c-button href="{{ ui_tenant_url }}investments/securities/new/"><c-icon name="plus" /> New security</c-button>
+    <c-button variant="primary" href="{{ ui_tenant_url }}investments/accounts/new/"><c-icon name="plus" /> New account</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  {# ---- Headline stats ---- #}
+  <div class="stat-grid">
+    <c-stat-tile icon="trending-up" tint="violet" value="{{ base.symbol }}{{ total_value|moneyfmt:'0' }}" label="Portfolio value">
+      <c-slot name="foot">{{ accounts_count }} {{ accounts_count|pluralize:'account,accounts' }} · {{ institutions_count }} {{ institutions_count|pluralize:'institution,institutions' }}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="briefcase" tint="teal" value="{{ base.symbol }}{{ total_market|moneyfmt:'0' }}" label="Invested">
+      <c-slot name="foot">{{ holdings_count }} {{ holdings_count|pluralize:'holding,holdings' }} at market</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="percent" tint="{% if unrealized >= 0 %}teal{% else %}rose{% endif %}" value="{{ unrealized_pct|floatformat:1 }}%" label="Unrealized gain">
+      <c-slot name="foot"><c-delta dir="{{ gain_dir }}" value="{{ base.symbol }}{{ unrealized|moneyfmt:'0' }}" /></c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="banknote" tint="blue" value="{{ base.symbol }}{{ total_cash|moneyfmt:'0' }}" label="Cash">
+      <c-slot name="foot">settlement cash</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="coins" tint="amber" value="{{ base.symbol }}{{ income_ytd|moneyfmt:'0' }}" label="Income YTD">
+      <c-slot name="foot">dividends &amp; interest</c-slot>
+    </c-stat-tile>
+  </div>
+
+  {# ---- Allocation + breakdown ---- #}
+  <div class="grid-2">
+    <c-card icon="pie-chart" title="Allocation">
+      <c-slot name="actions"><span class="subtle">by asset class</span></c-slot>
+      <c-donut :segments="donut" :total="total_value" total_label="Portfolio" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" empty_text="Add holdings to see your allocation." />
+    </c-card>
+    <c-card icon="briefcase" title="By account type">
+      <c-bar-list :items="group_bars" :total="group_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" empty_text="No holdings yet." />
+    </c-card>
+  </div>
+
+  {# ---- Accounts + activity ---- #}
+  <div class="grid-2">
+    <c-card icon="briefcase" title="Your accounts">
+      {% for a in accounts %}
+      <c-rel-row name="{{ a.nickname }}" role="{{ a.institution.display }} · {{ a.registration_label }}" href="{{ ui_tenant_url }}investments/accounts/{{ a.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ a.group_tint }}" size="sm" square><c-icon name="briefcase" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="a.total_value" symbol="{{ a.currency.symbol }}" dp="{{ a.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="briefcase" title="No accounts yet" text="Add a brokerage, retirement or HSA account to start tracking holdings.">
+        <c-button variant="primary" href="{{ ui_tenant_url }}investments/accounts/new/"><c-icon name="plus" /> New account</c-button>
+      </c-empty-state>
+      {% endfor %}
+    </c-card>
+
+    <div class="stack stack-20">
+      <c-card icon="star" title="Top holdings">
+        {% for h in top_holdings %}
+        <c-rel-row name="{{ h.security.display }}" role="{{ h.security.asset_class_label }}">
+          <c-slot name="avatar"><c-avatar tint="{{ h.security.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar></c-slot>
+          <c-slot name="tail"><c-money :amount="h.mv" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="star" title="No holdings yet" text="Buy a security to see your top positions." />
+        {% endfor %}
+      </c-card>
+
+      <c-card icon="clock" title="Recent activity">
+        {% for t in recent %}
+        <c-rel-row name="{{ t.account.nickname }}" role="{{ t.type_label }}{% if t.security %} · {{ t.security.symbol }}{% endif %}" href="{{ ui_tenant_url }}investments/accounts/{{ t.account_id }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ t.account.group_tint }}" size="sm"><c-icon name="{{ t.type_glyph }}" size="sm" /></c-avatar></c-slot>
+          <c-slot name="tail">
+            <span class="{% if t.direction == 'in' %}amount-pos{% elif t.direction == 'out' %}amount-neg{% endif %}"><c-money :amount="t.amount" symbol="{{ t.account.currency.symbol }}" dp="{{ t.account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>
+          </c-slot>
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="clock" title="No transactions yet" text="Buys, sells, dividends and transfers show up here." />
+        {% endfor %}
+      </c-card>
+
+      {% if maturities %}
+      <c-card icon="calendar-days" title="Upcoming CD maturities">
+        {% for s in maturities %}
+        <c-rel-row name="{{ s.display }}" role="Matures {{ s.maturity_date|date:'d M Y' }}" href="{{ ui_tenant_url }}investments/securities/{{ s.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="blue" size="sm" square><c-icon name="calendar-days" size="sm" /></c-avatar></c-slot>
+          {% if s.apr %}<c-slot name="tail"><c-badge variant="info">{{ s.apr|floatformat:2 }}% APR</c-badge></c-slot>{% endif %}
+        </c-rel-row>
+        {% endfor %}
+      </c-card>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

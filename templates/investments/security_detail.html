@@ -1,0 +1,75 @@
+{% extends "investments/base.html" %}
+{% block inv_heading %}{{ security.display }}{% endblock %}
+
+{% block inv %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}investments/securities/">Securities</a><c-icon name="chevron-right" /><span class="strong">{{ security.symbol|default:security.name }}</span></c-breadcrumb>
+
+<div class="stack-20">
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ security.tint }}"><c-icon name="tag" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ security.display }}</h1>
+          <c-badge>{{ security.kind_label }}</c-badge>
+          <c-chip tint="{{ security.tint }}">{{ security.asset_class_label }}</c-chip>
+          {% if not security.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
+        </div>
+        <div class="ph-meta">
+          {% if security.latest_price %}<span class="row"><c-icon name="coins" size="sm" class="subtle" /><span class="strong"><c-money :amount="security.latest_price" symbol="{{ security.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></span> latest</span>{% endif %}
+          {% if security.is_cd %}
+            {% if security.apr %}<span class="row"><c-icon name="percent" size="sm" class="subtle" />{{ security.apr|floatformat:2 }}% APR</span>{% endif %}
+            {% if security.maturity_date %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />Matures {{ security.maturity_date|date:"d M Y" }}</span>{% endif %}
+          {% endif %}
+        </div>
+      </div>
+      <div class="row">
+        <c-button variant="primary" href="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  <div class="grid-2">
+    <c-card title="Prices" icon="coins">
+      <c-slot name="actions">
+        <c-modal title="Add price">
+          <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add price</c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/price/">{% csrf_token %}
+            <div class="stack-16">
+              <div class="grid-halves">
+                <c-field label="Price / unit" required><div class="control"><input name="price" inputmode="decimal" placeholder="0.00"></div></c-field>
+                <c-field label="As of" required><div class="control"><input type="date" name="as_of" value="{{ today|date:'Y-m-d' }}"></div></c-field>
+              </div>
+              <c-field label="Source"><c-input name="source" placeholder="e.g. Broker statement" /></c-field>
+              <div class="row"><c-button type="submit" variant="primary">Add price</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </div>
+          </form>
+        </c-modal>
+      </c-slot>
+      {% if prices %}
+      <c-table>
+        <thead><tr><c-th>As of</c-th><th class="col-num">Price</th><c-th>Source</c-th></tr></thead>
+        <tbody>
+          {% for p in prices %}
+          <tr><td class="muted tnum">{{ p.as_of|date:"d M Y" }}</td><td class="col-num"><c-money :amount="p.price" symbol="{{ security.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td><td class="muted">{{ p.source|default:"—" }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </c-table>
+      {% else %}
+      <c-empty-state icon="coins" title="No prices yet" text="Add a price to mark holdings of this security to market." />
+      {% endif %}
+    </c-card>
+
+    <c-card title="Held in" icon="briefcase">
+      {% for p in positions %}
+      <c-rel-row name="{{ p.account.nickname }}" role="{{ p.account.institution.display }}" href="{{ ui_tenant_url }}investments/accounts/{{ p.account.pk }}/holdings/{{ security.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ p.account.group_tint }}" size="sm" square><c-icon name="briefcase" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><span class="tnum">{{ p.qty|floatformat:'-4' }}</span></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="briefcase" title="Not held" text="No open positions in this security." />
+      {% endfor %}
+    </c-card>
+  </div>
+</div>
+{% endblock %}

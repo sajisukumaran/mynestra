@@ -1,0 +1,59 @@
+{% extends "investments/base.html" %}
+{% block inv_heading %}{% if mode == 'create' %}New security{% else %}Edit security{% endif %}{% endblock %}
+
+{% block inv %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/securities/">Securities</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/">{{ security.symbol|default:security.name }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New security{% else %}Edit security{% endif %}" subtitle="A tradable instrument — stock, fund, ETF, bond, CD…" />
+
+<form method="post" x-data="{ kind: '{{ security.kind|default:'stock' }}' }">{% csrf_token %}
+  <div class="stack stack-20">
+    <c-card title="Security" icon="tag">
+      <div class="form-grid">
+        <c-field label="Symbol / ticker" help="Optional for CDs."><div class="control">{{ form.symbol }}</div></c-field>
+        <c-field label="Name" required error="{{ form.name.errors.0 }}"><div class="control">{{ form.name }}</div></c-field>
+        <c-field label="Type" required>
+          <div class="control is-select">
+            <select name="kind" x-model="kind">
+              {% for val, label in kinds %}<option value="{{ val }}"{% if security.kind == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Asset class" required help="Drives the allocation charts.">
+          <c-select name="asset_class">
+            {% for val, label in asset_classes %}<option value="{{ val }}"{% if security.asset_class == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Currency" required>
+          <c-select name="currency">
+            {% for c in currencies %}<option value="{{ c.code }}"{% if security.currency_id == c.code %} selected{% elif not security.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+      <label class="row">{{ form.is_active }} <span class="muted">Active</span></label>
+    </c-card>
+
+    <c-card title="Term deposit" icon="calendar-days" x-show="kind === 'cd'" x-cloak>
+      <div class="form-grid">
+        <c-field label="APR %" help="Annual percentage rate."><div class="control">{{ form.apr }}</div></c-field>
+        <c-field label="Maturity date"><div class="control">{{ form.maturity_date }}</div></c-field>
+      </div>
+    </c-card>
+
+    <c-card title="Notes" icon="file-text">
+      <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea></c-field>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if form.errors %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}investments/securities/{{ security.pk }}/{% else %}{{ ui_tenant_url }}investments/securities/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create security{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

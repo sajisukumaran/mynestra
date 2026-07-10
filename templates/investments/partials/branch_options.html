@@ -1,0 +1,4 @@
+{% comment %}htmx fragment: <option>s for the account form's branch select (swapped when the
+institution changes).{% endcomment %}
+<option value="">Branch (optional)…</option>
+{% for b in branches %}<option value="{{ b.pk }}">{{ b.name }}</option>{% endfor %}

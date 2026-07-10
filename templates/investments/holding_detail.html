@@ -1,0 +1,87 @@
+{% extends "investments/base.html" %}
+{% block inv_heading %}{{ security.display }}{% endblock %}
+
+{% block inv %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/">{{ account.nickname }}</a><c-icon name="chevron-right" />
+  <span class="strong">{{ security.symbol|default:security.name }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ security.tint }}"><c-icon name="tag" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ security.display }}</h1>
+          <c-badge>{{ security.kind_label }}</c-badge>
+          <c-chip tint="{{ security.tint }}">{{ security.asset_class_label }}</c-chip>
+        </div>
+        <div class="muted">In {{ account.nickname }}</div>
+        {% if holding %}
+        <div class="ph-meta">
+          <span class="row"><c-icon name="briefcase" size="sm" class="subtle" /><span class="strong tnum">{{ holding.quantity|floatformat:'-4' }}</span> shares</span>
+          <span class="row"><c-icon name="trending-up" size="sm" class="subtle" /><c-money :amount="holding.market_value" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> value</span>
+          <span class="row"><c-icon name="percent" size="sm" class="subtle" />{% if holding.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="holding.unrealized_gain" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> unrealized</span>
+        </div>
+        {% endif %}
+      </div>
+      <div class="row">
+        <c-button href="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/"><c-icon name="external-link" /> Security</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  <c-card title="Open lots" icon="briefcase" flush>
+    {% if lots %}
+    <c-table>
+      <thead><tr>
+        <c-th>Acquired</c-th>
+        <th class="col-num">Quantity</th>
+        <th class="col-num">Cost basis</th>
+        <th class="col-num">Cost / share</th>
+        <th class="col-num">Market value</th>
+        <th class="col-num">Unrealized</th>
+      </tr></thead>
+      <tbody>
+        {% for lot in lots %}
+        <tr>
+          <td class="muted tnum">{{ lot.acquired_date|date:"d M Y" }}</td>
+          <td class="col-num tnum">{{ lot.remaining_quantity|floatformat:'-4' }}</td>
+          <td class="col-num"><c-money :amount="lot.cost_basis" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num"><c-money :amount="lot.per_share_cost" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num"><c-money :amount="lot.market_value" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num">{% if lot.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="lot.unrealized_gain" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    {% else %}
+    <c-empty-state icon="briefcase" title="No open lots" text="This holding has been fully sold or not yet bought." />
+    {% endif %}
+  </c-card>
+
+  <c-card title="Transactions" icon="coins" flush>
+    {% if txns %}
+    <c-table>
+      <thead><tr><c-th>Date</c-th><c-th>Type</c-th><th class="col-num">Quantity</th><th class="col-num">Price</th><th class="col-num">Amount</th></tr></thead>
+      <tbody>
+        {% for t in txns %}
+        <tr>
+          <td class="muted tnum">{{ t.date|date:"d M Y" }}</td>
+          <td><span class="row"><c-icon name="{{ t.type_glyph }}" size="sm" class="subtle" /><c-badge>{{ t.type_label }}</c-badge></span></td>
+          <td class="col-num tnum">{% if t.quantity %}{{ t.quantity|floatformat:'-4' }}{% else %}—{% endif %}</td>
+          <td class="col-num">{% if t.price %}<c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+          <td class="col-num"><c-money :amount="t.amount" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    {% else %}
+    <c-empty-state icon="coins" title="No transactions" text="No activity for this security in this account." />
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

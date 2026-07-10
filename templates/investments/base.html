@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% comment %}Investments app shell: topbar + Investments per-app sidebar. Composes the kit.{% endcomment %}
+{% block title %}{% block inv_heading %}Investments{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Investments" subtitle="{{ ui_tenant_name }}" glyph="trending-up">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}investments/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Accounts" icon="briefcase" count="{{ nav_accounts }}" href="{{ ui_tenant_url }}investments/accounts/" {% if active == 'accounts' %}active="true"{% endif %} />
+      <c-sidebar-item label="Securities" icon="tag" count="{{ nav_securities }}" href="{{ ui_tenant_url }}investments/securities/" {% if active == 'securities' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block inv %}{% endblock %}
+</c-shell>
+{% endblock %}
