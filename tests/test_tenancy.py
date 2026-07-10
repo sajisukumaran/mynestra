@@ -151,3 +151,46 @@ def test_banking_accounts_transactions_and_ledger_are_isolated(make_tenant):
         assert not BankAccount.objects.filter(nickname="Alpha Checking").exists()
         # The opening entry posted in Alpha must not appear in Beta's ledger.
         assert JournalEntry.objects.count() == 0
+
+
+def test_investments_accounts_securities_lots_and_ledger_are_isolated(make_tenant):
+    """Module 5 (InvestmentAccount/Security/Lot/InvestmentTransaction) and the GL entries they post
+    must not leak across tenant schemas."""
+    from apps.investments.models import (
+        InvestmentAccount,
+        InvestmentTransaction,
+        InvTxnType,
+        Lot,
+        Security,
+    )
+    from apps.investments.services import apply_transaction, ensure_gl_account
+
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        acct = InvestmentAccount.objects.create(
+            institution=Organization.objects.create(name="Alpha-Only Broker"),
+            nickname="Alpha Taxable", registration="taxable_individual", currency_id="USD",
+        )
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="ALPH", name="Alpha Co", currency_id="USD")
+        opening = InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.OPENING,
+            date=datetime.date(2026, 1, 5), amount=Decimal("1000"))
+        apply_transaction(opening, is_new=True)
+        buy = InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.BUY, date=datetime.date(2026, 1, 6),
+            security=sec, quantity=Decimal("10"), price=Decimal("50"), amount=Decimal("500"))
+        apply_transaction(buy, is_new=True)
+        assert InvestmentAccount.objects.count() == 1
+        assert Lot.objects.count() == 1
+        assert acct.balance == Decimal("1000")  # cash 500 + cost 500
+
+    with schema_context(b.schema_name):
+        assert InvestmentAccount.objects.count() == 0
+        assert Security.objects.count() == 0
+        assert Lot.objects.count() == 0
+        assert InvestmentTransaction.objects.count() == 0
+        assert not InvestmentAccount.objects.filter(nickname="Alpha Taxable").exists()
+        assert JournalEntry.objects.count() == 0

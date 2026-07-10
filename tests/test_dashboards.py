@@ -177,6 +177,44 @@ def test_banking_launcher_tile_is_live(make_tenant, make_user, client):
     assert "Banking" in body and "banking/" in body  # live tile links to the app
 
 
+def test_investments_launcher_tile_is_live(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from decimal import Decimal
+
+        from apps.finance.models import Currency
+        from apps.investments.models import (
+            InvestmentAccount,
+            InvestmentTransaction,
+            InvTxnType,
+            Security,
+        )
+        from apps.investments.services import apply_transaction, ensure_gl_account
+
+        acct = InvestmentAccount.objects.create(
+            institution=Organization.objects.create(name="Fidelity"),
+            nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"),
+        )
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="ACME", name="Acme", currency_id="USD")
+        opening = InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.OPENING, date=datetime.date(2026, 1, 2),
+            amount=Decimal("1000"))
+        apply_transaction(opening, is_new=True)
+        buy = InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.BUY, date=datetime.date(2026, 1, 5),
+            security=sec, quantity=Decimal("4"), price=Decimal("100"), amount=Decimal("400"))
+        apply_transaction(buy, is_new=True)
+        counts = _launcher_counts("investments")
+    assert counts["Accounts"] == 1 and counts["Holdings"] == 1
+    assert counts["Value"] == Decimal("1000")
+
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/").content.decode()
+    assert "Investments" in body and "investments/" in body  # live tile links to the app
+
+
 def test_launcher_counts_are_tenant_isolated(make_tenant):
     a = make_tenant(name="Alpha")
     b = make_tenant(name="Beta")

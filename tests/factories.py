@@ -7,6 +7,7 @@ from apps.banking.models import BankAccount
 from apps.contacts.models import Person
 from apps.families.models import Family, FamilyMembership
 from apps.finance.models import Currency
+from apps.investments.models import InvestmentAccount, Security
 from apps.organizations.models import Branch, Organization
 
 
@@ -57,4 +58,28 @@ class BankAccountFactory(factory.django.DjangoModelFactory):
     bank = factory.SubFactory(OrganizationFactory)
     nickname = factory.Sequence(lambda n: f"Account{n}")
     account_type = "checking"
+    currency = factory.LazyFunction(lambda: Currency.objects.get(code="USD"))
+
+
+class InvestmentAccountFactory(factory.django.DjangoModelFactory):
+    """Needs the finance catalogs seeded (USD currency); use inside a tenant schema_context.
+    Call services.ensure_gl_account(acct) after building to provision the GL node."""
+
+    class Meta:
+        model = InvestmentAccount
+
+    institution = factory.SubFactory(OrganizationFactory)
+    nickname = factory.Sequence(lambda n: f"Portfolio{n}")
+    registration = "taxable_individual"
+    currency = factory.LazyFunction(lambda: Currency.objects.get(code="USD"))
+
+
+class SecurityFactory(factory.django.DjangoModelFactory):
+    class Meta:
+        model = Security
+
+    symbol = factory.Sequence(lambda n: f"SYM{n}")
+    name = factory.Sequence(lambda n: f"Security {n}")
+    kind = "stock"
+    asset_class = "equity"
     currency = factory.LazyFunction(lambda: Currency.objects.get(code="USD"))
