@@ -105,7 +105,7 @@ CHART_OF_ACCOUNTS = [
     ("5800", "Taxes", EXPENSE, "5000", True, ""),
     ("5850", "Bank Charges", EXPENSE, "5000", True, "bank_charges"),
     ("5860", "Interest Expense", EXPENSE, "5000", True, "interest_expense"),
-    # Advisory / account fees are expensed here; buy/sell commissions are capitalized into cost basis.
+    # Advisory / account fees are expensed here; buy/sell commissions are capitalized into basis.
     ("5870", "Investment Fees", EXPENSE, "5000", True, "investment_fees"),
     ("5900", "Other Expenses", EXPENSE, "5000", True, ""),
 ]

@@ -162,7 +162,7 @@ def test_transfer_clearing_nets_to_zero_with_matching_bank_leg(make_tenant):
         clearing = resolve_account("transfer_clearing")
         assert account_balance(clearing) == D("0")  # both legs net through 1150
         assert cash_balance(acct) == D("2000")
-        bank.refresh_from_db()  # the matching leg provisioned the bank's GL node on its own instance
+        bank.refresh_from_db()  # the matching leg provisioned the bank's GL node elsewhere
         assert bank.balance == D("-2000")           # money left the bank
 
 
