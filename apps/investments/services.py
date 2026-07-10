@@ -83,6 +83,11 @@ def _q_qty(x) -> Decimal:
     return Decimal(x).quantize(_SHARE)
 
 
+def _carry_total(carry) -> Decimal:
+    """Total cost basis of an in-kind `lot_carry` snapshot."""
+    return _q_amount(sum((Decimal(str(e["cost"])) for e in (carry or [])), ZERO))
+
+
 # --- GL account provisioning -----------------------------------------------------------------
 
 def _gl_name(account: InvestmentAccount) -> str:
@@ -194,11 +199,12 @@ def _plan_draws(txn) -> list[tuple[Lot, Decimal]]:
     return draws
 
 
-def _consume_lots(txn) -> Decimal:
-    """Draw the sale's quantity from lots, recording LotConsumptions; return the realized gain."""
-    draws = _plan_draws(txn)
-    net_proceeds = _q_amount(txn.net_proceeds)
-    total_qty = _q_qty(sum(q for _, q in draws))
+def _consume_draws(txn, draws, net_proceeds) -> Decimal:
+    """Consume the given lot draws at cost, allocating `net_proceeds` across them (recording a
+    LotConsumption per draw), and return the realized gain (proceeds − cost). Shared by SELL,
+    cash-merger (whole position for the buyout cash) and worthless (whole position for zero)."""
+    net_proceeds = _q_amount(net_proceeds)
+    total_qty = _q_qty(sum((q for _, q in draws), ZERO))
     total_cost = ZERO
     allocated = ZERO
     n = len(draws)
@@ -225,6 +231,29 @@ def _consume_lots(txn) -> Decimal:
         )
         total_cost = _q_amount(total_cost + cost)
     return _q_amount(net_proceeds - total_cost)
+
+
+def _consume_lots(txn) -> Decimal:
+    """Draw the sale's quantity from lots (FIFO or specific); return the realized gain."""
+    return _consume_draws(txn, _plan_draws(txn), txn.net_proceeds)
+
+
+def _all_open_draws(txn) -> list[tuple[Lot, Decimal]]:
+    """Every open lot of the transaction's security, drawn in full — for whole-position events
+    (worthless write-off, cash buyout/merger)."""
+    return [(lot, lot.remaining_quantity) for lot in _open_lots(txn.account, txn.security)]
+
+
+def _apply_worthless(txn) -> Decimal:
+    """Write the entire position off: dispose every open lot at cost for zero proceeds, realizing a
+    capital loss equal to the remaining basis. Cash-neutral."""
+    return _consume_draws(txn, _all_open_draws(txn), ZERO)
+
+
+def _apply_cash_merger(txn) -> Decimal:
+    """Cash buyout of the whole position: dispose every open lot for the buyout cash, realizing the
+    gain/loss (a full sell whose proceeds are the cash received)."""
+    return _consume_draws(txn, _all_open_draws(txn), _q_amount(txn.amount))
 
 
 def _apply_split(txn) -> None:
@@ -276,6 +305,54 @@ def _create_lot(txn, cost: Decimal) -> None:
     )
 
 
+def _apply_in_kind_out(txn) -> Decimal:
+    """Consume lots at cost (FIFO or specific), realizing NO gain, and materialize the consumed
+    lots onto `txn.lot_carry` (persisted by `rebuild_account_lots`) so the paired IN leg can
+    recreate them with their original acquisition date + cost basis."""
+    draws = _plan_draws(txn)
+    carry = []
+    for lot, take in draws:
+        if lot.remaining_quantity and lot.remaining_quantity != ZERO:
+            cost = _q_amount(lot.cost_basis * (take / lot.remaining_quantity))
+        else:
+            cost = ZERO
+        acquired = lot.acquired_date
+        lot.remaining_quantity = _q_qty(lot.remaining_quantity - take)
+        lot.cost_basis = _q_amount(lot.cost_basis - cost)
+        if lot.remaining_quantity <= ZERO:
+            lot.remaining_quantity = ZERO
+            lot.cost_basis = ZERO
+            lot.open = False
+        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
+        LotConsumption.objects.create(  # proceeds = cost → zero realized gain
+            sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=cost
+        )
+        carry.append(
+            {"acquired_date": acquired.isoformat(), "quantity": str(take), "cost": str(cost)}
+        )
+    txn.lot_carry = carry
+    return ZERO
+
+
+def _apply_in_kind_in(txn) -> None:
+    """Recreate the transferred lots from the snapshot, preserving each lot's original acquisition
+    date + cost basis exactly (multiple carry entries → multiple lots)."""
+    for e in (txn.lot_carry or []):
+        qty = _q_qty(Decimal(str(e["quantity"])))
+        cost = _q_amount(Decimal(str(e["cost"])))
+        Lot.objects.create(
+            account=txn.account,
+            security=txn.security,
+            acquired_date=datetime.date.fromisoformat(e["acquired_date"]),
+            original_quantity=qty,
+            remaining_quantity=qty,
+            original_cost=cost,
+            cost_basis=cost,
+            open=qty > ZERO,
+            source_txn=txn,
+        )
+
+
 def _apply_lot_effect(txn) -> Decimal:
     """Apply a transaction's lot effect during a replay; return its realized gain (0 if n/a)."""
     t = txn.txn_type
@@ -295,28 +372,57 @@ def _apply_lot_effect(txn) -> Decimal:
         return ZERO
     if t == InvTxnType.RETURN_OF_CAPITAL:
         return _apply_return_of_capital(txn)
+    if t == InvTxnType.IN_KIND_OUT:
+        return _apply_in_kind_out(txn)
+    if t == InvTxnType.IN_KIND_IN:
+        _apply_in_kind_in(txn)
+        return ZERO
+    if t == InvTxnType.WORTHLESS:
+        return _apply_worthless(txn)
+    if t == InvTxnType.CASH_MERGER:
+        return _apply_cash_merger(txn)
     return ZERO
 
 
-def rebuild_account_lots(account) -> list[int]:
-    """Wipe and replay the account's register in date order, rebuilding all lots and each sell's
-    realized gain. Returns the ids of SELL / return-of-capital txns whose realized gain changed."""
-    before = {t.id: t.realized_gain for t in account.transactions.all()}
+@dataclass
+class RebuildResult:
+    """Outcome of a register replay: which entries need re-posting downstream."""
+    resell_ids: list[int]      # SELL / return-of-capital (etc.) whose realized gain shifted
+    resync_out_ids: list[int]  # IN_KIND_OUT legs whose materialized lot_carry snapshot changed
+
+
+# Types whose realized gain, if it shifts on replay, requires re-posting their GL entry.
+_GAIN_TYPES = frozenset({
+    InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
+    InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
+})
+
+
+def rebuild_account_lots(account) -> RebuildResult:
+    """Wipe and replay the account's register in date order, rebuilding all lots + each
+    disposition's realized gain + each in-kind-out's materialized snapshot. Returns the txns
+    needing a re-post."""
+    before = {t.id: (t.realized_gain, t.lot_carry) for t in account.transactions.all()}
     LotConsumption.objects.filter(sale_txn__account=account).delete()
     Lot.objects.filter(account=account).delete()
 
-    changed: list[int] = []
+    resell: list[int] = []
+    resync: list[int] = []
     for txn in account.transactions.order_by("date", "id"):
         rg = _q_amount(_apply_lot_effect(txn))
+        fields = []
         if txn.realized_gain != rg:
             txn.realized_gain = rg
-            txn.save(update_fields=["realized_gain", "updated_at"])
-        if (
-            txn.txn_type in (InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL)
-            and before.get(txn.id, ZERO) != rg
-        ):
-            changed.append(txn.id)
-    return changed
+            fields.append("realized_gain")
+        prev_carry = before.get(txn.id, (None, None))[1]
+        if txn.txn_type == InvTxnType.IN_KIND_OUT and prev_carry != txn.lot_carry:
+            fields.append("lot_carry")
+            resync.append(txn.id)
+        if fields:
+            txn.save(update_fields=[*fields, "updated_at"])
+        if txn.txn_type in _GAIN_TYPES and before.get(txn.id, (ZERO, None))[0] != rg:
+            resell.append(txn.id)
+    return RebuildResult(resell, resync)
 
 
 # --- Posting ---------------------------------------------------------------------------------
@@ -377,7 +483,25 @@ def _lines_for(txn) -> list[LineInput]:
     if t == InvTxnType.FEE:
         contra = txn.category_account or resolve_posting_account(acct, "fee_expense", INVEST_FEES)
         return [line(contra, debit=amount, **payee), line(gl, credit=amount)]
-    if t in (InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL):
+    if t in (InvTxnType.IN_KIND_IN, InvTxnType.IN_KIND_OUT):
+        # Securities move at cost. Internal transfers net via 1150 clearing (the paired leg posts
+        # the other side); external transfers cross the household boundary against opening equity.
+        cost = _carry_total(txn.lot_carry)
+        if cost <= ZERO:
+            return []
+        contra = (
+            resolve_account(TRANSFER_CLEARING)
+            if txn.counter_investment_account_id
+            else resolve_account(OPENING_EQUITY)
+        )
+        if t == InvTxnType.IN_KIND_IN:
+            return [line(gl, debit=cost), line(contra, credit=cost)]
+        return [line(contra, debit=cost), line(gl, credit=cost)]
+    if t in (InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
+             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER):
+        # Only the realized gain/loss hits the ledger — the gl node already carries the position at
+        # cost, so a disposition changes it by exactly (proceeds − cost). Cash-merger's cash comes
+        # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss).
         gain = _q_amount(txn.realized_gain)
         if gain > ZERO:
             return [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
@@ -438,35 +562,118 @@ def unpost_transaction(txn, *, user=None) -> None:
 
 # --- Orchestration (called by views after any register mutation) -----------------------------
 
-@transaction.atomic
-def apply_transaction(txn, *, user=None, is_new=True):
-    """Rebuild lots (so realized gains are current), then post/repost this txn and re-post any other
-    sell whose realized gain shifted."""
-    changed = rebuild_account_lots(txn.account)
-    txn.refresh_from_db()
-    if is_new:
-        post_transaction(txn, user=user)
-    else:
-        repost_transaction(txn, user=user)
-    for tid in changed:
-        if tid == txn.id:
+def _repost_shifted(ids, *, exclude=None, user=None) -> None:
+    """Repost each disposition whose realized gain shifted on replay (skipping `exclude`)."""
+    for tid in ids:
+        if tid == exclude:
             continue
         other = InvestmentTransaction.objects.filter(id=tid).first()
         if other is not None:
             repost_transaction(other, user=user)
 
 
+def _resync_out_legs(ids, *, user=None, seen=None) -> None:
+    """Re-sync the managed mirror of each in-kind-out leg whose materialized snapshot changed."""
+    seen = seen if seen is not None else set()
+    for tid in ids:
+        if tid in seen:
+            continue
+        seen.add(tid)
+        out = InvestmentTransaction.objects.filter(id=tid).first()
+        if out is not None:
+            sync_in_kind_pair(out, user=user, seen=seen)
+
+
 @transaction.atomic
-def remove_transaction(txn, *, user=None):
-    """Reverse + soft-delete a transaction, then rebuild lots and re-post affected sells."""
+def apply_transaction(txn, *, user=None, is_new=True):
+    """Rebuild lots (so realized gains + in-kind snapshots are current), post/repost this txn,
+    re-post any other disposition whose realized gain shifted, and sync the mirror leg of any
+    internal in-kind-out whose materialized snapshot changed (including this one on create/edit)."""
+    result = rebuild_account_lots(txn.account)
+    txn.refresh_from_db()
+    if is_new:
+        post_transaction(txn, user=user)
+    else:
+        repost_transaction(txn, user=user)
+    _repost_shifted(result.resell_ids, exclude=txn.id, user=user)
+    _resync_out_legs(result.resync_out_ids, user=user)
+
+
+@transaction.atomic
+def remove_transaction(txn, *, user=None, seen=None):
+    """Reverse + soft-delete a transaction, rebuild lots, re-post affected dispositions, sync any
+    affected in-kind-out mirrors, and (for an internal in-kind-out) remove its managed IN leg."""
     account = txn.account
+    pair = txn.paired_txn if txn.txn_type == InvTxnType.IN_KIND_OUT else None
     unpost_transaction(txn, user=user)
     txn.delete()
-    changed = rebuild_account_lots(account)
-    for tid in changed:
-        other = InvestmentTransaction.objects.filter(id=tid).first()
-        if other is not None:
-            repost_transaction(other, user=user)
+    result = rebuild_account_lots(account)
+    _repost_shifted(result.resell_ids, user=user)
+    _resync_out_legs(result.resync_out_ids, user=user, seen=seen)
+    if pair is not None:
+        remove_transaction(pair, user=user, seen=seen)
+
+
+def sync_in_kind_pair(out, *, user=None, seen=None):
+    """Maintain the managed mirror IN leg of an *internal* in-kind-out transfer: create it, keep its
+    lot snapshot / security / date in sync, or remove it if the transfer became external. The OUT
+    leg is authoritative (it materializes `lot_carry` from the lots actually consumed); the IN leg
+    is a mirror in the destination account so the 1150 clearing account nets to zero across the two.
+
+    Bounded on purpose: it rebuilds the destination and reposts *its* dispositions, but does not
+    chain into the destination's own outgoing transfers — each transfer stays correct when its own
+    OUT leg is created/edited. `seen` guards against re-entrancy in cyclic transfer graphs."""
+    if out.txn_type != InvTxnType.IN_KIND_OUT:
+        return
+    seen = seen if seen is not None else set()
+    dest = out.counter_investment_account
+    pair = out.paired_txn
+
+    if dest is None:
+        # External now (or changed to external) — drop any stale mirror.
+        if pair is not None:
+            _unlink_pair(out)
+            remove_transaction(pair, user=user, seen=seen)
+        return
+
+    # A pair living in the wrong account (destination changed) is stale — drop and recreate.
+    if pair is not None and pair.account_id != dest.id:
+        _unlink_pair(out)
+        remove_transaction(pair, user=user, seen=seen)
+        pair = None
+    if pair is None:
+        pair = InvestmentTransaction(account=dest, txn_type=InvTxnType.IN_KIND_IN)
+
+    pair.security = out.security
+    pair.date = out.date
+    pair.quantity = out.quantity
+    pair.amount = ZERO
+    pair.counter_investment_account = out.account
+    pair.lot_carry = out.lot_carry
+    pair.memo = out.memo
+    pair.reference = out.reference
+    pair.save()
+
+    if out.paired_txn_id != pair.id:
+        out.paired_txn = pair
+        out.save(update_fields=["paired_txn", "updated_at"])
+    if pair.paired_txn_id != out.id:
+        pair.paired_txn = out
+        pair.save(update_fields=["paired_txn", "updated_at"])
+
+    result = rebuild_account_lots(dest)
+    pair.refresh_from_db()
+    if pair.journal_entry_id is not None:
+        repost_transaction(pair, user=user)
+    else:
+        post_transaction(pair, user=user)
+    _repost_shifted(result.resell_ids, exclude=pair.id, user=user)
+
+
+def _unlink_pair(out) -> None:
+    if out.paired_txn_id is not None:
+        out.paired_txn = None
+        out.save(update_fields=["paired_txn", "updated_at"])
 
 
 def create_matching_leg(txn, *, user=None):
