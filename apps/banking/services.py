@@ -1,0 +1,239 @@
+"""Banking service layer — the bridge from bank transactions to the general ledger.
+
+Every `BankTransaction` becomes a balanced journal entry posted through `apps.finance.services`
+(never a hand-written ledger row). The double-entry mapping per transaction type lives in
+`_lines_for`. Posted entries are immutable, so an edit is a reverse-and-repost (bumping
+`posting_version` so the idempotency `external_key` stays unique) and a delete is a reverse.
+
+Each bank account owns one postable ledger account (`ensure_gl_account`) nested under the
+`1120 Checking` / `1130 Savings` header, so its balance is just `account_balance(gl_account)`.
+"""
+
+from __future__ import annotations
+
+import datetime
+from decimal import Decimal
+
+from apps.banking.models import AccountType as BankAccountType
+from apps.banking.models import BankAccount, BankTransaction, TxnType
+from apps.finance.models import ZERO, Account, AccountType, JournalEntry, Side
+from apps.finance.services import LineInput, post_entry, resolve_account, reverse_entry
+
+# Fixed contra accounts (resolved by stable system_key / code).
+INTEREST_INCOME = "4400"          # Interest & Dividends
+BANK_CHARGES = "bank_charges"     # 5850 Bank Charges (system_key)
+TRANSFER_CLEARING = "transfer_clearing"  # 1150 Inter-account Transfer (system_key)
+OPENING_EQUITY = "opening_balance_equity"  # 3100 (system_key)
+DEFAULT_INCOME = "4900"           # Other Income
+DEFAULT_EXPENSE = "5900"          # Other Expenses
+
+
+# --- GL account provisioning ----------------------------------------------------------------
+
+def _gl_name(account: BankAccount) -> str:
+    masked = account.masked_number
+    return f"{account.nickname} {masked}".strip() if masked else account.nickname
+
+
+def _parent_code(account: BankAccount) -> str:
+    return "1120" if account.account_type == BankAccountType.CHECKING else "1130"
+
+
+def _next_child_code(parent: Account) -> str:
+    """The next free `<parent.code>.NN` code (string-sorts after the header, before the sibling)."""
+    prefix = f"{parent.code}."
+    highest = 0
+    for code in Account.objects.filter(parent=parent).values_list("code", flat=True):
+        if code.startswith(prefix):
+            suffix = code[len(prefix):]
+            if suffix.isdigit():
+                highest = max(highest, int(suffix))
+    return f"{parent.code}.{highest + 1:02d}"
+
+
+def ensure_gl_account(account: BankAccount) -> Account:
+    """Create (or refresh) the postable ledger account that carries this bank account's balance."""
+    if account.gl_account_id:
+        gl = account.gl_account
+        changed = []
+        name = _gl_name(account)
+        if gl.name != name:
+            gl.name = name
+            changed.append("name")
+        # Currency is a ledger-tagging concern; only re-tag while the account has no postings.
+        if gl.currency_id != account.currency_id and not gl.lines.exists():
+            gl.currency = account.currency
+            changed.append("currency")
+        if changed:
+            gl.save(update_fields=[*changed, "updated_at"])
+        return gl
+
+    parent = resolve_account(_parent_code(account))
+    gl = Account.objects.create(
+        code=_next_child_code(parent),
+        name=_gl_name(account),
+        type=AccountType.ASSET,
+        normal_side=Side.DEBIT,
+        currency=account.currency,
+        parent=parent,
+        is_postable=True,
+        is_system=False,
+    )
+    account.gl_account = gl
+    account.save(update_fields=["gl_account"])
+    return gl
+
+
+# --- Posting ---------------------------------------------------------------------------------
+
+def _external_key(txn: BankTransaction) -> str:
+    return f"banking:txn:{txn.pk}:v{txn.posting_version}"
+
+
+def _description(txn: BankTransaction) -> str:
+    return f"{txn.account.nickname}: {txn.type_label}"
+
+
+def _lines_for(txn: BankTransaction) -> list[LineInput]:
+    """The balanced debit/credit pair(s) for a transaction (see the module docstring's mapping)."""
+    gl = ensure_gl_account(txn.account)
+    amount = txn.amount
+    cur = txn.account.currency
+    payee = {"person": txn.payee_person, "organization": txn.payee_organization}
+    bank = {"organization": txn.account.bank}
+
+    def line(account, *, debit=ZERO, credit=ZERO, **party):
+        return LineInput(account, debit=debit, credit=credit, currency=cur, **party)
+
+    t = txn.txn_type
+    if t == TxnType.OPENING:
+        return [line(gl, debit=amount), line(OPENING_EQUITY, credit=amount)]
+    if t == TxnType.DEPOSIT:
+        contra = txn.category_account or resolve_account(DEFAULT_INCOME)
+        return [line(gl, debit=amount), line(contra, credit=amount, **payee)]
+    if t == TxnType.WITHDRAWAL:
+        contra = txn.category_account or resolve_account(DEFAULT_EXPENSE)
+        return [line(contra, debit=amount, **payee), line(gl, credit=amount)]
+    if t == TxnType.INTEREST:
+        return [line(gl, debit=amount), line(INTEREST_INCOME, credit=amount, **bank)]
+    if t in (TxnType.FEE, TxnType.CHARGE):
+        return [line(BANK_CHARGES, debit=amount, **bank), line(gl, credit=amount)]
+    if t == TxnType.TRANSFER_OUT:
+        return [line(TRANSFER_CLEARING, debit=amount), line(gl, credit=amount)]
+    if t == TxnType.TRANSFER_IN:
+        return [line(gl, debit=amount), line(TRANSFER_CLEARING, credit=amount)]
+    raise ValueError(f"Unknown transaction type {t!r}")
+
+
+def post_transaction(txn: BankTransaction, *, user=None) -> JournalEntry:
+    """Post a saved transaction to the ledger and link the resulting entry back onto it."""
+    entry_type = (
+        JournalEntry.EntryType.OPENING
+        if txn.txn_type == TxnType.OPENING
+        else JournalEntry.EntryType.STANDARD
+    )
+    entry = post_entry(
+        date=txn.date,
+        lines=_lines_for(txn),
+        entry_type=entry_type,
+        currency=txn.account.currency,
+        source=txn,
+        external_key=_external_key(txn),
+        description=_description(txn),
+        memo=txn.memo,
+        reference=txn.reference,
+        user=user,
+    )
+    if txn.journal_entry_id != entry.pk:
+        txn.journal_entry = entry
+        txn.save(update_fields=["journal_entry", "updated_at"])
+    return entry
+
+
+def repost_transaction(txn: BankTransaction, *, user=None) -> JournalEntry:
+    """Reverse the current entry and post a fresh one (edit path; posted entries are immutable)."""
+    current = txn.journal_entry
+    if current is not None and current.status == JournalEntry.Status.POSTED:
+        reverse_entry(current, user=user)
+    txn.posting_version += 1
+    txn.save(update_fields=["posting_version", "updated_at"])
+    return post_transaction(txn, user=user)
+
+
+def unpost_transaction(txn: BankTransaction, *, user=None) -> None:
+    """Reverse the transaction's entry (used when a transaction is deleted); balances net out."""
+    current = txn.journal_entry
+    if current is not None and current.status == JournalEntry.Status.POSTED:
+        reverse_entry(current, user=user)
+
+
+def create_matching_leg(txn: BankTransaction, *, user=None) -> BankTransaction | None:
+    """For a transfer against a tracked counter account, create + post the opposite leg."""
+    if txn.counter_account_id is None or txn.txn_type not in (
+        TxnType.TRANSFER_OUT,
+        TxnType.TRANSFER_IN,
+    ):
+        return None
+    opposite = (
+        TxnType.TRANSFER_IN if txn.txn_type == TxnType.TRANSFER_OUT else TxnType.TRANSFER_OUT
+    )
+    leg = BankTransaction.objects.create(
+        account=txn.counter_account,
+        txn_type=opposite,
+        date=txn.date,
+        amount=txn.amount,
+        counter_account=txn.account,
+        memo=txn.memo,
+        reference=txn.reference,
+    )
+    post_transaction(leg, user=user)
+    return leg
+
+
+# --- Holder ↔ organization ("Account Holder" P2O) synchronisation ----------------------------
+
+def sync_holder_p2o(account: BankAccount, *, user=None) -> None:
+    """Ensure each current holder has an org-level 'Account Holder' link to the bank. Add-only —
+    never removes edges (they may be managed by hand in the relationships graph)."""
+    from apps.relationships.models import PersonOrgRelationship, PersonOrgRelationshipType
+
+    rtype = PersonOrgRelationshipType.objects.filter(code="account_holder").first()
+    if rtype is None:
+        return
+    for holder in account.holders.all():
+        PersonOrgRelationship.objects.get_or_create(
+            person=holder.person, organization=account.bank, type=rtype
+        )
+
+
+# --- Read models -----------------------------------------------------------------------------
+
+def register(account: BankAccount) -> list[dict]:
+    """The account's transactions with a running balance (in the account's own currency),
+    computed oldest-first and returned newest-first for display."""
+    running = ZERO
+    rows = []
+    for txn in account.transactions.order_by("date", "id"):
+        running += txn.signed_amount
+        rows.append({"txn": txn, "balance": running})
+    rows.reverse()
+    return rows
+
+
+def total_balance() -> Decimal:
+    """Sum of all bank-account balances, in the base currency."""
+    return sum((a.balance for a in BankAccount.objects.all()), ZERO)
+
+
+def dashboard_stats() -> dict:
+    """Headline figures for the Banking dashboard."""
+    today = datetime.date.today()
+    month_start = today.replace(day=1)
+    accounts = list(BankAccount.objects.select_related("bank"))
+    return {
+        "accounts_count": len(accounts),
+        "banks_count": len({a.bank_id for a in accounts}),
+        "total_balance": sum((a.balance for a in accounts), ZERO),
+        "txns_this_month": BankTransaction.objects.filter(date__gte=month_start).count(),
+        "accounts": accounts,
+    }
