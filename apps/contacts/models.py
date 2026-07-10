@@ -52,6 +52,9 @@ class Person(SoftDeleteModel):
     preferred_name = models.CharField(max_length=80, blank=True)
     pronouns = models.CharField(max_length=40, blank=True)
     gender = models.CharField(max_length=1, choices=Gender.choices, default=Gender.UNSPECIFIED)
+    # Whether this person belongs to the household (vs an external contact). Drives the People
+    # "Household" filter and pickers like bank-account holders; most People stay False.
+    is_household_member = models.BooleanField(default=False)
 
     dob_year = models.SmallIntegerField(null=True, blank=True)
     dob_month = models.SmallIntegerField(null=True, blank=True)

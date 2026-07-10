@@ -36,6 +36,7 @@ def contacts_home(request):
 
     from apps.contacts.services import (
         count_birthdays,
+        count_household_members,
         recent_people,
         recently_updated,
         upcoming_dates,
@@ -49,6 +50,7 @@ def contacts_home(request):
     ctx = contacts_context(
         request, "dashboard",
         people_count=people_count,
+        household_members=count_household_members(),
         families_count=Family.objects.count(),
         birthdays_30=count_birthdays(30),
         added_this_month=Person.objects.filter(created_at__gte=month_start).count(),
@@ -118,6 +120,10 @@ def people_list(request):
     if category.isdigit():
         qs = qs.filter(categories__id=category)
 
+    household = request.GET.get("household", "")
+    if household:
+        qs = qs.filter(is_household_member=True)
+
     sort = request.GET.get("sort", "name")
     if sort not in SORTS:
         sort = "name"
@@ -127,6 +133,7 @@ def people_list(request):
         n=Count("people", filter=Q(people__deleted_at__isnull=True), distinct=True)
     )
     total = Person.objects.count()
+    household_count = Person.objects.filter(is_household_member=True).count()
 
     page = Paginator(qs, 10).get_page(request.GET.get("page"))
 
@@ -136,11 +143,13 @@ def people_list(request):
         people=page.object_list,
         q=q,
         category=category,
+        household=household,
         sort=sort,
         sort_name_next="-name" if sort == "name" else "name",
         sort_added_next="-added" if sort == "added" else "added",
         categories=categories,
         total=total,
+        household_count=household_count,
     )
     return render(request, "contacts/people_list.html", ctx)
 

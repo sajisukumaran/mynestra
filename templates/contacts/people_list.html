@@ -14,14 +14,16 @@
   <form method="get" class="row wrap">
     <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by name, phone, email…"></label>
     {% if category %}<input type="hidden" name="category" value="{{ category }}">{% endif %}
+    {% if household %}<input type="hidden" name="household" value="1">{% endif %}
     {% if sort != 'name' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
     {% if q %}<c-button href="{{ ui_tenant_url }}contacts/people/">Clear</c-button>{% endif %}
   </form>
 
   <div class="row wrap">
-    <a class="fchip{% if not category %} active{% endif %}" href="{% querystring category=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    <a class="fchip{% if not category and not household %} active{% endif %}" href="{% querystring category=None household=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    <a class="fchip{% if household %} active{% endif %}" href="{% querystring household=1 category=None page=None %}">Household <span class="cnt tnum">{{ household_count }}</span></a>
     {% for c in categories %}
-    <a class="fchip{% if category == c.id|stringformat:'s' %} active{% endif %}" href="{% querystring category=c.id page=None %}">{{ c.name }} <span class="cnt tnum">{{ c.n }}</span></a>
+    <a class="fchip{% if category == c.id|stringformat:'s' %} active{% endif %}" href="{% querystring category=c.id household=None page=None %}">{{ c.name }} <span class="cnt tnum">{{ c.n }}</span></a>
     {% endfor %}
   </div>
 
@@ -47,6 +49,7 @@
           </td>
           <td>
             {% for c in p.categories.all %}<c-chip tint="{{ c.color }}" dot>{{ c.name }}</c-chip> {% endfor %}
+            {% if p.is_household_member %}<c-badge variant="accent"><c-icon name="house" /> Household</c-badge>{% endif %}
             {% if p.is_deceased %}<c-badge variant="lock"><c-icon name="info" /> Deceased</c-badge>{% endif %}
           </td>
           <td>

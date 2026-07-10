@@ -112,6 +112,11 @@ def count_birthdays(within_days: int = 30, *, on: datetime.date | None = None) -
     )
 
 
+def count_household_members() -> int:
+    """People marked as belonging to the household (dashboard stat + pickers)."""
+    return Person.objects.filter(is_household_member=True).count()
+
+
 def count_upcoming(within_days: int = 30, *, on: datetime.date | None = None) -> int:
     """All upcoming dates (birthdays + anniversaries + important dates) in the next N days —
     the Contacts sidebar 'Important dates' badge."""

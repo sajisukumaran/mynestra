@@ -20,6 +20,7 @@ class PersonForm(forms.ModelForm):
         model = Person
         fields = [
             "first_name", "middle_name", "last_name", "preferred_name", "gender", "pronouns",
+            "is_household_member",
             "photo",
             "dob_year", "dob_month", "dob_day",
             "marital_status", "anniversary_year", "anniversary_month", "anniversary_day",

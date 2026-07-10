@@ -34,6 +34,11 @@
         <c-field label="Gender" error="{{ form.gender.errors.0 }}"><div class="control is-select">{{ form.gender }}<c-icon name="chevron-down" size="sm" class="subtle" /></div></c-field>
         <c-field label="Pronouns" error="{{ form.pronouns.errors.0 }}"><div class="control">{{ form.pronouns }}</div></c-field>
       </div>
+      <div class="switch-row" x-data="{ household: {{ form.is_household_member.value|yesno:'true,false' }} }">
+        <button type="button" role="switch" class="switch" :class="{ on: household }" :aria-checked="household" @click="household = !household"></button>
+        <input type="hidden" name="is_household_member" :value="household ? 'true' : 'false'">
+        <div class="sw-txt"><div class="t">Household member</div><div class="d">Turn on for people who belong to your household (not external contacts).</div></div>
+      </div>
     </c-card>
 
     {# Life events #}

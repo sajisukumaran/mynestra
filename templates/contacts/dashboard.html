@@ -16,6 +16,9 @@
     <c-stat-tile icon="user-round" tint="teal" value="{{ people_count }}" label="People">
       <c-slot name="foot">{% if added_this_month %}<c-delta dir="up" value="{{ added_this_month }}" /> added this month{% else %}across the household{% endif %}</c-slot>
     </c-stat-tile>
+    <c-stat-tile icon="users" tint="rose" value="{{ household_members }}" label="Household">
+      <c-slot name="foot"><a href="{{ ui_tenant_url }}contacts/people/?household=1">household members</a></c-slot>
+    </c-stat-tile>
     <c-stat-tile icon="house" tint="violet" value="{{ families_count }}" label="Families">
       <c-slot name="foot">across {{ people_count }} {{ people_count|pluralize:'person,people' }}</c-slot>
     </c-stat-tile>
