@@ -16,6 +16,9 @@ class FinanceConfig(AppConfig):
         "tint": "finance",
         "url": "finance/",
         "order": 30,
+        # Expert-mode only: in Standard the GL is invisible, so the launcher hides this tile
+        # (and the finance routes 404 — see apps.finance.views.expert_required).
+        "requires_expert": True,
     }
 
     def launcher_counts(self):

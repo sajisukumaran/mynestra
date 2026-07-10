@@ -8,9 +8,25 @@ user is a member of `request.tenant` by the time a tenant view runs; this narrow
 from functools import wraps
 
 from django.contrib.auth.views import redirect_to_login
-from django.http import HttpResponseForbidden
+from django.http import Http404, HttpResponseForbidden
 
 from apps.tenants.models import Membership, Role
+
+
+def expert_required(view):
+    """Allow only when `request.tenant` is in Expert accounting mode; else 404 — the Finance/GL
+    surface is hidden entirely in Standard mode (the software handles accounting behind the scenes).
+    MembershipMiddleware has already proven membership. Stack above `owner_required` when a view is
+    both Expert-only and Owner-only (mode check first → 404 hides it before the 403)."""
+
+    @wraps(view)
+    def _wrapped(request, *args, **kwargs):
+        mode = getattr(getattr(request, "tenant", None), "accounting_mode", "standard")
+        if mode != "expert":
+            raise Http404()
+        return view(request, *args, **kwargs)
+
+    return _wrapped
 
 
 def owner_required(view):

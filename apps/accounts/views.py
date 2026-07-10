@@ -46,7 +46,7 @@ def tenant_home(request):
     ).exists()
     modules = [
         {"meta": cfg.launcher_module, "counts": cfg.launcher_counts()}
-        for cfg in enabled_modules()
+        for cfg in enabled_modules(request.tenant)
     ]
     return render(
         request,

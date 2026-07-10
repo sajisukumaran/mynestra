@@ -21,7 +21,17 @@ COMING_SOON = [
 ]
 
 
-def enabled_modules():
-    """AppConfigs that declare a ``launcher_module`` dict, sorted by their ``order``."""
-    configs = [c for c in django_apps.get_app_configs() if getattr(c, "launcher_module", None)]
+def enabled_modules(tenant=None):
+    """AppConfigs that declare a ``launcher_module`` dict, sorted by ``order``.
+
+    A module may set ``requires_expert: True`` in its ``launcher_module`` metadata (e.g. Finance);
+    such tiles are hidden unless the given tenant is in Expert accounting mode. Passing no tenant
+    returns every declared module (used where mode is irrelevant)."""
+    mode = getattr(tenant, "accounting_mode", "expert")  # no tenant → show everything
+    configs = [
+        c
+        for c in django_apps.get_app_configs()
+        if getattr(c, "launcher_module", None)
+        and (mode == "expert" or not c.launcher_module.get("requires_expert"))
+    ]
     return sorted(configs, key=lambda c: c.launcher_module.get("order", 100))
