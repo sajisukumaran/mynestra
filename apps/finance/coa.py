@@ -54,7 +54,9 @@ CHART_OF_ACCOUNTS = [
     ("1990", "Suspense", ASSET, "1000", True, "suspense"),
     # --- Liabilities ---
     ("2000", "Liabilities", LIABILITY, None, False, ""),
-    ("2100", "Credit Cards", LIABILITY, "2000", True, ""),
+    # 2100 is a group header: the Cards module nests one postable sub-account per real credit card
+    # beneath it (normal_side=credit), so per-card balances owed roll up here.
+    ("2100", "Credit Cards", LIABILITY, "2000", False, "credit_cards"),
     ("2200", "Loans", LIABILITY, "2000", False, ""),
     ("2210", "Mortgage", LIABILITY, "2200", True, ""),
     ("2220", "Auto Loan", LIABILITY, "2200", True, ""),
@@ -91,5 +93,6 @@ CHART_OF_ACCOUNTS = [
     ("5700", "Personal & Lifestyle", EXPENSE, "5000", True, ""),
     ("5800", "Taxes", EXPENSE, "5000", True, ""),
     ("5850", "Bank Charges", EXPENSE, "5000", True, "bank_charges"),
+    ("5860", "Interest Expense", EXPENSE, "5000", True, "interest_expense"),
     ("5900", "Other Expenses", EXPENSE, "5000", True, ""),
 ]
