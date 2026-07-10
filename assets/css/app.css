@@ -387,6 +387,8 @@ img { max-width:100%; display:block; }
 :root[data-theme="dark"] .tile-glyph.orgs { background:rgba(59,130,246,.18); color:#93c5fd; }
 .tile-glyph.finance { background:#d1fae5; color:#047857; }
 :root[data-theme="dark"] .tile-glyph.finance { background:rgba(16,185,129,.18); color:#6ee7b7; }
+.tile-glyph.banking { background:#e0e7ff; color:#4338ca; }
+:root[data-theme="dark"] .tile-glyph.banking { background:rgba(99,102,241,.18); color:#a5b4fc; }
 .tile-glyph.soon { background:var(--surface-3); color:var(--text-subtle); }
 
 /* Money — right-aligned tabular figures; negatives in danger + parentheses (accounting style). */
