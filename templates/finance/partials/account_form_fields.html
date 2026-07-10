@@ -1,0 +1,27 @@
+{% comment %}Shared Chart-of-Accounts add/edit fields. `acct` = the Account being edited (or unset
+for a new account); `all_accounts` (parent options) and `types` come from the page context.{% endcomment %}
+<div class="form-grid">
+  <c-field label="Code" required><div class="control"><input name="code" value="{{ acct.code|default:'' }}" placeholder="e.g. 5150"></div></c-field>
+  <c-field label="Name" required><div class="control"><input name="name" value="{{ acct.name|default:'' }}" placeholder="e.g. Subscriptions"></div></c-field>
+  <c-field label="Type" required>
+    <div class="control is-select">
+      <select name="type">
+        {% for val, label in types %}<option value="{{ val }}"{% if acct and acct.type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Parent" help="Optional — the header this account rolls up into.">
+    <div class="control is-select">
+      <select name="parent">
+        <option value="">— none (top level) —</option>
+        {% for a in all_accounts %}{% if not acct or a.pk != acct.pk %}<option value="{{ a.pk }}"{% if acct and acct.parent_id == a.pk %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endif %}{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Description" class="span2"><div class="control"><input name="description" value="{{ acct.description|default:'' }}"></div></c-field>
+</div>
+<label class="row"><input type="checkbox" name="is_header"{% if acct and not acct.is_postable %} checked{% endif %}> <span class="muted">Header — groups sub-accounts (not directly postable)</span></label>
+{% if acct %}<label class="row"><input type="checkbox" name="is_active"{% if acct.is_active %} checked{% endif %}> <span class="muted">Active</span></label>{% endif %}
+{% if acct and acct.is_system %}<c-hint icon="triangle-alert">This is a built-in account. Renaming is safe, but changing its code, type, parent, or header status — or deactivating it — permanently locks this household into Expert mode.</c-hint>{% endif %}

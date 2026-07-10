@@ -31,3 +31,8 @@ class PostedEntryImmutable(FinanceError):
 
 class MissingExchangeRate(FinanceError):
     """No exchange rate is available for a non-base currency on/before the transaction date."""
+
+
+class COAEditError(FinanceError):
+    """An Expert-mode Chart-of-Accounts edit is rejected (duplicate code, would-be cycle, or
+    deleting an account that has postings or children)."""

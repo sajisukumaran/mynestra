@@ -4,7 +4,23 @@
 {% block finance %}
 <c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Finance</span></c-breadcrumb>
 
-<c-page-header title="Chart of accounts" subtitle="Balances in {{ base.code }} — {{ base.name }}. Computed from the general ledger." />
+<c-page-header title="Chart of accounts" subtitle="Balances in {{ base.code }} — {{ base.name }}. Computed from the general ledger.">
+  {% if is_owner %}
+  <c-slot name="actions">
+    <c-modal title="New account">
+      <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> New account</c-button></c-slot>
+      <form method="post" action="{{ ui_tenant_url }}finance/accounts/new/">{% csrf_token %}
+        <div class="stack-16">
+          {% include "finance/partials/account_form_fields.html" %}
+          <div class="row"><c-button type="submit" variant="primary">Create account</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+        </div>
+      </form>
+    </c-modal>
+  </c-slot>
+  {% endif %}
+</c-page-header>
+
+{% if request.GET.err %}<c-hint icon="triangle-alert">{{ request.GET.err }}</c-hint>{% endif %}
 
 <c-card flush>
   {% if rows %}
@@ -14,6 +30,7 @@
       <c-th>Account</c-th>
       <c-th>Type</c-th>
       <th class="col-num">Balance</th>
+      {% if is_owner %}<th class="col-num"></th>{% endif %}
     </tr></thead>
     <tbody>
       {% for row in rows %}
@@ -21,6 +38,7 @@
         <td class="muted tnum">{{ row.account.code }}</td>
         <td style="padding-left: calc(15px + {{ row.indent }}px);">
           {% if row.is_header %}<span class="strong">{{ row.account.name }}</span>{% else %}{{ row.account.name }}{% endif %}
+          {% if not row.account.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
         </td>
         <td><c-badge>{{ row.account.get_type_display }}</c-badge></td>
         <td class="col-num">
@@ -30,6 +48,29 @@
           <c-money :amount="row.balance" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" />
           {% endif %}
         </td>
+        {% if is_owner %}
+        <td class="col-num">
+          <div class="cell-actions">
+            <c-modal title="Edit account">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+              <form method="post" action="{{ ui_tenant_url }}finance/accounts/{{ row.account.pk }}/edit/">{% csrf_token %}
+                <div class="stack-16">
+                  {% include "finance/partials/account_form_fields.html" with acct=row.account %}
+                  <div class="row"><c-button type="submit" variant="primary">Save changes</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+                </div>
+              </form>
+            </c-modal>
+            <c-confirm-dialog title="Delete {{ row.account.code }} {{ row.account.name }}?"
+                              message="The account is moved to Recently deleted. Accounts with posted entries or sub-accounts can't be deleted. Deleting a built-in account permanently locks this household into Expert mode."
+                              confirm_variant="danger" icon="trash-2">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Delete"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+              <c-slot name="confirm">
+                <form method="post" action="{{ ui_tenant_url }}finance/accounts/{{ row.account.pk }}/delete/">{% csrf_token %}<c-button type="submit" variant="danger">Delete</c-button></form>
+              </c-slot>
+            </c-confirm-dialog>
+          </div>
+        </td>
+        {% endif %}
       </tr>
       {% endfor %}
     </tbody>
@@ -40,6 +81,6 @@
 </c-card>
 
 {% if not has_postings %}
-<c-hint icon="info">No journal entries have been posted yet, so every balance is zero. Finance is wired for other modules to post to — direct entry comes later.</c-hint>
+<c-hint icon="info">No journal entries have been posted yet, so every balance is zero.</c-hint>
 {% endif %}
 {% endblock %}

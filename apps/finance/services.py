@@ -24,6 +24,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.finance.exceptions import (
+    COAEditError,
     EmptyEntry,
     InvalidLine,
     MissingExchangeRate,
@@ -42,6 +43,7 @@ from apps.finance.models import (
     JournalEntry,
     JournalLine,
     PostingMap,
+    default_side_for,
 )
 
 ONE = Decimal("1")
@@ -248,6 +250,114 @@ def posting_map_for(owner) -> dict[str, int]:
             content_type=_posting_map_content_type(owner), object_id=owner.pk
         ).values_list("activity", "account_id")
     )
+
+
+# --- Chart-of-Accounts editing (Expert mode only) -------------------------------------------
+# Mutations here can break Standard-mode automatic posting, so any Standard-critical change to a
+# seeded (`is_system`) account sets the sticky `accounting_locked` flag — after which the tenant
+# can no longer switch back to Standard. Rename/description edits are not critical.
+
+def account_has_postings(account) -> bool:
+    return JournalLine.objects.filter(account=account).exists()
+
+
+def account_has_children(account) -> bool:
+    return Account.objects.filter(parent=account).exists()
+
+
+def lock_accounting_mode() -> None:
+    """Sticky-lock: this tenant can no longer switch back to Standard. Idempotent."""
+    from apps.tenants.models import Tenant
+
+    Tenant.objects.filter(
+        schema_name=connection.schema_name, accounting_locked=False
+    ).update(accounting_locked=True)
+
+
+def _assert_code_free(code: str, *, exclude_pk=None) -> None:
+    qs = Account.objects.filter(code=code)
+    if exclude_pk is not None:
+        qs = qs.exclude(pk=exclude_pk)
+    if qs.exists():
+        raise COAEditError(f"Account code {code!r} is already in use.")
+
+
+def _would_cycle(account, parent) -> bool:
+    """True if `account.parent = parent` would create a cycle (parent is self or a descendant)."""
+    node = parent
+    while node is not None:
+        if node.pk == account.pk:
+            return True
+        node = node.parent
+    return False
+
+
+def create_account(*, code, name, account_type, parent=None, is_postable=True,
+                   description="", currency=None) -> Account:
+    code = (code or "").strip()
+    name = (name or "").strip()
+    if not code or not name:
+        raise COAEditError("Code and name are both required.")
+    if account_type not in AccountType.values:
+        raise COAEditError("Choose a valid account type.")
+    _assert_code_free(code)
+    return Account.objects.create(
+        code=code, name=name, description=description or "",
+        type=account_type, normal_side=default_side_for(account_type),
+        parent=parent, currency=currency,
+        is_postable=is_postable, is_active=True, is_system=False,
+    )
+
+
+def edit_account(account, *, code, name, account_type, parent=None, is_postable=True,
+                 is_active=True, description="") -> Account:
+    code = (code or "").strip()
+    name = (name or "").strip()
+    if not code or not name:
+        raise COAEditError("Code and name are both required.")
+    if account_type not in AccountType.values:
+        raise COAEditError("Choose a valid account type.")
+    _assert_code_free(code, exclude_pk=account.pk)
+    if parent is not None and _would_cycle(account, parent):
+        raise COAEditError("An account can't be a child of itself.")
+    if not is_postable and account_has_postings(account):
+        raise COAEditError("This account has posted entries, so it can't become a header.")
+    if is_postable and account_has_children(account):
+        raise COAEditError("This account has sub-accounts, so it must stay a header.")
+
+    new_parent_id = parent.pk if parent else None
+    critical = account.is_system and (
+        code != account.code
+        or account_type != account.type
+        or new_parent_id != account.parent_id
+        or is_postable != account.is_postable
+        or (account.is_active and not is_active)
+    )
+
+    account.code = code
+    account.name = name
+    account.description = description or ""
+    if account_type != account.type:  # preserve a deliberate contra normal_side otherwise
+        account.type = account_type
+        account.normal_side = default_side_for(account_type)
+    account.parent = parent
+    account.is_postable = is_postable
+    account.is_active = is_active
+    account.save()
+    if critical:
+        lock_accounting_mode()
+    return account
+
+
+def delete_account(account) -> None:
+    if account_has_postings(account):
+        raise COAEditError("This account has posted entries and can't be deleted.")
+    if account_has_children(account):
+        raise COAEditError("This account has sub-accounts — remove or reparent them first.")
+    was_system = account.is_system
+    account.delete()  # soft-delete (frees the code; Recently-deleted can restore)
+    if was_system:
+        lock_accounting_mode()
 
 
 # --- Posting --------------------------------------------------------------------------------

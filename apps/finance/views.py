@@ -1,16 +1,24 @@
-"""Finance app views — a read-only Chart of Accounts with computed balances.
+"""Finance app views — the Chart of Accounts with computed balances.
 
-This is the only finance screen for now: the ledger and fiscal calendar stay invisible; their
-aggregate balances surface here. Balances are computed from posted lines (services layer) and
-rolled up the account tree in one pass. Member-accessible (household finances are shared)."""
+The whole Finance surface is Expert-mode only (hidden + route-guarded in Standard, where the GL is
+invisible). In Expert mode any member can view the chart; Owners can also edit it (add / edit /
+reparent / delete). Balances are computed from posted lines and rolled up the account tree in one
+pass."""
 
 from decimal import Decimal
 
 from django.db.models import Sum
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.finance.models import Account, JournalEntry, JournalLine
-from apps.finance.services import base_currency
+from apps.accounts.decorators import expert_required, owner_required
+from apps.finance.exceptions import COAEditError
+from apps.finance.models import Account, AccountType, JournalEntry, JournalLine
+from apps.finance.services import (
+    base_currency,
+    create_account,
+    delete_account,
+    edit_account,
+)
 from apps.tenants.models import Membership, Role
 
 ZERO = Decimal("0")
@@ -22,6 +30,11 @@ def _is_owner(request) -> bool:
     ).exists()
 
 
+def _tenant_url(request, path=""):
+    return f"/t/{request.tenant.schema_name}/{path}"
+
+
+@expert_required
 def finance_home(request):
     """Chart of accounts + base-currency balances (headers roll up their subtree)."""
     accounts = list(Account.objects.all())  # ordered by code
@@ -62,5 +75,68 @@ def finance_home(request):
         "rows": rows,
         "base": base_currency(),
         "has_postings": bool(own),
+        # Editor (Owner-only affordances, gated in the template on is_owner):
+        "all_accounts": accounts,
+        "types": AccountType.choices,
     }
     return render(request, "finance/chart_of_accounts.html", ctx)
+
+
+# --- Chart-of-Accounts editor (Expert + Owner) ----------------------------------------------
+
+def _account_from_post(request):
+    parent = Account.objects.filter(pk=request.POST.get("parent") or 0).first()
+    return {
+        "code": request.POST.get("code", ""),
+        "name": request.POST.get("name", ""),
+        "account_type": request.POST.get("type", ""),
+        "parent": parent,
+        "is_postable": request.POST.get("is_header") not in ("on", "1", "true"),
+        "description": request.POST.get("description", "").strip(),
+    }
+
+
+@expert_required
+@owner_required
+def account_create(request):
+    if request.method == "POST":
+        data = _account_from_post(request)
+        data.pop("is_active", None)
+        try:
+            create_account(**data)
+        except COAEditError as exc:
+            return _coa_error(request, exc)
+    return redirect(_tenant_url(request, "finance/"))
+
+
+@expert_required
+@owner_required
+def account_edit(request, pk):
+    account = get_object_or_404(Account, pk=pk)
+    if request.method == "POST":
+        data = _account_from_post(request)
+        data["is_active"] = request.POST.get("is_active") in ("on", "1", "true")
+        try:
+            edit_account(account, **data)
+        except COAEditError as exc:
+            return _coa_error(request, exc)
+    return redirect(_tenant_url(request, "finance/"))
+
+
+@expert_required
+@owner_required
+def account_delete(request, pk):
+    account = get_object_or_404(Account, pk=pk)
+    if request.method == "POST":
+        try:
+            delete_account(account)
+        except COAEditError as exc:
+            return _coa_error(request, exc)
+    return redirect(_tenant_url(request, "finance/"))
+
+
+def _coa_error(request, exc):
+    """Bounce back to the chart with an inline error banner (query param; editor is Owner-only)."""
+    from urllib.parse import urlencode
+
+    return redirect(_tenant_url(request, "finance/") + "?" + urlencode({"err": str(exc)}))
