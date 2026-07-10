@@ -51,6 +51,7 @@ P2P_TYPES = [
 P2O_TYPES = [
     ("customer", "Customer"),
     ("account_holder", "Account Holder"),
+    ("cardholder", "Cardholder"),
     ("employee", "Employee"),
     ("patient", "Patient"),
     ("student", "Student"),
