@@ -1,0 +1,10 @@
+<c-vars value="0" max="100" tint="" class="" />
+{% comment %}A thin utilization/progress bar. `value`/`max` set the fill width (capped at 100%);
+`tint` = danger|warning|success (blank = accent). The default slot, if given, renders as the label
+row above the track (use two <span>s for a left/right label via space-between).{% endcomment %}
+<div class="meter{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if slot %}<div class="meter-label">{{ slot }}</div>{% endif %}
+  <div class="meter-track">
+    <div class="meter-fill{% if tint %} meter-{{ tint }}{% endif %}" style="width:{% widthratio value max 100 %}%;"></div>
+  </div>
+</div>

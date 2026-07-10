@@ -187,7 +187,21 @@
         <c-tile-stat n="86" label="Transactions" />
         <c-tile-stat n="2" label="Banks" />
       </c-app-tile>
+      <c-app-tile name="Cards" description="Credit &amp; debit cards" glyph="credit-card" tint="cards" href="#">
+        <c-tile-stat n="3" label="Credit cards" />
+        <c-tile-stat n="2" label="Debit cards" />
+        <c-tile-stat n="1,240" label="Owed" />
+      </c-app-tile>
     </div>
+
+    {# ---- Meter (c-meter — credit-limit utilization) ---- #}
+    <c-card title="Meter" id="meter" icon="credit-card">
+      <div class="stack-16" style="max-width:420px;">
+        <c-meter value="180" max="1000"><span>Utilization</span><span>18%</span></c-meter>
+        <c-meter value="720" max="1000" tint="warning"><span>Utilization</span><span>72%</span></c-meter>
+        <c-meter value="960" max="1000" tint="danger"><span>Utilization</span><span>96%</span></c-meter>
+      </div>
+    </c-card>
 
     {# ---- Accounting mode (Setup → Mode) ---- #}
     <c-card title="Accounting mode" id="accounting-mode" icon="sliders-horizontal">

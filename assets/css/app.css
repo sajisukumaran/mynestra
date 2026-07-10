@@ -389,7 +389,18 @@ img { max-width:100%; display:block; }
 :root[data-theme="dark"] .tile-glyph.finance { background:rgba(16,185,129,.18); color:#6ee7b7; }
 .tile-glyph.banking { background:#e0e7ff; color:#4338ca; }
 :root[data-theme="dark"] .tile-glyph.banking { background:rgba(99,102,241,.18); color:#a5b4fc; }
+.tile-glyph.cards { background:#fef3c7; color:#b45309; }
+:root[data-theme="dark"] .tile-glyph.cards { background:rgba(245,158,11,.18); color:#fcd34d; }
 .tile-glyph.soon { background:var(--surface-3); color:var(--text-subtle); }
+
+/* Meter — a thin utilization/progress bar (c-meter), e.g. credit-limit usage. */
+.meter { display:flex; flex-direction:column; gap:5px; }
+.meter-label { display:flex; justify-content:space-between; font-size:var(--fs-xs); color:var(--text-muted); }
+.meter-track { height:7px; border-radius:999px; background:var(--surface-3); overflow:hidden; }
+.meter-fill { height:100%; border-radius:999px; background:var(--accent); transition:width .3s ease; max-width:100%; }
+.meter-fill.meter-danger { background:var(--danger); }
+.meter-fill.meter-warning { background:var(--warning); }
+.meter-fill.meter-success { background:var(--success); }
 
 /* Money — right-aligned tabular figures; negatives in danger + parentheses (accounting style). */
 .amount { font-variant-numeric:tabular-nums; white-space:nowrap; }
