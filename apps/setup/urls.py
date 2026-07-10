@@ -26,6 +26,17 @@ urlpatterns = [
         views.rel_type_delete,
         name="rel-type-delete",
     ),
+    # Household members (which People belong to this household)
+    path("household-members/", views.household_members, name="household-members"),
+    path(
+        "household-members/search/",
+        views.household_member_search, name="household-member-search",
+    ),
+    path("household-members/add/", views.household_member_add, name="household-member-add"),
+    path(
+        "household-members/<int:pk>/remove/",
+        views.household_member_remove, name="household-member-remove",
+    ),
     # Members & invitations
     path("members/", views.members, name="members"),
     path("members/invite/", views.member_invite, name="member-invite"),

@@ -9,6 +9,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db.models import Q
 from django.http import Http404, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -49,6 +50,7 @@ def setup_context(request, active, **extra):
         "nav_categories": Category.objects.count(),
         "nav_rel_types": nav_rel_types,
         "nav_members": Membership.objects.filter(tenant=request.tenant).count(),
+        "nav_household_members": Person.objects.filter(is_household_member=True).count(),
         "nav_invites": Invitation.objects.filter(
             tenant=request.tenant, status=Invitation.Status.PENDING
         ).count(),
@@ -215,6 +217,50 @@ def _send_invitation_email(request, invitation):
         from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[invitation.email],
     )
+
+
+# --- Household members (which People belong to this household) -------------------------------
+
+def _render_household_members(request):
+    members = Person.objects.filter(is_household_member=True).order_by("first_name", "last_name")
+    ctx = setup_context(request, "household-members", members=members)
+    return render(request, "setup/household_members.html", ctx)
+
+
+@owner_required
+def household_members(request):
+    return _render_household_members(request)
+
+
+@owner_required
+def household_member_search(request):
+    """htmx: People not yet in the household, matching the query (candidates to add)."""
+    qs = Person.objects.filter(is_household_member=False)
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(preferred_name__icontains=q)
+        )
+    return render(request, "setup/partials/household_search.html", {"candidates": qs[:8], "q": q})
+
+
+@owner_required
+def household_member_add(request):
+    if request.method == "POST":
+        person = Person.objects.filter(pk=request.POST.get("person") or 0).first()
+        if person and not person.is_household_member:
+            person.is_household_member = True
+            person.save(update_fields=["is_household_member", "updated_at"])
+    return redirect(setup_url(request, "household-members/"))
+
+
+@owner_required
+def household_member_remove(request, pk):
+    if request.method == "POST":
+        person = get_object_or_404(Person, pk=pk)
+        person.is_household_member = False
+        person.save(update_fields=["is_household_member", "updated_at"])
+    return redirect(setup_url(request, "household-members/"))
 
 
 def _owner_count(tenant):

@@ -1,0 +1,14 @@
+{% comment %}htmx fragment: People not yet in the household. Each row is a small POST form that marks
+the person a household member (plain POST → redirect, matching the Setup idiom).{% endcomment %}
+{% for p in candidates %}
+<div class="rel">
+  {% if p.photo %}<c-avatar src="{{ p.photo.url }}" size="sm" alt="{{ p.display_name }}" />{% else %}<c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>{% endif %}
+  <div class="grow"><div class="r-name">{{ p.display_name }}</div>{% if p.list_subtitle %}<div class="r-role">{{ p.list_subtitle }}</div>{% endif %}</div>
+  <form method="post" action="{{ ui_tenant_url }}setup/household-members/add/">{% csrf_token %}
+    <input type="hidden" name="person" value="{{ p.pk }}">
+    <c-button type="submit" size="sm" variant="primary"><c-icon name="plus" size="sm" /> Add</c-button>
+  </form>
+</div>
+{% empty %}
+<div class="rel-empty">{% if q %}No matching people to add. They may already be household members — or add them in People first.{% else %}Search to find people to add to your household.{% endif %}</div>
+{% endfor %}
