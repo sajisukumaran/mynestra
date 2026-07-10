@@ -12,61 +12,105 @@
 <c-page-header title="{% if mode == 'create' %}New account{% else %}Edit account{% endif %}" subtitle="Fields marked * are required." />
 
 {% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
-{% if not banks %}<c-hint icon="info">No banks yet. Add an organization in the <a href="{{ ui_tenant_url }}organizations/new/">Bank</a> category first, then come back to create the account.</c-hint>{% endif %}
 
 <form method="post">{% csrf_token %}
   <div class="stack stack-20">
 
     <c-card title="Account" icon="coins">
-      <div class="form-grid">
-        <c-field label="Bank" required>
-          <c-select name="bank" id="id_bank"
-                    hx-get="{{ ui_tenant_url }}banking/branch-options/" hx-target="#id_branch"
-                    hx-swap="innerHTML" hx-trigger="change" hx-include="this">
-            <option value="">Choose bank…</option>
-            {% for b in banks %}<option value="{{ b.pk }}"{% if account.bank_id == b.pk %} selected{% endif %}>{{ b.display }}</option>{% endfor %}
-          </c-select>
-        </c-field>
-        <c-field label="Branch" help="Optional — the specific branch.">
-          <c-select name="branch" id="id_branch">
-            <option value="">Branch (optional)…</option>
-            {% for br in branches %}<option value="{{ br.pk }}"{% if account.branch_id == br.pk %} selected{% endif %}>{{ br.name }}</option>{% endfor %}
-          </c-select>
-        </c-field>
-        <c-field label="Account type" required>
-          <c-select name="account_type">
-            {% for val, label in account_types %}<option value="{{ val }}"{% if account.account_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
-          </c-select>
-        </c-field>
-        <c-field label="Nickname" required error="{{ form.nickname.errors.0 }}"><div class="control">{{ form.nickname }}</div></c-field>
-        <c-field label="Account number"><div class="control">{{ form.number }}</div></c-field>
-        <c-field label="Currency" required>
-          <c-select name="currency">
-            {% for c in currencies %}<option value="{{ c.code }}"{% if account.currency_id == c.code %} selected{% elif not account.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
-          </c-select>
-        </c-field>
+      <div x-data="{ newBank: {% if banks %}false{% else %}true{% endif %} }">
+        <div class="form-grid">
+          <c-field label="Bank" required>
+            <div x-show="!newBank">
+              <c-select name="bank" id="id_bank" :disabled="newBank"
+                        hx-get="{{ ui_tenant_url }}banking/branch-options/" hx-target="#id_branch"
+                        hx-swap="innerHTML" hx-trigger="change" hx-include="this">
+                <option value="">Choose bank…</option>
+                {% for b in banks %}<option value="{{ b.pk }}"{% if account.bank_id == b.pk %} selected{% endif %}>{{ b.display }}</option>{% endfor %}
+              </c-select>
+            </div>
+            <div x-show="newBank" x-cloak><div class="control"><input name="new_bank_name" placeholder="e.g. HDFC Bank"></div></div>
+          </c-field>
+          <c-field label="Branch" help="Optional — the specific branch.">
+            <div x-show="!newBank">
+              <c-select name="branch" id="id_branch" :disabled="newBank">
+                <option value="">Branch (optional)…</option>
+                {% for br in branches %}<option value="{{ br.pk }}"{% if account.branch_id == br.pk %} selected{% endif %}>{{ br.name }}</option>{% endfor %}
+              </c-select>
+            </div>
+            <div x-show="newBank" x-cloak><div class="control"><input name="new_branch_name" placeholder="Branch (optional)"></div></div>
+          </c-field>
+          <c-field label="City" help="Optional — the new bank's city." x-show="newBank" x-cloak>
+            <div class="control"><input name="new_bank_city" placeholder="City"></div>
+          </c-field>
+          <c-field label="Account type" required>
+            <c-select name="account_type">
+              {% for val, label in account_types %}<option value="{{ val }}"{% if account.account_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </c-select>
+          </c-field>
+          <c-field label="Nickname" required error="{{ form.nickname.errors.0 }}"><div class="control">{{ form.nickname }}</div></c-field>
+          <c-field label="Account number"><div class="control">{{ form.number }}</div></c-field>
+          <c-field label="Currency" required>
+            <c-select name="currency">
+              {% for c in currencies %}<option value="{{ c.code }}"{% if account.currency_id == c.code %} selected{% elif not account.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+            </c-select>
+          </c-field>
+        </div>
+        <div class="row wrap">
+          <c-button variant="ghost" size="sm" x-show="!newBank" @click="newBank = true"><c-icon name="plus" size="sm" /> Add a new bank</c-button>
+          <c-button variant="ghost" size="sm" x-show="newBank" x-cloak @click="newBank = false"><c-icon name="chevron-left" size="sm" /> Choose an existing bank</c-button>
+        </div>
+        <label class="row">{{ form.is_active }} <span class="muted">Active account</span></label>
       </div>
-      <label class="row">{{ form.is_active }} <span class="muted">Active account</span></label>
     </c-card>
 
     <c-card title="Holders" icon="users">
-      <div class="stack stack-16">
-        <c-field label="Household members" help="Select everyone who holds this account (joint accounts allowed).">
+      <div class="stack stack-16"
+           x-data="{
+             extras: JSON.parse(document.getElementById('holder-extras-data').textContent),
+             primaryId: '{{ primary_holder }}',
+             addExtra(d){ if(!this.extras.some(e => String(e.id) === String(d.id))){ this.extras.push({ id: d.id, name: d.name, tint: d.tint || 'slate', initials: d.initials || '?' }); } if(this.$refs.holderQ){ this.$refs.holderQ.value = ''; } },
+             removeExtra(id){ this.extras = this.extras.filter(e => String(e.id) !== String(id)); if(String(this.primaryId) === String(id)){ this.primaryId = ''; } }
+           }">
+        <c-field label="Household members" help="Tap to add the members who hold this account (joint accounts allowed).">
           <div class="row wrap">
             {% for p in people %}{% with pid=p.pk|stringformat:'s' %}
             <label class="fchip{% if pid in selected_holders %} active{% endif %}" x-data="{ on: {% if pid in selected_holders %}true{% else %}false{% endif %} }" :class="{ active: on }">
               <input type="checkbox" name="holders" value="{{ p.pk }}" x-model="on" hidden>{{ p.display_name }}
             </label>
-            {% endwith %}{% empty %}<span class="subtle">No household members yet — add people in Contacts.</span>{% endfor %}
+            {% endwith %}{% empty %}<span class="subtle">No household members yet — <a href="{{ ui_tenant_url }}setup/household-members/">add household members</a> (or search below).</span>{% endfor %}
           </div>
         </c-field>
+
+        <div x-show="extras.length" x-cloak class="stack-8">
+          <template x-for="e in extras" :key="e.id">
+            <div class="rel">
+              <span class="avatar a-sm" :class="'av-'+e.tint" x-text="e.initials"></span>
+              <div class="grow"><div class="r-name" x-text="e.name"></div><div class="r-role">Co-holder (not a household member)</div></div>
+              <c-button type="button" variant="ghost" size="sm" @click="removeExtra(e.id)"><c-icon name="x" size="sm" /> Remove</c-button>
+              <input type="hidden" name="holders" :value="e.id">
+            </div>
+          </template>
+        </div>
+
+        <c-field label="Add someone else" help="Search any contact to add as a co-holder (e.g. an external relative).">
+          <c-input type="search" name="holder_q" x-ref="holderQ" autocomplete="off" placeholder="Search people…"
+                   hx-get="{{ ui_tenant_url }}banking/accounts/holder-search/"
+                   hx-trigger="input changed delay:200ms" hx-target="#holder-results" />
+          <div id="holder-results" class="rel-results"></div>
+        </c-field>
+
         <c-field label="Primary holder" help="Optional — who to show first.">
-          <c-select name="primary_holder">
-            <option value="">— none —</option>
-            {% for p in people %}<option value="{{ p.pk }}"{% if primary_holder == p.pk|stringformat:'s' %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}
-          </c-select>
+          <div class="control is-select">
+            <select name="primary_holder" x-model="primaryId">
+              <option value="">— none —</option>
+              {% for p in people %}<option value="{{ p.pk }}">{{ p.display_name }}</option>{% endfor %}
+              <template x-for="e in extras" :key="e.id"><option :value="e.id" x-text="e.name"></option></template>
+            </select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
         </c-field>
       </div>
+      {{ holder_extras|json_script:"holder-extras-data" }}
     </c-card>
 
     {% if mode == 'create' %}

@@ -30,12 +30,13 @@ from apps.banking.services import (
     sync_holder_p2o,
     unpost_transaction,
 )
-from apps.contacts.models import Person
+from apps.contacts.models import Address, Person
 from apps.finance.models import Account, Currency
 from apps.finance.models import AccountType as GLType
 from apps.finance.services import base_currency
 from apps.organizations.models import Branch, Organization
 from apps.relationships.services import parse_partial_dates
+from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
 ACCOUNT_SORTS = {
@@ -185,18 +186,16 @@ def _account_form(request, account, mode):
     form = BankAccountForm(request.POST or None, instance=account)
     error = ""
     if request.method == "POST":
-        bank = Organization.objects.filter(pk=request.POST.get("bank") or 0).first()
+        new_bank_name = request.POST.get("new_bank_name", "").strip()
+        selected_bank = Organization.objects.filter(pk=request.POST.get("bank") or 0).first()
+        have_bank = bool(new_bank_name or selected_bank)
         account_type = request.POST.get("account_type") or AccountType.CHECKING
         currency = (
             Currency.objects.filter(code=request.POST.get("currency") or "").first()
             or base_currency()
         )
-        branch = (
-            Branch.objects.filter(pk=request.POST.get("branch") or 0, organization=bank).first()
-            if bank
-            else None
-        )
-        if form.is_valid() and bank and account_type in AccountType.values:
+        if form.is_valid() and have_bank and account_type in AccountType.values:
+            bank, branch = _resolve_bank(request, new_bank_name, selected_bank)
             account = form.save(commit=False)
             account.bank = bank
             account.branch = branch
@@ -210,12 +209,21 @@ def _account_form(request, account, mode):
             sync_holder_p2o(account)
             _maybe_opening_balance(request, account)
             return redirect(tenant_url(request, f"banking/accounts/{account.pk}/"))
-        if not bank:
-            error = "Choose the bank this account is held at."
+        if not have_bank:
+            error = "Choose a bank or add a new one."
 
-    selected_holders = (
-        {str(h.person_id): h.is_primary for h in account.holders.all()} if account.pk else {}
-    )
+    people = Person.objects.filter(is_household_member=True)
+    household_ids = set(people.values_list("pk", flat=True))
+    current_holders = list(account.holders.select_related("person").all()) if account.pk else []
+    selected_holders = {str(h.person_id): h.is_primary for h in current_holders}
+    # Holders who aren't household members render as removable "extra" chips (added via search).
+    holder_extras = [
+        {"id": h.person_id, "name": h.person.display_name,
+         "tint": h.person.avatar_tint, "initials": h.person.initials}
+        for h in current_holders
+        if h.person_id not in household_ids
+    ]
+    primary_holder = next((str(h.person_id) for h in current_holders if h.is_primary), "")
     branches = (
         Branch.objects.filter(organization=account.bank)
         if account.bank_id
@@ -229,11 +237,37 @@ def _account_form(request, account, mode):
         currencies=Currency.objects.filter(is_active=True),
         base=base_currency(),
         account_types=AccountType.choices,
-        people=Person.objects.all(),
+        people=people,
         selected_holders=selected_holders,
-        primary_holder=next((pid for pid, prim in selected_holders.items() if prim), ""),
+        holder_extras=holder_extras,
+        primary_holder=primary_holder,
     )
     return render(request, "banking/account_form.html", ctx)
+
+
+def _resolve_bank(request, new_bank_name, selected_bank):
+    """Return (bank, branch). Creates a Bank-category Organization (+ optional branch/city) from the
+    inline 'add a new bank' fields when given; else uses the selected bank + its posted branch."""
+    if not new_bank_name:
+        branch = (
+            Branch.objects.filter(pk=request.POST.get("branch") or 0, organization=selected_bank)
+            .first()
+            if selected_bank
+            else None
+        )
+        return selected_bank, branch
+
+    bank = Organization.objects.create(name=new_bank_name)
+    bank.categories.add(Category.objects.get(kind=Category.Kind.ORG, name="Bank"))
+    branch = None
+    new_branch_name = request.POST.get("new_branch_name", "").strip()
+    if new_branch_name:
+        branch = Branch.objects.create(organization=bank, name=new_branch_name, is_primary=True)
+    city = request.POST.get("new_bank_city", "").strip()
+    if city:
+        Address.objects.create(**({"branch": branch} if branch else {"organization": bank}),
+                               city=city, is_primary=True)
+    return bank, branch
 
 
 def account_delete(request, pk):
@@ -369,6 +403,19 @@ def payee_search(request):
         request,
         "banking/partials/payee_search.html",
         {"people": people[:6], "orgs": orgs[:6], "q": q},
+    )
+
+
+def holder_search(request):
+    """People for the account-holder picker's 'add someone else' search (any contact)."""
+    q = request.GET.get("q", "").strip()
+    people = Person.objects.all()
+    if q:
+        people = people.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(preferred_name__icontains=q)
+        )
+    return render(
+        request, "banking/partials/holder_search.html", {"candidates": people[:8], "q": q}
     )
 
 

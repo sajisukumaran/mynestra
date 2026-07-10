@@ -4,6 +4,7 @@ member/non-member gate. Drives the authenticated tenant client end-to-end."""
 from django_tenants.utils import schema_context
 
 from apps.banking.models import BankAccount, BankTransaction
+from apps.contacts.models import Person
 from apps.organizations.models import Organization
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
@@ -48,6 +49,43 @@ def test_account_create_form_renders(make_tenant, make_user, client):
     client.force_login(owner)
     body = client.get(_url(tenant, "accounts/new/")).content.decode()
     assert "New account" in body and "HDFC Bank" in body
+
+
+def test_holder_picker_shows_only_household_members(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _bank()
+        Person.objects.create(first_name="Asha", last_name="Home", is_household_member=True)
+        Person.objects.create(first_name="Zubin", last_name="Mistry")  # external contact
+    client.force_login(owner)
+    body = client.get(_url(tenant, "accounts/new/")).content.decode()
+    assert "Asha" in body       # household member is a quick-add chip
+    assert "Zubin" not in body  # external contacts are reachable only via the holder search
+
+
+def test_create_account_with_new_bank_inline(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)  # no banks exist yet
+    resp = client.post(
+        _url(tenant, "accounts/new/"),
+        {
+            "new_bank_name": "Brand New Bank",
+            "new_branch_name": "Downtown",
+            "new_bank_city": "Metropolis",
+            "account_type": "checking",
+            "nickname": "New Bank Checking",
+            "currency": "USD",
+            "is_active": "on",
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        bank = Organization.objects.get(name="Brand New Bank")
+        assert bank.categories.filter(kind="ORG", name="Bank").exists()
+        branch = bank.branches.get(name="Downtown")
+        assert branch.primary_city == "Metropolis"
+        acct = BankAccount.objects.get(nickname="New Bank Checking")
+        assert acct.bank_id == bank.pk and acct.branch_id == branch.pk
 
 
 def test_create_account_with_opening_balance(make_tenant, make_user, client):

@@ -18,5 +18,6 @@ urlpatterns = [
     path("accounts/<int:pk>/txns/<int:tx>/delete/", views.txn_delete, name="txn-delete"),
     path("accounts/<int:pk>/txns/<int:tx>/cleared/", views.txn_toggle_cleared, name="txn-cleared"),
     path("payee-search/", views.payee_search, name="payee-search"),
+    path("accounts/holder-search/", views.holder_search, name="holder-search"),
     path("branch-options/", views.branch_options, name="branch-options"),
 ]
