@@ -48,6 +48,8 @@ urlpatterns = [
     path("appearance/", views.appearance, name="appearance"),
     # Localization (default currency + timezone + formats)
     path("localization/", views.localization, name="localization"),
+    # Accounting mode (Standard / Expert)
+    path("mode/", views.mode, name="mode"),
     # Household profile
     path("profile/", views.profile, name="profile"),
     # Recently deleted

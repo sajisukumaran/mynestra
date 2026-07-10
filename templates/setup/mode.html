@@ -1,0 +1,61 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Accounting mode{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Accounting mode</span></c-breadcrumb>
+<c-page-header title="Accounting mode" subtitle="Choose how much of the accounting MyNestra handles for you." />
+
+<div class="stack-20">
+  <div class="grid-2">
+    <c-card title="Standard" icon="sparkles">
+      <div class="stack-8">
+        {% if not is_expert %}<div><c-badge variant="success">Current mode</c-badge></div>{% endif %}
+        <p class="muted">The recommended default. MyNestra keeps a complete set of books behind the scenes and picks the right account for every transaction — you never see the ledger. Nothing to set up.</p>
+      </div>
+    </c-card>
+
+    <c-card title="Expert" icon="sliders-horizontal">
+      <div class="stack-8">
+        {% if is_expert %}<div><c-badge variant="accent">Current mode</c-badge></div>{% endif %}
+        <p class="muted">For people comfortable with accounting. Reveals the Chart of Accounts and lets you edit it, and adds an <span class="strong">Accounting</span> tab to each bank &amp; card account so you choose exactly which account every activity posts to.</p>
+      </div>
+    </c-card>
+  </div>
+
+  <c-card title="Switch mode" icon="sliders-horizontal">
+    {% if not is_expert %}
+    <div class="stack-16">
+      <p class="muted">Switching to Expert reveals the ledger. You can switch back to Standard afterwards — as long as you haven't changed any of the built-in accounts.</p>
+      <c-confirm-dialog
+        title="Switch to Expert mode?"
+        message="Expert mode reveals the Chart of Accounts and per-account accounting setup. You can switch back to Standard later, as long as the built-in accounts stay untouched. Your data is not changed."
+        confirm_variant="primary" icon="sliders-horizontal">
+        <c-slot name="trigger"><c-button variant="primary">Switch to Expert mode</c-button></c-slot>
+        <c-slot name="confirm">
+          <form method="post">{% csrf_token %}<input type="hidden" name="mode" value="expert"><c-button type="submit" variant="primary">Switch to Expert</c-button></form>
+        </c-slot>
+      </c-confirm-dialog>
+    </div>
+    {% elif is_expert and not locked %}
+    <div class="stack-16">
+      <c-hint icon="triangle-alert">Editing or deleting a built-in account while in Expert mode will permanently disable switching back to Standard.</c-hint>
+      <p class="muted">You're in Expert mode and the built-in accounts are still intact, so you can switch back to Standard. Future transactions will use the default accounts again; existing entries stay exactly as posted (the Chart of Accounts simply becomes hidden).</p>
+      <c-confirm-dialog
+        title="Switch back to Standard?"
+        message="Future transactions will use MyNestra's default accounts again, and the Chart of Accounts will be hidden. Your existing entries are untouched. You can return to Expert any time."
+        confirm_variant="primary" icon="rotate-ccw">
+        <c-slot name="trigger"><c-button variant="default">Switch back to Standard</c-button></c-slot>
+        <c-slot name="confirm">
+          <form method="post">{% csrf_token %}<input type="hidden" name="mode" value="standard"><c-button type="submit" variant="primary">Switch back to Standard</c-button></form>
+        </c-slot>
+      </c-confirm-dialog>
+    </div>
+    {% else %}
+    <div class="stack-8">
+      <div><c-badge variant="lock">Locked to Expert</c-badge></div>
+      <p class="muted">A built-in account has been changed, so switching back to Standard is no longer available. Your household stays in Expert mode from here on.</p>
+    </div>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

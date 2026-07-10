@@ -17,6 +17,7 @@ Every Setup page extends this and fills the `setup` block. Tenant links are buil
       <c-sidebar-item label="Members" icon="users" count="{{ nav_members }}" href="{{ ui_tenant_url }}setup/members/" {% if active == 'members' %}active="true"{% endif %} />
       <c-sidebar-item label="Appearance" icon="palette" href="{{ ui_tenant_url }}setup/appearance/" {% if active == 'appearance' %}active="true"{% endif %} />
       <c-sidebar-item label="Localization" icon="globe" href="{{ ui_tenant_url }}setup/localization/" {% if active == 'localization' %}active="true"{% endif %} />
+      <c-sidebar-item label="Accounting mode" icon="sliders-horizontal" href="{{ ui_tenant_url }}setup/mode/" {% if active == 'mode' %}active="true"{% endif %} />
       <c-sidebar-item label="Recently deleted" icon="trash-2" href="{{ ui_tenant_url }}setup/recently-deleted/" {% if active == 'recently-deleted' %}active="true"{% endif %} />
       <c-sidebar-item label="Household profile" icon="building-2" href="{{ ui_tenant_url }}setup/profile/" {% if active == 'profile' %}active="true"{% endif %} />
       <c-slot name="foot">

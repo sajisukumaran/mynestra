@@ -417,6 +417,39 @@ def localization(request):
     return render(request, "setup/localization.html", ctx)
 
 
+# --- Accounting mode --------------------------------------------------------------------------
+# Standard (default): the double-entry GL is invisible; the software picks every account. Expert:
+# the household controls the Chart of Accounts + per-account posting maps (see DESIGN / plan).
+# The switch is Standard->Expert freely; Expert->Standard only while `accounting_locked` is False
+# (it flips True on the first Standard-critical COA edit, done in the finance COA editor). All
+# writes go through a queryset update to avoid TenantMixin.save() (which switches schema).
+
+
+@owner_required
+def mode(request):
+    tenant = request.tenant
+    if request.method == "POST":
+        target = request.POST.get("mode")
+        if target == Tenant.AccountingMode.EXPERT:
+            Tenant.objects.filter(pk=tenant.pk).update(
+                accounting_mode=Tenant.AccountingMode.EXPERT
+            )
+        elif target == Tenant.AccountingMode.STANDARD and not tenant.accounting_locked:
+            # Reverting to Standard is allowed only while the seeded COA is still pristine.
+            Tenant.objects.filter(pk=tenant.pk).update(
+                accounting_mode=Tenant.AccountingMode.STANDARD
+            )
+        return redirect(setup_url(request, "mode/"))
+
+    ctx = setup_context(
+        request, "mode",
+        mode=tenant.accounting_mode,
+        is_expert=tenant.accounting_mode == Tenant.AccountingMode.EXPERT,
+        locked=tenant.accounting_locked,
+    )
+    return render(request, "setup/mode.html", ctx)
+
+
 # --- Household profile ----------------------------------------------------------------------
 # Tenant is a public (django-tenants) model; name is updated via queryset (no schema switch), the
 # logo via model save (TenantMixin.save() resets to public — safe because we redirect after).
