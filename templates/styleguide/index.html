@@ -189,6 +189,27 @@
       </c-app-tile>
     </div>
 
+    {# ---- Accounting mode (Setup → Mode) ---- #}
+    <c-card title="Accounting mode" id="accounting-mode" icon="sliders-horizontal">
+      <div class="stack-16">
+        <p class="muted">Standard vs Expert — the tenant-level accounting mode. Composed from cards, badges, a hint and a confirm-dialog; no new components.</p>
+        <div class="grid-2">
+          <c-card title="Standard" icon="sparkles">
+            <div class="stack-8"><div><c-badge variant="success">Current mode</c-badge></div>
+              <p class="muted">Accounting runs behind the scenes; the software picks every account.</p></div>
+          </c-card>
+          <c-card title="Expert" icon="sliders-horizontal">
+            <div class="stack-8"><p class="muted">An editable Chart of Accounts + a per-account Accounting Setup tab.</p></div>
+          </c-card>
+        </div>
+        <c-hint icon="triangle-alert">Editing a built-in account while in Expert mode permanently disables switching back to Standard.</c-hint>
+        <c-confirm-dialog title="Switch to Expert mode?" message="You can switch back to Standard later, as long as the built-in accounts stay untouched." confirm_variant="primary" icon="sliders-horizontal">
+          <c-slot name="trigger"><c-button variant="primary">Switch to Expert mode</c-button></c-slot>
+          <c-slot name="confirm"><c-button variant="primary">Switch to Expert</c-button></c-slot>
+        </c-confirm-dialog>
+      </div>
+    </c-card>
+
     {# ---- Money ---- #}
     <c-card title="Money" id="money" icon="coins">
       <div class="row wrap" style="gap:28px; align-items:baseline;">
