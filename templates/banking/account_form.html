@@ -20,15 +20,19 @@
       <div x-data="{ newBank: {% if banks %}false{% else %}true{% endif %} }">
         <div class="form-grid">
           <c-field label="Bank" required>
-            <div x-show="!newBank">
+            <div x-show="!newBank" class="stack-8">
               <c-select name="bank" id="id_bank" :disabled="newBank"
                         hx-get="{{ ui_tenant_url }}banking/branch-options/" hx-target="#id_branch"
                         hx-swap="innerHTML" hx-trigger="change" hx-include="this">
                 <option value="">Choose bank…</option>
                 {% for b in banks %}<option value="{{ b.pk }}"{% if account.bank_id == b.pk %} selected{% endif %}>{{ b.display }}</option>{% endfor %}
               </c-select>
+              <c-button variant="ghost" size="sm" @click="newBank = true"><c-icon name="plus" size="sm" /> Add a new bank</c-button>
             </div>
-            <div x-show="newBank" x-cloak><div class="control"><input name="new_bank_name" placeholder="e.g. HDFC Bank"></div></div>
+            <div x-show="newBank" x-cloak class="stack-8">
+              <div class="control"><input name="new_bank_name" placeholder="e.g. HDFC Bank"></div>
+              <c-button variant="ghost" size="sm" @click="newBank = false"><c-icon name="chevron-left" size="sm" /> Choose an existing bank</c-button>
+            </div>
           </c-field>
           <c-field label="Branch" help="Optional — the specific branch.">
             <div x-show="!newBank">
@@ -54,10 +58,6 @@
               {% for c in currencies %}<option value="{{ c.code }}"{% if account.currency_id == c.code %} selected{% elif not account.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
             </c-select>
           </c-field>
-        </div>
-        <div class="row wrap">
-          <c-button variant="ghost" size="sm" x-show="!newBank" @click="newBank = true"><c-icon name="plus" size="sm" /> Add a new bank</c-button>
-          <c-button variant="ghost" size="sm" x-show="newBank" x-cloak @click="newBank = false"><c-icon name="chevron-left" size="sm" /> Choose an existing bank</c-button>
         </div>
         <label class="row">{{ form.is_active }} <span class="muted">Active account</span></label>
       </div>

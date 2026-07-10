@@ -666,6 +666,7 @@ textarea.control { min-height:70px; height:auto; align-items:stretch; padding:8p
 .grid-halves { display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start; }
 .grid-detail { display:grid; grid-template-columns:340px 1fr; gap:22px; align-items:start; }
 .stack { display:flex; flex-direction:column; }
+.stack-8 > * + * { margin-top:8px; }
 .stack-16 > * + * { margin-top:16px; }
 .stack-20 > * + * { margin-top:20px; }
 .row { display:flex; align-items:center; gap:10px; }
