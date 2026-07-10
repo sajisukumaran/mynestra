@@ -13,7 +13,7 @@ from simple_history.models import HistoricalRecords
 
 from apps.core.models import SoftDeleteModel, TimeStampedModel
 from apps.core.partialdate import PartialDate
-from apps.finance.models import AMOUNT_DECIMALS, AMOUNT_MAX_DIGITS
+from apps.finance.models import AMOUNT_DECIMALS, AMOUNT_MAX_DIGITS, ZERO
 
 
 class AccountType(models.TextChoices):
@@ -33,7 +33,7 @@ class TxnType(models.TextChoices):
     TRANSFER_IN = "transfer_in", "Transfer in"
 
 
-# Money flows INTO the account for these types, OUT for the rest (drives the signed running balance).
+# Money flows INTO the account for these types, OUT for the rest (drives the signed balance).
 INFLOW_TYPES = frozenset(
     {TxnType.OPENING, TxnType.DEPOSIT, TxnType.INTEREST, TxnType.TRANSFER_IN}
 )
@@ -131,12 +131,18 @@ class BankAccount(SoftDeleteModel):
 
     @property
     def native_balance(self):
-        """Balance in the account's own currency (equals `balance` when that is the base currency)."""
+        """Balance in the account's own currency (equals `balance` when that is the base)."""
         if self.gl_account_id is None:
             return None
         from apps.finance.services import account_native_balance
 
         return account_native_balance(self.gl_account)
+
+    @property
+    def display_balance(self):
+        """The account's own-currency balance for display (never None; zero before any posting)."""
+        nb = self.native_balance
+        return nb if nb is not None else ZERO
 
     @property
     def opened(self) -> PartialDate:

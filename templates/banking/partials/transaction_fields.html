@@ -1,0 +1,85 @@
+{% comment %}Transaction add/edit fields. Included inside a <form> whose Alpine x-data provides:
+`type` (the selected txn type) and the payee picker state (payeeKind/payeeId/payeeName/payeeTint/
+payeeInit + pickPayee/clearPayee). Fields reveal per type via x-show; category selects for the wrong
+type are :disabled so they don't submit. Needs: account, picker_types, income_accounts,
+expense_accounts, cash_account, other_accounts. Pass `txn` (edit prefill) + a unique `suffix`.{% endcomment %}
+<div class="form-grid">
+  <c-field label="Type" required>
+    <div class="control is-select">
+      <select name="txn_type" @change="type = $event.target.value">
+        {% if txn.txn_type == 'opening' %}<option value="opening" selected>Opening balance</option>{% endif %}
+        {% for val, label in picker_types %}<option value="{{ val }}"{% if txn.txn_type == val or not txn and val == 'deposit' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+  <c-field label="Amount" required help="In {{ account.currency.code }}."><div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div></c-field>
+</div>
+
+{# Category — deposit (income) #}
+<div x-show="type === 'deposit'" x-cloak>
+  <c-field label="Category" help="Where the money came from.">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'deposit'">
+        <option value="">Uncategorized (Other Income)</option>
+        {% for a in income_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Category — withdrawal (expense or cash) #}
+<div x-show="type === 'withdrawal'" x-cloak>
+  <c-field label="Category" help="What the money was spent on.">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'withdrawal'">
+        <option value="">Uncategorized (Other Expenses)</option>
+        {% if cash_account %}<option value="{{ cash_account.pk }}"{% if txn.category_account_id == cash_account.pk %} selected{% endif %}>Cash withdrawal ({{ cash_account.name }})</option>{% endif %}
+        {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Payee — deposits & withdrawals #}
+<div x-show="type === 'deposit' || type === 'withdrawal'" x-cloak>
+  <c-field label="Payee (optional)" help="A person or organization on the other side.">
+    <div x-show="!payeeId">
+      <c-input type="search" name="payee_q" autocomplete="off" placeholder="Search people or organizations…"
+               hx-get="{{ ui_tenant_url }}banking/payee-search/" hx-trigger="input changed delay:200ms, focus"
+               hx-target="#payee-results-{{ suffix }}" />
+      <div id="payee-results-{{ suffix }}" class="rel-results"></div>
+    </div>
+    <div x-show="payeeId" x-cloak class="rel">
+      <span class="avatar a-sm" :class="'av-'+payeeTint" x-text="payeeInit"></span>
+      <div class="grow"><div class="r-name" x-text="payeeName"></div></div>
+      <c-button type="button" variant="ghost" size="sm" @click="clearPayee()"><c-icon name="x" size="sm" /> Change</c-button>
+    </div>
+  </c-field>
+</div>
+<input type="hidden" name="payee_person" :value="payeeKind === 'person' ? payeeId : ''">
+<input type="hidden" name="payee_organization" :value="payeeKind === 'org' ? payeeId : ''">
+
+{# Transfer — the other account #}
+<div x-show="type === 'transfer_out' || type === 'transfer_in'" x-cloak>
+  <div class="grid-halves">
+    <c-field label="Other account">
+      <c-select name="counter_account">
+        <option value="">— external / untracked —</option>
+        {% for oa in other_accounts %}<option value="{{ oa.pk }}"{% if txn.counter_account_id == oa.pk %} selected{% endif %}>{{ oa.nickname }} · {{ oa.bank.display }}</option>{% endfor %}
+      </c-select>
+    </c-field>
+    <c-field label="External name" help="If the other side isn't tracked here."><c-input name="counter_external" value="{{ txn.counter_external|default:'' }}" placeholder="e.g. External broker" /></c-field>
+  </div>
+  {% if not txn %}<label class="row"><input type="checkbox" name="auto_match" checked> <span class="muted">Also record the matching leg in the other account</span></label>{% endif %}
+</div>
+
+{# Always #}
+<c-field label="Memo"><c-input name="memo" value="{{ txn.memo|default:'' }}" placeholder="Optional note" /></c-field>
+<div class="grid-halves">
+  <c-field label="Reference"><c-input name="reference" value="{{ txn.reference|default:'' }}" placeholder="Cheque no. / ref" /></c-field>
+  <label class="row"><input type="checkbox" name="cleared"{% if txn.cleared %} checked{% endif %}> <span class="muted">Cleared / reconciled</span></label>
+</div>

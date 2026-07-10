@@ -15,6 +15,7 @@ urlpatterns = [
     path("contacts/", include("apps.contacts.urls")),
     path("organizations/", include("apps.organizations.urls")),
     path("finance/", include("apps.finance.urls")),
+    path("banking/", include("apps.banking.urls")),
     path("setup/", include("apps.setup.urls")),
     # Legacy P1 invite route; invitations now live in Setup → Members (P3).
     path(

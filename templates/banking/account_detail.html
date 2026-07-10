@@ -1,0 +1,158 @@
+{% extends "banking/base.html" %}
+{% block bank_heading %}{{ account.nickname }}{% endblock %}
+
+{% block bank %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}banking/">Banking</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}banking/accounts/">Accounts</a><c-icon name="chevron-right" />
+  <span class="strong">{{ account.nickname }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ account.bank.avatar_tint }}"><c-icon name="landmark" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ account.nickname }}</h1>
+          <c-badge>{{ account.type_label }}</c-badge>
+          {% if not account.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
+          {% if account.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
+        </div>
+        <div class="muted">{{ account.bank.display }}{% if account.branch %} · {{ account.branch.name }}{% endif %}{% if account.masked_number %} · <span class="tnum">{{ account.masked_number }}</span>{% endif %}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="coins" size="sm" class="subtle" /><span class="strong"><c-money :amount="account.display_balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> {{ account.currency.code }}</span>
+          {% if holders %}<span class="row"><c-icon name="users" size="sm" class="subtle" />{% for h in holders %}{{ h.person.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete {{ account.nickname }}?" message="This moves the account to Recently deleted. Its ledger entries stay posted.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {# Tabs #}
+  <div x-data="{ tab: 'register' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="coins" size="sm" /> Register {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'holders' }" @click="tab = 'holders'"><c-icon name="users" size="sm" /> Holders {% if holders %}<span class="tcount tnum">{{ holders|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# REGISTER #}
+    <div x-show="tab === 'register'">
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Transactions</span>
+          <c-modal title="Add transaction" class="modal-wide">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add transaction</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/txns/new/"
+                  x-data="{ type:'deposit', payeeKind:'', payeeId:'', payeeName:'', payeeTint:'slate', payeeInit:'?', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
+              <div class="stack-16">
+                {% include "banking/partials/transaction_fields.html" with suffix='new' %}
+                <div class="row"><c-button type="submit" variant="primary">Add transaction</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-modal>
+        </div>
+
+        {% if rows %}
+        <c-card flush>
+          <c-table>
+            <thead><tr>
+              <c-th>Date</c-th>
+              <c-th>Type</c-th>
+              <c-th>Details</c-th>
+              <c-th>Cleared</c-th>
+              <th class="col-num">Amount</th>
+              <th class="col-num">Balance</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {% for r in rows %}{% with t=r.txn %}
+              <tr>
+                <td class="muted tnum">{{ t.date|date:"d M Y" }}</td>
+                <td><span class="row"><c-icon name="{{ t.type_glyph }}" size="sm" class="subtle" /><c-badge>{{ t.type_label }}</c-badge></span></td>
+                <td>
+                  <div class="pc-name">{% if t.category_account %}{{ t.category_account.name }}{% elif t.counter_account %}{{ t.counter_account.nickname }}{% elif t.counter_external %}{{ t.counter_external }}{% else %}{{ t.type_label }}{% endif %}</div>
+                  {% if t.payee or t.memo %}<div class="pc-sub">{% if t.payee %}{{ t.payee }}{% if t.memo %} · {% endif %}{% endif %}{{ t.memo }}</div>{% endif %}
+                </td>
+                <td>
+                  <form method="post" action="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/txns/{{ t.pk }}/cleared/">{% csrf_token %}
+                    <c-button type="submit" icon_only size="sm" variant="ghost" title="{% if t.cleared %}Cleared — click to unmark{% else %}Not cleared — click to mark{% endif %}"><c-icon name="{% if t.cleared %}circle-check{% else %}clock{% endif %}" size="sm" /></c-button>
+                  </form>
+                </td>
+                <td class="col-num"><span class="{% if t.is_inflow %}amount-pos{% else %}amount-neg{% endif %}"><c-money :amount="t.signed_amount" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></td>
+                <td class="col-num"><c-money :amount="r.balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td>
+                  <div class="cell-actions">
+                    <c-modal title="Edit transaction" class="modal-wide">
+                      <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                      <form method="post" action="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/txns/{{ t.pk }}/edit/"
+                            x-data="{ type:'{{ t.txn_type }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
+                        <div class="stack-16">
+                          {% include "banking/partials/transaction_fields.html" with txn=t suffix=t.pk %}
+                          <div class="between">
+                            <c-button type="submit" variant="primary">Save</c-button>
+                            <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/txns/{{ t.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                          </div>
+                        </div>
+                      </form>
+                    </c-modal>
+                  </div>
+                </td>
+              </tr>
+              {% endwith %}{% endfor %}
+            </tbody>
+          </c-table>
+        </c-card>
+        {% else %}
+        <c-card><c-empty-state icon="coins" title="No transactions yet" text="Record deposits, withdrawals, interest, fees and transfers to build the register." /></c-card>
+        {% endif %}
+      </div>
+    </div>
+
+    {# HOLDERS #}
+    <div x-show="tab === 'holders'" x-cloak>
+      <c-card title="Account holders" icon="users">
+        <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/edit/"><c-icon name="pencil" size="sm" /> Manage</c-button></c-slot>
+        {% for h in holders %}
+        <c-rel-row name="{{ h.person.display_name }}" role="{{ h.person.list_subtitle }}" href="{{ ui_tenant_url }}contacts/people/{{ h.person.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ h.person.avatar_tint }}" size="sm">{{ h.person.initials }}</c-avatar></c-slot>
+          {% if h.is_primary %}<c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="users" title="No holders yet" text="Add the household members who hold this account.">
+          <c-button variant="primary" href="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/edit/"><c-icon name="pencil" /> Manage holders</c-button>
+        </c-empty-state>
+        {% endfor %}
+      </c-card>
+    </div>
+
+    {# HISTORY #}
+    <div x-show="tab === 'history'" x-cloak>
+      <c-card>
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this account{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}<span class="subtle">No history yet.</span>{% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

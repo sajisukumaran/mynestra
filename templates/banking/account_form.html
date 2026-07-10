@@ -1,0 +1,99 @@
+{% extends "banking/base.html" %}
+{% block bank_heading %}{% if mode == 'create' %}New account{% else %}Edit account{% endif %}{% endblock %}
+
+{% block bank %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}banking/">Banking</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}banking/accounts/">Accounts</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/">{{ account.nickname }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New account{% else %}Edit account{% endif %}" subtitle="Fields marked * are required." />
+
+{% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
+{% if not banks %}<c-hint icon="info">No banks yet. Add an organization in the <a href="{{ ui_tenant_url }}organizations/new/">Bank</a> category first, then come back to create the account.</c-hint>{% endif %}
+
+<form method="post">{% csrf_token %}
+  <div class="stack stack-20">
+
+    <c-card title="Account" icon="coins">
+      <div class="form-grid">
+        <c-field label="Bank" required>
+          <c-select name="bank" id="id_bank"
+                    hx-get="{{ ui_tenant_url }}banking/branch-options/" hx-target="#id_branch"
+                    hx-swap="innerHTML" hx-trigger="change" hx-include="this">
+            <option value="">Choose bank…</option>
+            {% for b in banks %}<option value="{{ b.pk }}"{% if account.bank_id == b.pk %} selected{% endif %}>{{ b.display }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Branch" help="Optional — the specific branch.">
+          <c-select name="branch" id="id_branch">
+            <option value="">Branch (optional)…</option>
+            {% for br in branches %}<option value="{{ br.pk }}"{% if account.branch_id == br.pk %} selected{% endif %}>{{ br.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Account type" required>
+          <c-select name="account_type">
+            {% for val, label in account_types %}<option value="{{ val }}"{% if account.account_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Nickname" required error="{{ form.nickname.errors.0 }}"><div class="control">{{ form.nickname }}</div></c-field>
+        <c-field label="Account number"><div class="control">{{ form.number }}</div></c-field>
+        <c-field label="Currency" required>
+          <c-select name="currency">
+            {% for c in currencies %}<option value="{{ c.code }}"{% if account.currency_id == c.code %} selected{% elif not account.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+      <label class="row">{{ form.is_active }} <span class="muted">Active account</span></label>
+    </c-card>
+
+    <c-card title="Holders" icon="users">
+      <div class="stack stack-16">
+        <c-field label="Household members" help="Select everyone who holds this account (joint accounts allowed).">
+          <div class="row wrap">
+            {% for p in people %}{% with pid=p.pk|stringformat:'s' %}
+            <label class="fchip{% if pid in selected_holders %} active{% endif %}" x-data="{ on: {% if pid in selected_holders %}true{% else %}false{% endif %} }" :class="{ active: on }">
+              <input type="checkbox" name="holders" value="{{ p.pk }}" x-model="on" hidden>{{ p.display_name }}
+            </label>
+            {% endwith %}{% empty %}<span class="subtle">No household members yet — add people in Contacts.</span>{% endfor %}
+          </div>
+        </c-field>
+        <c-field label="Primary holder" help="Optional — who to show first.">
+          <c-select name="primary_holder">
+            <option value="">— none —</option>
+            {% for p in people %}<option value="{{ p.pk }}"{% if primary_holder == p.pk|stringformat:'s' %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+    </c-card>
+
+    {% if mode == 'create' %}
+    <c-card title="Opening balance" icon="pin">
+      <div class="form-grid">
+        <c-field label="Opening balance" help="Optional. Posts a dated opening entry (Dr account / Cr Opening Balance Equity).">
+          <div class="control"><input name="opening_balance" inputmode="decimal" placeholder="0.00"></div>
+        </c-field>
+        <c-field label="As of"><div class="control"><input type="date" name="opening_date" value="{% now 'Y-m-d' %}"></div></c-field>
+      </div>
+    </c-card>
+    {% endif %}
+
+    <c-card title="Details" icon="calendar-days">
+      <div class="stack stack-16">
+        <div class="grid-halves">
+          <c-field label="Opened"><c-partial-date prefix="opened" day="{{ account.opened_day|default:'' }}" month="{{ account.opened_month|default:'' }}" year="{{ account.opened_year|default:'' }}" /></c-field>
+          <c-field label="Closed" help="Leave blank unless it has closed."><c-partial-date prefix="closed" day="{{ account.closed_day|default:'' }}" month="{{ account.closed_month|default:'' }}" year="{{ account.closed_year|default:'' }}" /></c-field>
+        </div>
+        <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea></c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if error or form.errors %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}banking/accounts/{{ account.pk }}/{% else %}{{ ui_tenant_url }}banking/accounts/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create account{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

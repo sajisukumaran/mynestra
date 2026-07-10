@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}Banking app shell: topbar + Banking per-app sidebar. Composes the kit (no mockup).{% endcomment %}
+{% block title %}{% block bank_heading %}Banking{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Banking" subtitle="{{ ui_tenant_name }}" glyph="landmark">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}banking/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Accounts" icon="coins" count="{{ nav_accounts }}" href="{{ ui_tenant_url }}banking/accounts/" {% if active == 'accounts' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block bank %}{% endblock %}
+</c-shell>
+{% endblock %}
