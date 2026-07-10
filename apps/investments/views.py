@@ -396,7 +396,7 @@ def holding_detail(request, pk, sec):
     security = get_object_or_404(Security, pk=sec)
     lots = account.lots.filter(security=security, open=True).order_by("acquired_date", "id")
     txns = account.transactions.filter(security=security).order_by("-date", "-id")
-    match = next((h for h in holdings(account) if h.security_id == security.id), None)
+    match = next((h for h in holdings(account) if h.security.id == security.id), None)
     ctx = inv_context(
         request, "accounts",
         account=account, security=security, lots=lots, txns=txns, holding=match,
