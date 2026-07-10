@@ -41,6 +41,7 @@ from apps.finance.models import (
     FiscalYear,
     JournalEntry,
     JournalLine,
+    PostingMap,
 )
 
 ONE = Decimal("1")
@@ -167,6 +168,86 @@ def resolve_account(ref) -> Account:
     if account is None:
         raise UnknownAccount(f"No account matches {ref!r}.")
     return account
+
+
+# --- Accounting mode + per-owner posting maps (Standard/Expert seam) -------------------------
+
+def _tenant_accounting_mode() -> str:
+    """The active tenant's accounting mode ('standard'/'expert'), with a schema_context fallback
+    (connection.tenant is a FakeTenant without `.accounting_mode` under schema_context)."""
+    mode = getattr(getattr(connection, "tenant", None), "accounting_mode", "") or ""
+    if mode:
+        return mode
+    try:
+        from apps.tenants.models import Tenant
+
+        return (
+            Tenant.objects.filter(schema_name=connection.schema_name)
+            .values_list("accounting_mode", flat=True)
+            .first()
+        ) or "standard"
+    except Exception:  # noqa: BLE001 — field may not exist yet / no row
+        return "standard"
+
+
+def is_expert_mode() -> bool:
+    return _tenant_accounting_mode() == "expert"
+
+
+def _posting_map_content_type(owner):
+    from django.contrib.contenttypes.models import ContentType
+
+    return ContentType.objects.get_for_model(owner.__class__)
+
+
+def resolve_posting_account(owner, activity: str, default_ref) -> Account:
+    """The account a subledger `activity` posts to.
+
+    Standard mode (or no owner): the subledger's built-in `default_ref`. Expert mode: a per-owner
+    `PostingMap` override for (owner, activity) if one exists, else `default_ref`. Raises
+    UnknownAccount if a mapped account has since been removed — Expert users own COA deletions, and
+    callers surface this as a "fix your accounting setup" message rather than crashing."""
+    if owner is not None and is_expert_mode():
+        pm = (
+            PostingMap.objects.filter(
+                content_type=_posting_map_content_type(owner),
+                object_id=owner.pk,
+                activity=activity,
+            )
+            .values_list("account_id", flat=True)
+            .first()
+        )
+        if pm is not None:
+            account = Account.objects.filter(pk=pm).first()  # excludes soft-deleted
+            if account is None:
+                raise UnknownAccount(
+                    f"The account mapped for '{activity}' no longer exists — "
+                    "update the account's Accounting setup."
+                )
+            return account
+    return resolve_account(default_ref)
+
+
+def set_posting_map(owner, activity: str, account) -> None:
+    """Upsert a per-owner activity→account override; `account=None` clears it. Used by the
+    Accounting Setup tab. (Only consulted in Expert mode, but safe to write in any mode.)"""
+    ct = _posting_map_content_type(owner)
+    if account in (None, "", 0, "0"):
+        PostingMap.objects.filter(content_type=ct, object_id=owner.pk, activity=activity).delete()
+        return
+    account = account if isinstance(account, Account) else resolve_account(account)
+    PostingMap.objects.update_or_create(
+        content_type=ct, object_id=owner.pk, activity=activity, defaults={"account": account}
+    )
+
+
+def posting_map_for(owner) -> dict[str, int]:
+    """{activity: account_id} for an owner — prefills the Accounting Setup tab."""
+    return dict(
+        PostingMap.objects.filter(
+            content_type=_posting_map_content_type(owner), object_id=owner.pk
+        ).values_list("activity", "account_id")
+    )
 
 
 # --- Posting --------------------------------------------------------------------------------

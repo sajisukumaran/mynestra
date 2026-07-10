@@ -25,6 +25,10 @@ from simple_history.models import HistoricalRecords
 
 from apps.core.models import SoftDeleteModel, TimeStampedModel
 
+# Per-owner posting-map "activity" keys are just strings agreed between a subledger and its
+# Accounting Setup UI; they are not enumerated here so a new module can add its own without a
+# finance migration.
+
 # Money is stored as Decimal(20,4): 4 dp covers every ISO-4217 currency + FX headroom.
 # Per-currency display precision lives on Currency.decimal_places. FX rates get more
 # precision. Never use float.
@@ -363,3 +367,35 @@ class JournalLine(TimeStampedModel):
     def __str__(self) -> str:
         side = f"Dr {self.debit}" if self.debit else f"Cr {self.credit}"
         return f"{self.account_id} {side}"
+
+
+class PostingMap(TimeStampedModel):
+    """Expert-mode override: which Account a given subledger `activity` posts to, per owner row.
+
+    A subledger (e.g. a BankAccount or CreditCard) may map named activities — "interest_income",
+    "fee_expense", … — to a chosen postable Account. `apps.finance.services.resolve_posting_account`
+    honors these only in Expert mode; in Standard mode the subledger's built-in default is used and
+    these rows are ignored. The owner is a tenant-schema row referenced via a (shared) ContentType +
+    object id, mirroring `JournalEntry.source`."""
+
+    content_type = models.ForeignKey(
+        "contenttypes.ContentType", on_delete=models.CASCADE, related_name="+"
+    )
+    object_id = models.PositiveBigIntegerField()
+    owner = GenericForeignKey("content_type", "object_id")
+    activity = models.CharField(max_length=40)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, related_name="+")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["content_type", "object_id", "activity"],
+                name="uniq_postingmap_owner_activity",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["content_type", "object_id"], name="postingmap_owner_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.content_type_id}:{self.object_id} {self.activity} -> {self.account_id}"
