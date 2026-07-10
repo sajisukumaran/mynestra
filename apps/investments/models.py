@@ -1,0 +1,646 @@
+"""Investments — investment accounts, their securities/holdings (per-lot cost basis) and a
+transaction register. Module 5, the third consumer of the finance general-ledger backbone.
+
+Design (locked with the user):
+- **Cost basis in the GL; market value in the module.** Each `InvestmentAccount` owns one postable
+  `finance.Account` (nested under the `1210`/`1220`/`1230` group header matching its tax
+  registration). The GL carries the account **at cost** (cash + cost basis of open lots). Current
+  market value / unrealized gain are computed here from manually-entered `SecurityPrice`s and are
+  never posted to the GL.
+- **Per-security tax lots.** Every buy creates a `Lot`; sells consume lots (FIFO or specific) via
+  `LotConsumption`, so realized gains are tax-accurate and reversible (see `apps.investments.services`).
+- **Explicit settlement cash.** Money in/out, buys, sells, dividends, interest and fees all move an
+  internal cash balance (`cash_balance`), computed from the register (`InvestmentTransaction.signed_cash`).
+
+Invariant (asserted in tests): `account_balance(gl) == cash_balance + Σ open-lot cost_basis`.
+
+Soft-deletable + audited like every tenant model (DESIGN §5).
+"""
+
+from decimal import Decimal
+
+from django.db import models
+from simple_history.models import HistoricalRecords
+
+from apps.core.models import SoftDeleteModel, TimeStampedModel
+from apps.core.partialdate import PartialDate
+from apps.finance.models import AMOUNT_DECIMALS, AMOUNT_MAX_DIGITS, ZERO
+
+# Quantities (fractional shares) and per-unit prices carry more precision than money amounts.
+QTY_MAX_DIGITS = 20
+QTY_DECIMALS = 6
+PRICE_MAX_DIGITS = 20
+PRICE_DECIMALS = 6
+
+
+def _amount(**kw):
+    return models.DecimalField(
+        max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS, **kw
+    )
+
+
+def _qty(**kw):
+    return models.DecimalField(max_digits=QTY_MAX_DIGITS, decimal_places=QTY_DECIMALS, **kw)
+
+
+def _price(**kw):
+    return models.DecimalField(max_digits=PRICE_MAX_DIGITS, decimal_places=PRICE_DECIMALS, **kw)
+
+
+# --- Security master -------------------------------------------------------------------------
+
+class SecurityKind(models.TextChoices):
+    STOCK = "stock", "Stock"
+    ETF = "etf", "ETF"
+    MUTUAL_FUND = "mutual_fund", "Mutual fund"
+    BOND = "bond", "Bond"
+    CD = "cd", "CD / Term deposit"
+    MONEY_MARKET = "money_market", "Money market"
+    OTHER = "other", "Other"
+
+
+class AssetClass(models.TextChoices):
+    EQUITY = "equity", "Equity"
+    FIXED_INCOME = "fixed_income", "Fixed income"
+    CASH = "cash", "Cash & equivalents"
+    REAL_ASSET = "real_asset", "Real assets"
+    OTHER = "other", "Other"
+
+
+# Chip tint per asset class (drives the allocation donut / bars). From the curated chip set.
+ASSET_CLASS_TINT = {
+    AssetClass.EQUITY: "teal",
+    AssetClass.FIXED_INCOME: "blue",
+    AssetClass.CASH: "slate",
+    AssetClass.REAL_ASSET: "amber",
+    AssetClass.OTHER: "violet",
+}
+
+
+class Security(SoftDeleteModel):
+    """A tradable instrument the household holds — a stock, ETF, fund, bond, CD, etc. Prices are
+    entered by hand (`SecurityPrice`); the latest one marks holdings to market."""
+
+    symbol = models.CharField(max_length=20, blank=True)  # ticker; blank for CDs / bespoke holdings
+    name = models.CharField(max_length=160)
+    kind = models.CharField(max_length=14, choices=SecurityKind.choices, default=SecurityKind.STOCK)
+    asset_class = models.CharField(
+        max_length=14, choices=AssetClass.choices, default=AssetClass.EQUITY
+    )
+    currency = models.ForeignKey("finance.Currency", on_delete=models.PROTECT, related_name="+")
+
+    # CD / term-deposit attributes (only meaningful when kind == CD).
+    apr = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)  # e.g. 5.2500 %
+    maturity_date = models.DateField(null=True, blank=True)
+
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["symbol", "name"]
+
+    def __str__(self) -> str:
+        return self.display
+
+    @property
+    def display(self) -> str:
+        if self.symbol:
+            return f"{self.symbol} · {self.name}" if self.name else self.symbol
+        return self.name
+
+    @property
+    def kind_label(self) -> str:
+        return self.get_kind_display()
+
+    @property
+    def asset_class_label(self) -> str:
+        return self.get_asset_class_display()
+
+    @property
+    def tint(self) -> str:
+        return ASSET_CLASS_TINT.get(self.asset_class, "slate")
+
+    @property
+    def is_cd(self) -> bool:
+        return self.kind == SecurityKind.CD
+
+    @property
+    def latest_price(self):
+        """The most recent manually-entered price, or None if none recorded."""
+        row = self.prices.order_by("-as_of").first()
+        return row.price if row else None
+
+
+class SecurityPrice(TimeStampedModel):
+    """A dated mark for a security (units of the security's currency per share/unit). Mirrors
+    `finance.ExchangeRate`: the latest on/before a date is the mark. Manually entered."""
+
+    security = models.ForeignKey(Security, on_delete=models.CASCADE, related_name="prices")
+    as_of = models.DateField()
+    price = _price()
+    source = models.CharField(max_length=60, blank=True)
+
+    class Meta:
+        ordering = ["-as_of"]
+        constraints = [
+            models.UniqueConstraint(fields=["security", "as_of"], name="securityprice_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.security} {self.price} @ {self.as_of}"
+
+
+# --- Investment account ----------------------------------------------------------------------
+
+class Registration(models.TextChoices):
+    TAXABLE_INDIVIDUAL = "taxable_individual", "Taxable — Individual"
+    TAXABLE_JOINT = "taxable_joint", "Taxable — Joint"
+    TRADITIONAL_IRA = "traditional_ira", "Traditional IRA"
+    ROTH_IRA = "roth_ira", "Roth IRA"
+    ROLLOVER_IRA = "rollover_ira", "Rollover IRA"
+    SEP_IRA = "sep_ira", "SEP IRA"
+    SIMPLE_IRA = "simple_ira", "SIMPLE IRA"
+    P401K = "401k", "401(k)"
+    ROTH_401K = "roth_401k", "Roth 401(k)"
+    P403B = "403b", "403(b)"
+    P457B = "457b", "457(b)"
+    HSA = "hsa", "HSA"
+    ESA_529 = "529", "529 plan"
+    CUSTODIAL = "custodial", "Custodial (UGMA/UTMA)"
+    TRUST = "trust", "Trust"
+    OTHER = "other", "Other"
+
+
+class AccountGroup(models.TextChoices):
+    TAXABLE = "taxable", "Taxable"
+    RETIREMENT = "retirement", "Retirement"
+    HSA = "hsa", "HSA"
+
+
+# Registration → GL group header (drives which of 1210/1220/1230 the account's node nests under).
+REGISTRATION_GROUP = {
+    Registration.TAXABLE_INDIVIDUAL: AccountGroup.TAXABLE,
+    Registration.TAXABLE_JOINT: AccountGroup.TAXABLE,
+    Registration.TRADITIONAL_IRA: AccountGroup.RETIREMENT,
+    Registration.ROTH_IRA: AccountGroup.RETIREMENT,
+    Registration.ROLLOVER_IRA: AccountGroup.RETIREMENT,
+    Registration.SEP_IRA: AccountGroup.RETIREMENT,
+    Registration.SIMPLE_IRA: AccountGroup.RETIREMENT,
+    Registration.P401K: AccountGroup.RETIREMENT,
+    Registration.ROTH_401K: AccountGroup.RETIREMENT,
+    Registration.P403B: AccountGroup.RETIREMENT,
+    Registration.P457B: AccountGroup.RETIREMENT,
+    Registration.HSA: AccountGroup.HSA,
+    Registration.ESA_529: AccountGroup.TAXABLE,
+    Registration.CUSTODIAL: AccountGroup.TAXABLE,
+    Registration.TRUST: AccountGroup.TAXABLE,
+    Registration.OTHER: AccountGroup.TAXABLE,
+}
+
+# GL group header system_keys, per AccountGroup (seeded in finance COA / migration 0006).
+GROUP_HEADER_KEY = {
+    AccountGroup.TAXABLE: "brokerage",
+    AccountGroup.RETIREMENT: "retirement",
+    AccountGroup.HSA: "hsa",
+}
+
+GROUP_TINT = {
+    AccountGroup.TAXABLE: "teal",
+    AccountGroup.RETIREMENT: "violet",
+    AccountGroup.HSA: "emerald",
+}
+
+
+class InvestmentAccount(SoftDeleteModel):
+    """A household investment account at an institution (Fidelity, Vanguard, …). Its balance lives
+    in the GL via `gl_account` (at cost); this row carries the human-facing metadata and the
+    module-computed market value / cash breakdown."""
+
+    institution = models.ForeignKey(
+        "organizations.Organization", on_delete=models.PROTECT, related_name="investment_accounts"
+    )
+    branch = models.ForeignKey(
+        "organizations.Branch",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="investment_accounts",
+    )
+    nickname = models.CharField(max_length=120)
+    number = models.CharField(max_length=40, blank=True)  # displayed masked
+    registration = models.CharField(
+        max_length=20, choices=Registration.choices, default=Registration.TAXABLE_INDIVIDUAL
+    )
+    currency = models.ForeignKey("finance.Currency", on_delete=models.PROTECT, related_name="+")
+
+    gl_account = models.OneToOneField(
+        "finance.Account",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="investment_account",
+    )
+
+    is_active = models.BooleanField(default=True)
+
+    opened_year = models.SmallIntegerField(null=True, blank=True)
+    opened_month = models.SmallIntegerField(null=True, blank=True)
+    opened_day = models.SmallIntegerField(null=True, blank=True)
+    closed_year = models.SmallIntegerField(null=True, blank=True)
+    closed_month = models.SmallIntegerField(null=True, blank=True)
+    closed_day = models.SmallIntegerField(null=True, blank=True)
+
+    notes = models.TextField(blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["nickname"]
+
+    def __str__(self) -> str:
+        return self.nickname
+
+    @property
+    def display(self) -> str:
+        return self.nickname
+
+    @property
+    def masked_number(self) -> str:
+        n = (self.number or "").strip()
+        if not n:
+            return ""
+        return f"••••{n[-4:]}" if len(n) > 4 else n
+
+    @property
+    def registration_label(self) -> str:
+        return self.get_registration_display()
+
+    @property
+    def group(self) -> str:
+        return REGISTRATION_GROUP.get(self.registration, AccountGroup.TAXABLE)
+
+    @property
+    def group_label(self) -> str:
+        return AccountGroup(self.group).label
+
+    @property
+    def group_tint(self) -> str:
+        return GROUP_TINT.get(self.group, "slate")
+
+    # -- GL delegators (base currency; the account at cost) --
+
+    @property
+    def balance(self):
+        """Base-currency GL balance (cost basis + cash), computed from posted lines."""
+        if self.gl_account_id is None:
+            return ZERO
+        from apps.finance.services import account_balance
+
+        return account_balance(self.gl_account)
+
+    @property
+    def native_balance(self):
+        if self.gl_account_id is None:
+            return None
+        from apps.finance.services import account_native_balance
+
+        return account_native_balance(self.gl_account)
+
+    # -- Module-computed figures (account's own currency) --
+
+    @property
+    def cash_balance(self):
+        from apps.investments.services import cash_balance
+
+        return cash_balance(self)
+
+    @property
+    def cost_basis(self):
+        from apps.investments.services import cost_basis
+
+        return cost_basis(self)
+
+    @property
+    def market_value(self):
+        from apps.investments.services import market_value
+
+        return market_value(self)
+
+    @property
+    def unrealized_gain(self):
+        return self.market_value - self.cost_basis
+
+    @property
+    def invested_value(self):
+        """Market value of securities only (excludes settlement cash)."""
+        return self.market_value
+
+    @property
+    def total_value(self):
+        """Everything the account is worth today: settlement cash + securities at market."""
+        return self.cash_balance + self.market_value
+
+    @property
+    def opened(self) -> PartialDate:
+        return PartialDate.from_instance(self, "opened")
+
+    @property
+    def closed(self) -> PartialDate:
+        return PartialDate.from_instance(self, "closed")
+
+    @property
+    def is_closed(self) -> bool:
+        return self.closed.is_set
+
+
+class InvestmentAccountHolder(TimeStampedModel):
+    """A household member who holds an investment account (joint accounts have several). Unique per
+    (account, person); one may be flagged primary."""
+
+    account = models.ForeignKey(
+        InvestmentAccount, on_delete=models.CASCADE, related_name="holders"
+    )
+    person = models.ForeignKey(
+        "contacts.Person", on_delete=models.PROTECT, related_name="investment_holdings"
+    )
+    is_primary = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ["-is_primary", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "person"], name="investmentaccountholder_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.person} @ {self.account}"
+
+
+# --- Transactions ----------------------------------------------------------------------------
+
+class InvTxnType(models.TextChoices):
+    OPENING = "opening", "Opening balance"          # cash (security null) or an opening holding
+    CONTRIBUTION = "contribution", "Contribution"    # money in (external source / employer match)
+    WITHDRAWAL = "withdrawal", "Withdrawal"          # money out (external)
+    TRANSFER_IN = "transfer_in", "Transfer in"       # cash in from a tracked bank account
+    TRANSFER_OUT = "transfer_out", "Transfer out"    # cash out to a tracked bank account
+    BUY = "buy", "Buy"
+    SELL = "sell", "Sell"
+    DIVIDEND = "dividend", "Dividend"
+    DIVIDEND_REINVEST = "dividend_reinvest", "Dividend (reinvested)"
+    INTEREST = "interest", "Interest"
+    CAP_GAIN_DIST = "cap_gain_dist", "Capital gains distribution"
+    RETURN_OF_CAPITAL = "return_of_capital", "Return of capital"
+    FEE = "fee", "Fee"
+    SPLIT = "split", "Stock split"
+
+
+# Types that require a security (the rest are cash-only / account-level).
+SECURITY_TYPES = frozenset({
+    InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST,
+    InvTxnType.RETURN_OF_CAPITAL, InvTxnType.SPLIT,
+})
+
+TXN_GLYPHS = {
+    InvTxnType.OPENING: "pin",
+    InvTxnType.CONTRIBUTION: "arrow-down",
+    InvTxnType.WITHDRAWAL: "arrow-up",
+    InvTxnType.TRANSFER_IN: "arrow-down",
+    InvTxnType.TRANSFER_OUT: "arrow-up",
+    InvTxnType.BUY: "arrow-up",
+    InvTxnType.SELL: "arrow-down",
+    InvTxnType.DIVIDEND: "coins",
+    InvTxnType.DIVIDEND_REINVEST: "coins",
+    InvTxnType.INTEREST: "coins",
+    InvTxnType.CAP_GAIN_DIST: "coins",
+    InvTxnType.RETURN_OF_CAPITAL: "arrow-down",
+    InvTxnType.FEE: "arrow-up",
+    InvTxnType.SPLIT: "network",
+}
+
+
+class CostBasisMethod(models.TextChoices):
+    FIFO = "fifo", "First in, first out"
+    SPECIFIC = "specific", "Specific lots"
+
+
+class InvestmentTransaction(SoftDeleteModel):
+    """One line in an investment account's register. Posts a balanced journal entry via
+    `apps.investments.services` and drives the tax-lot engine (buys create lots, sells consume them).
+    Posted entries are immutable, so an edit is a reverse-and-repost (bumping `posting_version`)."""
+
+    account = models.ForeignKey(
+        InvestmentAccount, on_delete=models.CASCADE, related_name="transactions"
+    )
+    txn_type = models.CharField(max_length=20, choices=InvTxnType.choices)
+    date = models.DateField()
+
+    security = models.ForeignKey(
+        Security, on_delete=models.PROTECT, null=True, blank=True, related_name="transactions"
+    )
+    quantity = _qty(default=ZERO)   # shares/units (buy/sell/reinvest); pre-split share count for SPLIT
+    price = _price(default=ZERO)    # per-unit price (buy/sell/reinvest)
+    amount = _amount(default=ZERO)  # gross cash: principal (buy), gross proceeds (sell), income, etc.
+    fee = _amount(default=ZERO)     # commission (capitalized) or advisory/account fee (expensed)
+
+    # Stock split ratio, e.g. 2-for-1 → new=2, old=1; 1-for-10 reverse → new=1, old=10.
+    split_ratio_new = models.DecimalField(
+        max_digits=12, decimal_places=6, null=True, blank=True
+    )
+    split_ratio_old = models.DecimalField(
+        max_digits=12, decimal_places=6, null=True, blank=True
+    )
+
+    # Contra override: for CONTRIBUTION a revenue account marks it as income (e.g. employer match);
+    # for FEE an alternate expense account. Null → the service's default contra for the type.
+    category_account = models.ForeignKey(
+        "finance.Account", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+
+    # The tracked bank account on the other side of a cash transfer (nets via 1150 clearing).
+    counter_account = models.ForeignKey(
+        "banking.BankAccount",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="investment_transfers",
+    )
+    counter_external = models.CharField(max_length=160, blank=True)
+
+    payee_person = models.ForeignKey(
+        "contacts.Person",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="investment_txns",
+    )
+    payee_organization = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="investment_txns",
+    )
+
+    # Sell lot selection: FIFO consumes oldest-first; SPECIFIC uses `lot_selection`
+    # (a list of {"lot": <id>, "qty": "<decimal>"}), preserved so a repost reproduces the same draw.
+    cost_basis_method = models.CharField(
+        max_length=10, choices=CostBasisMethod.choices, default=CostBasisMethod.FIFO
+    )
+    lot_selection = models.JSONField(null=True, blank=True)
+    realized_gain = _amount(default=ZERO)  # computed on SELL / excess return-of-capital; for display
+
+    memo = models.CharField(max_length=255, blank=True)
+    reference = models.CharField(max_length=60, blank=True)
+    cleared = models.BooleanField(default=False)  # reconciliation-lite; never affects the GL
+
+    journal_entry = models.ForeignKey(
+        "finance.JournalEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    posting_version = models.PositiveIntegerField(default=1)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(
+                    payee_person__isnull=False, payee_organization__isnull=False
+                ),
+                name="investmenttransaction_one_payee",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0), name="investmenttransaction_amount_nonneg"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_txn_type_display()} {self.amount} on {self.date}"
+
+    @property
+    def type_label(self) -> str:
+        return self.get_txn_type_display()
+
+    @property
+    def type_glyph(self) -> str:
+        return TXN_GLYPHS.get(self.txn_type, "circle")
+
+    @property
+    def net_proceeds(self):
+        """Sell proceeds net of commission (commission reduces proceeds / is capitalized)."""
+        return self.amount - self.fee
+
+    @property
+    def signed_cash(self):
+        """Effect of this transaction on the account's settlement cash balance."""
+        t = self.txn_type
+        if t == InvTxnType.OPENING:
+            return self.amount if self.security_id is None else ZERO
+        if t in (InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
+                 InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL):
+            return self.amount
+        if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE):
+            return -self.amount
+        if t == InvTxnType.BUY:
+            return -(self.amount + self.fee)
+        if t == InvTxnType.SELL:
+            return self.net_proceeds
+        # DIVIDEND_REINVEST and SPLIT are cash-neutral.
+        return ZERO
+
+    @property
+    def is_inflow(self) -> bool:
+        return self.signed_cash > 0
+
+    @property
+    def direction(self) -> str:
+        sc = self.signed_cash
+        return "in" if sc > 0 else ("out" if sc < 0 else "flat")
+
+    @property
+    def payee(self):
+        return self.payee_person or self.payee_organization
+
+    @property
+    def split_ratio_display(self) -> str:
+        if self.split_ratio_new and self.split_ratio_old:
+            new = self.split_ratio_new.normalize()
+            old = self.split_ratio_old.normalize()
+            return f"{new}-for-{old}"
+        return ""
+
+
+class Lot(TimeStampedModel):
+    """An open tax lot: a quantity of a security acquired on a date at a cost. Sells consume lots
+    (see `LotConsumption`); `remaining_quantity`/`cost_basis` track what's left. Engine state managed
+    exclusively by `apps.investments.services` — never edited directly."""
+
+    account = models.ForeignKey(InvestmentAccount, on_delete=models.CASCADE, related_name="lots")
+    security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="lots")
+    acquired_date = models.DateField()
+
+    original_quantity = _qty()
+    remaining_quantity = _qty()
+    original_cost = _amount()   # cost basis of original_quantity (commission capitalized)
+    cost_basis = _amount()      # cost basis of remaining_quantity
+
+    open = models.BooleanField(default=True)
+    source_txn = models.ForeignKey(
+        InvestmentTransaction,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="lots_created",
+    )
+
+    class Meta:
+        ordering = ["acquired_date", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.remaining_quantity} {self.security} @ {self.acquired_date}"
+
+    @property
+    def per_share_cost(self):
+        if self.remaining_quantity and self.remaining_quantity != ZERO:
+            return self.cost_basis / self.remaining_quantity
+        if self.original_quantity and self.original_quantity != ZERO:
+            return self.original_cost / self.original_quantity
+        return ZERO
+
+    @property
+    def market_value(self):
+        price = self.security.latest_price
+        if price is None:
+            return self.cost_basis
+        return (self.remaining_quantity * price).quantize(Decimal("0.0001"))
+
+    @property
+    def unrealized_gain(self):
+        return self.market_value - self.cost_basis
+
+
+class LotConsumption(TimeStampedModel):
+    """Audit of a SELL (or excess return-of-capital) drawing cost basis from a specific lot — makes
+    sells reversible: reversing a sale restores each lot's `remaining_quantity`/`cost_basis`."""
+
+    sale_txn = models.ForeignKey(
+        InvestmentTransaction, on_delete=models.CASCADE, related_name="lot_consumptions"
+    )
+    lot = models.ForeignKey(Lot, on_delete=models.PROTECT, related_name="consumptions")
+    quantity = _qty()
+    cost = _amount()       # cost basis drawn from the lot
+    proceeds = _amount(default=ZERO)  # proceeds allocated to this draw (for per-lot realized gain)
+
+    class Meta:
+        ordering = ["id"]
+
+    def __str__(self) -> str:
+        return f"{self.quantity} from lot #{self.lot_id}"
+
+    @property
+    def realized_gain(self):
+        return self.proceeds - self.cost
