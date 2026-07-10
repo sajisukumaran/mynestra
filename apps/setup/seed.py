@@ -5,6 +5,7 @@ from .models import Category
 # (name, chip tint) — tints from the curated set in DESIGN §7.1.
 ORG_CATEGORIES = [
     ("Bank", "blue"),
+    ("Brokerage", "sky"),
     ("Hospital/Clinic", "rose"),
     ("Pharmacy", "emerald"),
     ("School/College", "amber"),
