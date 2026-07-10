@@ -33,6 +33,10 @@ def ui(request):
     tenant_timezone = ""
     tenant_date_format = ""
     tenant_number_format = ""
+    # Accounting mode (Setup → Mode): drives whether the Finance/GL surface and per-account
+    # Accounting Setup tabs are shown. Empty/Standard on public pages.
+    tenant_accounting_mode = ""
+    tenant_accounting_locked = False
     if tenant is not None and tenant.schema_name != get_public_schema_name():
         tenant_name = tenant.name
         tenant_initials = _initials(tenant.name, "H")
@@ -44,6 +48,8 @@ def ui(request):
         tenant_timezone = getattr(tenant, "timezone", "") or ""
         tenant_date_format = getattr(tenant, "date_format", "") or ""
         tenant_number_format = getattr(tenant, "number_format", "") or ""
+        tenant_accounting_mode = getattr(tenant, "accounting_mode", "") or ""
+        tenant_accounting_locked = bool(getattr(tenant, "accounting_locked", False))
 
     return {
         "ui_user_initials": user_initials,
@@ -56,4 +62,7 @@ def ui(request):
         "ui_timezone": tenant_timezone,
         "ui_date_format": tenant_date_format,
         "ui_number_format": tenant_number_format,
+        "ui_accounting_mode": tenant_accounting_mode,
+        "ui_expert": tenant_accounting_mode == "expert",
+        "ui_accounting_locked": tenant_accounting_locked,
     }

@@ -45,6 +45,13 @@ class Tenant(TenantMixin):
         THOUSANDS = "thousands", "1,234.56"
         INDIAN = "indian", "1,23,456.78"
 
+    class AccountingMode(models.TextChoices):
+        # Standard: the GL is invisible; the software picks every account. Expert: the household
+        # controls the Chart of Accounts + per-account posting maps. Switch is Standard→Expert freely,
+        # Expert→Standard only while `accounting_locked` is False (see the Mode setup screen).
+        STANDARD = "standard", "Standard"
+        EXPERT = "expert", "Expert"
+
     # `schema_name` (max 63, unique) comes from TenantMixin and doubles as the slug.
     name = models.CharField(max_length=100)
     # Household accent, chosen by an Owner in Setup → Appearance (P3). Default Teal (DESIGN §7.2).
@@ -62,6 +69,15 @@ class Tenant(TenantMixin):
     number_format = models.CharField(
         max_length=12, choices=NumberFormat.choices, default=NumberFormat.THOUSANDS
     )
+
+    # Accounting mode (Setup → Mode, Owner-set). Default Standard: the double-entry GL is entirely
+    # behind the scenes. `accounting_locked` turns True the first time an Expert user makes a
+    # Standard-critical Chart-of-Accounts edit (delete/deactivate/re-code/reparent/un-header a
+    # seeded account); once locked, the household can no longer switch back to Standard.
+    accounting_mode = models.CharField(
+        max_length=8, choices=AccountingMode.choices, default=AccountingMode.STANDARD
+    )
+    accounting_locked = models.BooleanField(default=False)
 
     auto_create_schema = True
     auto_drop_schema = False
