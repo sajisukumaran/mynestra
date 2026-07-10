@@ -45,5 +45,7 @@ class InvestmentTransactionAdmin(admin.ModelAdmin):
 
 @admin.register(Lot)
 class LotAdmin(admin.ModelAdmin):
-    list_display = ("account", "security", "acquired_date", "remaining_quantity", "cost_basis", "open")
+    list_display = (
+        "account", "security", "acquired_date", "remaining_quantity", "cost_basis", "open",
+    )
     list_filter = ("open",)

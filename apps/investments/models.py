@@ -8,9 +8,9 @@ Design (locked with the user):
   market value / unrealized gain are computed here from manually-entered `SecurityPrice`s and are
   never posted to the GL.
 - **Per-security tax lots.** Every buy creates a `Lot`; sells consume lots (FIFO or specific) via
-  `LotConsumption`, so realized gains are tax-accurate and reversible (see `apps.investments.services`).
+  `LotConsumption`, so realized gains are tax-accurate and reversible (see the services module).
 - **Explicit settlement cash.** Money in/out, buys, sells, dividends, interest and fees all move an
-  internal cash balance (`cash_balance`), computed from the register (`InvestmentTransaction.signed_cash`).
+  internal cash balance (`cash_balance`), computed from the register (`signed_cash`).
 
 Invariant (asserted in tests): `account_balance(gl) == cash_balance + Σ open-lot cost_basis`.
 
@@ -90,7 +90,7 @@ class Security(SoftDeleteModel):
     currency = models.ForeignKey("finance.Currency", on_delete=models.PROTECT, related_name="+")
 
     # CD / term-deposit attributes (only meaningful when kind == CD).
-    apr = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)  # e.g. 5.2500 %
+    apr = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)  # e.g. 5.25 %
     maturity_date = models.DateField(null=True, blank=True)
 
     is_active = models.BooleanField(default=True)
@@ -428,9 +428,9 @@ class CostBasisMethod(models.TextChoices):
 
 
 class InvestmentTransaction(SoftDeleteModel):
-    """One line in an investment account's register. Posts a balanced journal entry via
-    `apps.investments.services` and drives the tax-lot engine (buys create lots, sells consume them).
-    Posted entries are immutable, so an edit is a reverse-and-repost (bumping `posting_version`)."""
+    """One line in an investment account's register. Posts a balanced journal entry via the services
+    module and drives the tax-lot engine (buys create lots, sells consume them). Posted entries are
+    immutable, so an edit is a reverse-and-repost (bumping `posting_version`)."""
 
     account = models.ForeignKey(
         InvestmentAccount, on_delete=models.CASCADE, related_name="transactions"
@@ -441,9 +441,9 @@ class InvestmentTransaction(SoftDeleteModel):
     security = models.ForeignKey(
         Security, on_delete=models.PROTECT, null=True, blank=True, related_name="transactions"
     )
-    quantity = _qty(default=ZERO)   # shares/units (buy/sell/reinvest); pre-split share count for SPLIT
+    quantity = _qty(default=ZERO)   # shares/units (buy/sell/reinvest); pre-split count for SPLIT
     price = _price(default=ZERO)    # per-unit price (buy/sell/reinvest)
-    amount = _amount(default=ZERO)  # gross cash: principal (buy), gross proceeds (sell), income, etc.
+    amount = _amount(default=ZERO)  # gross cash: principal (buy), gross proceeds (sell), income…
     fee = _amount(default=ZERO)     # commission (capitalized) or advisory/account fee (expensed)
 
     # Stock split ratio, e.g. 2-for-1 → new=2, old=1; 1-for-10 reverse → new=1, old=10.
@@ -491,7 +491,7 @@ class InvestmentTransaction(SoftDeleteModel):
         max_length=10, choices=CostBasisMethod.choices, default=CostBasisMethod.FIFO
     )
     lot_selection = models.JSONField(null=True, blank=True)
-    realized_gain = _amount(default=ZERO)  # computed on SELL / excess return-of-capital; for display
+    realized_gain = _amount(default=ZERO)  # computed on SELL / excess return-of-capital
 
     memo = models.CharField(max_length=255, blank=True)
     reference = models.CharField(max_length=60, blank=True)
@@ -576,8 +576,8 @@ class InvestmentTransaction(SoftDeleteModel):
 
 class Lot(TimeStampedModel):
     """An open tax lot: a quantity of a security acquired on a date at a cost. Sells consume lots
-    (see `LotConsumption`); `remaining_quantity`/`cost_basis` track what's left. Engine state managed
-    exclusively by `apps.investments.services` — never edited directly."""
+    (see `LotConsumption`); `remaining_quantity`/`cost_basis` track what's left. Engine state is
+    managed exclusively by the services module — never edited directly."""
 
     account = models.ForeignKey(InvestmentAccount, on_delete=models.CASCADE, related_name="lots")
     security = models.ForeignKey(Security, on_delete=models.PROTECT, related_name="lots")
