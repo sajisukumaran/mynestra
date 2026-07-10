@@ -117,3 +117,37 @@ def test_finance_ledger_source_and_party_are_isolated(make_tenant):
         assert JournalLine.objects.count() == 0
         assert Account.objects.count() == seeded  # same seeded COA, no cross-schema leak
         assert not Organization.objects.filter(name="Alpha-Only Bank").exists()
+
+
+def test_banking_accounts_transactions_and_ledger_are_isolated(make_tenant):
+    """Module 3 (BankAccount/Holder/BankTransaction) and the GL entries they post must not leak
+    across tenant schemas."""
+    from apps.banking.models import BankAccount, BankAccountHolder, BankTransaction, TxnType
+    from apps.banking.services import post_transaction
+
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        bank = Organization.objects.create(name="Alpha-Only Bank")
+        person = Person.objects.create(first_name="Alpha", last_name="Holder")
+        account = BankAccount.objects.create(
+            bank=bank, account_type="checking", nickname="Alpha Checking", currency_id="USD",
+        )
+        BankAccountHolder.objects.create(account=account, person=person, is_primary=True)
+        txn = BankTransaction.objects.create(
+            account=account, txn_type=TxnType.OPENING, date=datetime.date(2026, 1, 5),
+            amount=Decimal("500"),
+        )
+        post_transaction(txn)
+        assert BankAccount.objects.count() == 1
+        assert BankTransaction.objects.count() == 1
+        assert account.balance == Decimal("500")
+
+    with schema_context(b.schema_name):
+        assert BankAccount.objects.count() == 0
+        assert BankAccountHolder.objects.count() == 0
+        assert BankTransaction.objects.count() == 0
+        assert not BankAccount.objects.filter(nickname="Alpha Checking").exists()
+        # The opening entry posted in Alpha must not appear in Beta's ledger.
+        assert JournalEntry.objects.count() == 0

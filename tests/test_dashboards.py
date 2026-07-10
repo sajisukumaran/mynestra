@@ -154,8 +154,27 @@ def test_launcher_renders_enabled_and_coming_soon_tiles(make_tenant, make_user, 
     tenant, owner = _owner(make_tenant, make_user)
     client.force_login(owner)
     body = client.get(f"/t/{tenant.schema_name}/").content.decode()
-    for label in ("Contacts", "Organizations", "People", "Branches", "Key people", "Banking"):
+    # Enabled tiles (+ their live counts) and a still-coming-soon tile (Health).
+    for label in ("Contacts", "Organizations", "People", "Branches", "Key people", "Health"):
         assert label in body
+
+
+def test_banking_launcher_tile_is_live(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.banking.models import BankAccount
+
+        bank = Organization.objects.create(name="HDFC Bank")
+        bank.categories.add(Category.objects.get(kind="ORG", name="Bank"))
+        BankAccount.objects.create(
+            bank=bank, account_type="checking", nickname="Chk", currency_id="USD"
+        )
+        counts = _launcher_counts("banking")
+    assert counts["Accounts"] == 1 and counts["Banks"] == 1
+
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/").content.decode()
+    assert "Banking" in body and "banking/" in body  # live tile links to the app
 
 
 def test_launcher_counts_are_tenant_isolated(make_tenant):

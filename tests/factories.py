@@ -3,8 +3,10 @@ per-tenant)."""
 
 import factory
 
+from apps.banking.models import BankAccount
 from apps.contacts.models import Person
 from apps.families.models import Family, FamilyMembership
+from apps.finance.models import Currency
 from apps.organizations.models import Branch, Organization
 
 
@@ -44,3 +46,15 @@ class BranchFactory(factory.django.DjangoModelFactory):
 
     organization = factory.SubFactory(OrganizationFactory)
     name = factory.Sequence(lambda n: f"Branch{n}")
+
+
+class BankAccountFactory(factory.django.DjangoModelFactory):
+    """Needs the finance catalogs seeded (USD currency); use inside a tenant schema_context."""
+
+    class Meta:
+        model = BankAccount
+
+    bank = factory.SubFactory(OrganizationFactory)
+    nickname = factory.Sequence(lambda n: f"Account{n}")
+    account_type = "checking"
+    currency = factory.LazyFunction(lambda: Currency.objects.get(code="USD"))
