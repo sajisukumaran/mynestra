@@ -81,6 +81,10 @@ PICKER_TYPES = [
     (InvTxnType.TRANSFER_OUT, "Transfer out"),
     (InvTxnType.FEE, "Fee"),
     (InvTxnType.SPLIT, "Stock split"),
+    (InvTxnType.IN_KIND_OUT, "In-kind transfer out"),
+    (InvTxnType.IN_KIND_IN, "In-kind transfer in"),
+    (InvTxnType.WORTHLESS, "Worthless write-off"),
+    (InvTxnType.CASH_MERGER, "Cash buyout / merger"),
     (InvTxnType.OPENING, "Opening / existing holding"),
 ]
 
@@ -381,6 +385,7 @@ def account_detail(request, pk):
         income_accounts=_income_accounts(),
         expense_accounts=_expense_accounts(),
         bank_accounts=_bank_accounts(),
+        investment_accounts=InvestmentAccount.objects.exclude(pk=account.pk).order_by("nickname"),
     )
     return render(request, "investments/account_detail.html", ctx)
 
@@ -407,6 +412,23 @@ def holding_detail(request, pk, sec):
 
 # --- Transactions ---------------------------------------------------------------------------
 
+def _parse_lot_carry(request):
+    """Build a `lot_carry` snapshot from the external in-kind-IN form's repeated lot rows
+    (parallel lot_acquired / lot_qty / lot_cost inputs). Skips blank/invalid rows."""
+    dates = request.POST.getlist("lot_acquired")
+    qtys = request.POST.getlist("lot_qty")
+    costs = request.POST.getlist("lot_cost")
+    rows = []
+    for d, q, c in zip(dates, qtys, costs, strict=False):
+        pd = parse_date(d or "")
+        qd = _decimal(q)
+        cd = _decimal(c)
+        if pd is None or qd is None or qd <= 0 or cd is None or cd < 0:
+            continue
+        rows.append({"acquired_date": pd.isoformat(), "quantity": str(qd), "cost": str(cd)})
+    return rows
+
+
 def _apply_txn_post(request, txn):
     """Populate a (new or existing) transaction from POST; save + return it, or None if invalid."""
     t = request.POST.get("txn_type", "")
@@ -424,6 +446,8 @@ def _apply_txn_post(request, txn):
                                     InvTxnType.CAP_GAIN_DIST, InvTxnType.OPENING):
         security = Security.objects.filter(pk=request.POST.get("security") or 0).first()
 
+    lot_rows = _parse_lot_carry(request) if t == InvTxnType.IN_KIND_IN else []
+
     # Per-type required-field guards.
     if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST):
         if security is None or quantity <= 0 or amount <= 0:
@@ -436,6 +460,18 @@ def _apply_txn_post(request, txn):
             return None
     elif t == InvTxnType.OPENING:
         if amount <= 0:  # opening cash or opening-holding cost
+            return None
+    elif t == InvTxnType.IN_KIND_OUT:
+        if security is None or quantity <= 0:  # shares leaving the account
+            return None
+    elif t == InvTxnType.IN_KIND_IN:
+        if security is None or not lot_rows:  # user-entered incoming lots (external)
+            return None
+    elif t == InvTxnType.WORTHLESS:
+        if security is None:  # whole position written off
+            return None
+    elif t == InvTxnType.CASH_MERGER:
+        if security is None or amount <= 0:  # whole position bought out for cash
             return None
     else:  # cash types
         if amount <= 0:
@@ -484,6 +520,28 @@ def _apply_txn_post(request, txn):
         ).first()
         txn.counter_external = request.POST.get("counter_external", "").strip()
 
+    # In-kind transfers / worthless / cash-merger. `lot_carry` is user-entered only for an external
+    # in-kind IN; the OUT leg's snapshot is materialized by the engine on replay (never here). The
+    # mirror IN leg of an internal transfer is managed by the service, not this form.
+    txn.counter_investment_account = None
+    if t == InvTxnType.IN_KIND_OUT:
+        txn.amount = Decimal("0")
+        txn.lot_carry = None
+        dest_id = request.POST.get("counter_investment_account") or ""
+        if dest_id and dest_id != str(txn.account_id):
+            txn.counter_investment_account = InvestmentAccount.objects.filter(pk=dest_id).first()
+    elif t == InvTxnType.IN_KIND_IN:
+        txn.amount = Decimal("0")
+        txn.quantity = sum((Decimal(e["quantity"]) for e in lot_rows), Decimal("0"))
+        txn.lot_carry = lot_rows
+    elif t == InvTxnType.WORTHLESS:
+        txn.amount = Decimal("0")
+        txn.quantity = Decimal("0")
+        txn.lot_carry = None
+    elif t == InvTxnType.CASH_MERGER:
+        txn.quantity = Decimal("0")  # the engine disposes the whole position for the buyout cash
+        txn.lot_carry = None
+
     txn.payee_person = None
     txn.payee_organization = None
     pid = request.POST.get("payee_person") or ""
@@ -515,6 +573,9 @@ def txn_create(request, pk):
 def txn_edit(request, pk, tx):
     account = get_object_or_404(InvestmentAccount, pk=pk)
     txn = get_object_or_404(InvestmentTransaction, pk=tx, account=account)
+    # A managed mirror IN leg is maintained via its OUT leg — never edited directly.
+    if txn.is_managed_in_leg:
+        return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
     if request.method == "POST" and _apply_txn_post(request, txn) is not None:
         apply_transaction(txn, user=request.user, is_new=False)
     return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
@@ -523,7 +584,7 @@ def txn_edit(request, pk, tx):
 def txn_delete(request, pk, tx):
     account = get_object_or_404(InvestmentAccount, pk=pk)
     txn = get_object_or_404(InvestmentTransaction, pk=tx, account=account)
-    if request.method == "POST":
+    if request.method == "POST" and not txn.is_managed_in_leg:
         remove_transaction(txn, user=request.user)
     return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
 

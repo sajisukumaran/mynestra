@@ -125,8 +125,9 @@
                 <td>
                   <div class="pc-name">{% if t.security %}{{ t.security.display }}{% elif t.counter_account %}{{ t.counter_account.nickname }}{% elif t.counter_external %}{{ t.counter_external }}{% else %}{{ t.type_label }}{% endif %}</div>
                   <div class="pc-sub">
-                    {% if t.quantity %}{{ t.quantity|floatformat:'-4' }} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
-                    {% if t.txn_type == 'sell' and t.realized_gain %} · realized <c-money :amount="t.realized_gain" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
+                    {% if t.quantity %}{{ t.quantity|floatformat:'-4' }}{% if t.price %} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}{% endif %}
+                    {% if t.realized_gain %} · realized <c-money :amount="t.realized_gain" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
+                    {% if t.counter_investment_account %} · {% if t.txn_type == 'in_kind_out' %}to{% else %}from{% endif %} {{ t.counter_investment_account.nickname }}{% endif %}
                     {% if t.split_ratio_display %}{{ t.split_ratio_display }}{% endif %}
                     {% if t.payee %}{% if t.quantity %} · {% endif %}{{ t.payee }}{% endif %}{% if t.memo %} · {{ t.memo }}{% endif %}
                   </div>
@@ -140,6 +141,9 @@
                 <td class="col-num"><c-money :amount="r.balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
                 <td>
                   <div class="cell-actions">
+                    {% if t.is_managed_in_leg %}
+                    <span class="muted" title="Managed automatically by the in-kind transfer from {{ t.counter_investment_account.nickname }}">Auto</span>
+                    {% else %}
                     <c-modal title="Edit transaction" class="modal-wide">
                       <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                       <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/edit/"
@@ -153,6 +157,7 @@
                         </div>
                       </form>
                     </c-modal>
+                    {% endif %}
                   </div>
                 </td>
               </tr>
