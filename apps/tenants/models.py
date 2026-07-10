@@ -47,8 +47,8 @@ class Tenant(TenantMixin):
 
     class AccountingMode(models.TextChoices):
         # Standard: the GL is invisible; the software picks every account. Expert: the household
-        # controls the Chart of Accounts + per-account posting maps. Switch is Standard→Expert freely,
-        # Expert→Standard only while `accounting_locked` is False (see the Mode setup screen).
+        # controls the Chart of Accounts + per-account posting maps. Switch to Expert freely; back
+        # to Standard only while `accounting_locked` is False (see the Setup Mode screen).
         STANDARD = "standard", "Standard"
         EXPERT = "expert", "Expert"
 
