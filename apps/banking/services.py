@@ -17,15 +17,34 @@ from decimal import Decimal
 from apps.banking.models import AccountType as BankAccountType
 from apps.banking.models import BankAccount, BankTransaction, TxnType
 from apps.finance.models import ZERO, Account, AccountType, JournalEntry, Side
-from apps.finance.services import LineInput, post_entry, resolve_account, reverse_entry
+from apps.finance.services import (
+    LineInput,
+    post_entry,
+    resolve_account,
+    resolve_posting_account,
+    reverse_entry,
+)
 
-# Fixed contra accounts (resolved by stable system_key / code).
+# Fixed contra accounts (resolved by stable system_key / code). These are the Standard-mode
+# defaults; in Expert mode a per-account PostingMap can override the *category* activities below
+# (structural legs — opening equity, transfer clearing — are never remappable).
 INTEREST_INCOME = "4400"          # Interest & Dividends
 BANK_CHARGES = "bank_charges"     # 5850 Bank Charges (system_key)
 TRANSFER_CLEARING = "transfer_clearing"  # 1150 Inter-account Transfer (system_key)
 OPENING_EQUITY = "opening_balance_equity"  # 3100 (system_key)
 DEFAULT_INCOME = "4900"           # Other Income
 DEFAULT_EXPENSE = "5900"          # Other Expenses
+
+# Category activities the Expert-mode Accounting Setup tab can remap, per bank account.
+# `kind` selects which account list the picker offers (income = revenue, expense = expense).
+POSTING_ACTIVITIES = [
+    {"key": "deposit_income", "label": "Deposits", "kind": "income", "default": DEFAULT_INCOME},
+    {"key": "withdrawal_expense", "label": "Withdrawals", "kind": "expense",
+     "default": DEFAULT_EXPENSE},
+    {"key": "interest_income", "label": "Interest earned", "kind": "income",
+     "default": INTEREST_INCOME},
+    {"key": "fee_expense", "label": "Fees & charges", "kind": "expense", "default": BANK_CHARGES},
+]
 
 
 # --- GL account provisioning ----------------------------------------------------------------
@@ -51,8 +70,11 @@ def _next_child_code(parent: Account) -> str:
     return f"{parent.code}.{highest + 1:02d}"
 
 
-def ensure_gl_account(account: BankAccount) -> Account:
-    """Create (or refresh) the postable ledger account that carries this bank account's balance."""
+def ensure_gl_account(account: BankAccount, *, parent=None, existing=None) -> Account:
+    """Create (or refresh) the postable ledger account that carries this bank account's balance.
+
+    Standard mode auto-creates a child under the `1120`/`1130` header. Expert mode may pass a
+    different `parent` header, or an `existing` postable account to adopt as this account's node."""
     if account.gl_account_id:
         gl = account.gl_account
         changed = []
@@ -68,7 +90,13 @@ def ensure_gl_account(account: BankAccount) -> Account:
             gl.save(update_fields=[*changed, "updated_at"])
         return gl
 
-    parent = resolve_account(_parent_code(account))
+    if existing is not None:
+        # Expert: adopt a pre-existing postable account as this bank account's ledger node.
+        account.gl_account = existing
+        account.save(update_fields=["gl_account"])
+        return existing
+
+    parent = parent or resolve_account(_parent_code(account))
     gl = Account.objects.create(
         code=_next_child_code(parent),
         name=_gl_name(account),
@@ -105,19 +133,27 @@ def _lines_for(txn: BankTransaction) -> list[LineInput]:
     def line(account, *, debit=ZERO, credit=ZERO, **party):
         return LineInput(account, debit=debit, credit=credit, currency=cur, **party)
 
+    acct = txn.account  # the PostingMap owner for Expert-mode category overrides
+
     t = txn.txn_type
     if t == TxnType.OPENING:
         return [line(gl, debit=amount), line(OPENING_EQUITY, credit=amount)]
     if t == TxnType.DEPOSIT:
-        contra = txn.category_account or resolve_account(DEFAULT_INCOME)
+        contra = txn.category_account or resolve_posting_account(
+            acct, "deposit_income", DEFAULT_INCOME
+        )
         return [line(gl, debit=amount), line(contra, credit=amount, **payee)]
     if t == TxnType.WITHDRAWAL:
-        contra = txn.category_account or resolve_account(DEFAULT_EXPENSE)
+        contra = txn.category_account or resolve_posting_account(
+            acct, "withdrawal_expense", DEFAULT_EXPENSE
+        )
         return [line(contra, debit=amount, **payee), line(gl, credit=amount)]
     if t == TxnType.INTEREST:
-        return [line(gl, debit=amount), line(INTEREST_INCOME, credit=amount, **bank)]
+        contra = resolve_posting_account(acct, "interest_income", INTEREST_INCOME)
+        return [line(gl, debit=amount), line(contra, credit=amount, **bank)]
     if t in (TxnType.FEE, TxnType.CHARGE):
-        return [line(BANK_CHARGES, debit=amount, **bank), line(gl, credit=amount)]
+        contra = resolve_posting_account(acct, "fee_expense", BANK_CHARGES)
+        return [line(contra, debit=amount, **bank), line(gl, credit=amount)]
     if t == TxnType.TRANSFER_OUT:
         return [line(TRANSFER_CLEARING, debit=amount), line(gl, credit=amount)]
     if t == TxnType.TRANSFER_IN:

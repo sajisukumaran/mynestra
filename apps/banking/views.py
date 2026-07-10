@@ -21,6 +21,7 @@ from apps.banking.models import (
     TxnType,
 )
 from apps.banking.services import (
+    POSTING_ACTIVITIES,
     create_matching_leg,
     dashboard_stats,
     ensure_gl_account,
@@ -33,7 +34,12 @@ from apps.banking.services import (
 from apps.contacts.models import Address, Person
 from apps.finance.models import Account, Currency
 from apps.finance.models import AccountType as GLType
-from apps.finance.services import base_currency
+from apps.finance.services import (
+    base_currency,
+    is_expert_mode,
+    posting_map_for,
+    set_posting_map,
+)
 from apps.organizations.models import Branch, Organization
 from apps.relationships.services import parse_partial_dates
 from apps.setup.models import Category
@@ -182,8 +188,36 @@ def account_edit(request, pk):
     return _account_form(request, get_object_or_404(BankAccount, pk=pk), "edit")
 
 
+def _expert_gl_choice(request):
+    """Expert-mode GL-node choice for a NEW bank account: (parent header, existing account)."""
+    gl_mode = request.POST.get("gl_mode", "auto")
+    if gl_mode == "parent":
+        parent = Account.objects.filter(
+            pk=request.POST.get("gl_parent") or 0, is_postable=False, type=GLType.ASSET
+        ).first()
+        return parent, None
+    if gl_mode == "existing":
+        existing = Account.objects.filter(
+            pk=request.POST.get("gl_existing") or 0, is_postable=True, type=GLType.ASSET,
+            bank_account__isnull=True,
+        ).first()
+        return None, existing
+    return None, None
+
+
+def _save_posting_maps(request, account):
+    """Persist the Accounting Setup tab's per-activity account overrides (Expert mode)."""
+    for act in POSTING_ACTIVITIES:
+        acct_id = request.POST.get(f"map_{act['key']}") or None
+        chosen = (
+            Account.objects.filter(pk=acct_id, is_postable=True).first() if acct_id else None
+        )
+        set_posting_map(account, act["key"], chosen)
+
+
 def _account_form(request, account, mode):
     form = BankAccountForm(request.POST or None, instance=account)
+    expert = is_expert_mode()
     error = ""
     if request.method == "POST":
         new_bank_name = request.POST.get("new_bank_name", "").strip()
@@ -204,7 +238,13 @@ def _account_form(request, account, mode):
             for field, value in parse_partial_dates(request.POST, "opened", "closed").items():
                 setattr(account, field, value)
             account.save()
-            ensure_gl_account(account)
+            # Expert may direct where the account's own ledger node lives (create only).
+            parent = existing = None
+            if expert and mode == "create":
+                parent, existing = _expert_gl_choice(request)
+            ensure_gl_account(account, parent=parent, existing=existing)
+            if expert:
+                _save_posting_maps(request, account)
             _save_holders(request, account)
             sync_holder_p2o(account)
             _maybe_opening_balance(request, account)
@@ -229,6 +269,11 @@ def _account_form(request, account, mode):
         if account.bank_id
         else Branch.objects.none()
     )
+    # Expert-mode "Accounting" tab: per-activity account overrides + this account's ledger node.
+    pmap = posting_map_for(account) if account.pk else {}
+    posting_activities = [
+        {**act, "current": pmap.get(act["key"], "")} for act in POSTING_ACTIVITIES
+    ]
     ctx = bank_context(
         request, "accounts",
         form=form, account=account, mode=mode, error=error,
@@ -241,6 +286,16 @@ def _account_form(request, account, mode):
         selected_holders=selected_holders,
         holder_extras=holder_extras,
         primary_holder=primary_holder,
+        expert=expert,
+        posting_activities=posting_activities,
+        income_accounts=_income_accounts(),
+        expense_accounts=_expense_accounts(),
+        asset_headers=Account.objects.filter(
+            is_postable=False, type=GLType.ASSET
+        ).order_by("code"),
+        adoptable_accounts=Account.objects.filter(
+            is_postable=True, type=GLType.ASSET, is_system=False, bank_account__isnull=True
+        ).order_by("code"),
     )
     return render(request, "banking/account_form.html", ctx)
 

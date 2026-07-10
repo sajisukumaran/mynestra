@@ -124,6 +124,74 @@
     </c-card>
     {% endif %}
 
+    {% if ui_expert %}
+    <c-card title="Accounting" icon="sliders-horizontal">
+      <div class="stack stack-16">
+        <p class="muted">Expert mode: choose exactly which ledger accounts this account uses. Leave a row on <span class="strong">Default</span> to let MyNestra decide.</p>
+
+        {% if mode == 'create' %}
+        <div x-data="{ glMode: 'auto' }">
+          <c-field label="This account's ledger node" help="Where this account lives in your Chart of Accounts.">
+            <div class="control is-select">
+              <select name="gl_mode" x-model="glMode">
+                <option value="auto">Auto — nest under the standard header (recommended)</option>
+                <option value="parent">Create under a specific header…</option>
+                <option value="existing">Use an existing account…</option>
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+          </c-field>
+          <div x-show="glMode === 'parent'" x-cloak style="margin-top:10px;">
+            <c-field label="Parent header">
+              <div class="control is-select">
+                <select name="gl_parent">
+                  {% for h in asset_headers %}<option value="{{ h.pk }}">{{ h.code }} — {{ h.name }}</option>{% endfor %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+          </div>
+          <div x-show="glMode === 'existing'" x-cloak style="margin-top:10px;">
+            <c-field label="Existing account" help="A postable asset account you've created that isn't linked to another account yet.">
+              <div class="control is-select">
+                <select name="gl_existing">
+                  <option value="">Choose an account…</option>
+                  {% for a in adoptable_accounts %}<option value="{{ a.pk }}">{{ a.code }} — {{ a.name }}</option>{% endfor %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+          </div>
+        </div>
+        {% elif account.gl_account_id %}
+        <c-field label="This account's ledger node">
+          <div class="control" style="display:flex;align-items:center;">{{ account.gl_account.code }} — {{ account.gl_account.name }}</div>
+        </c-field>
+        {% endif %}
+
+        <c-field label="Which account each activity posts to">
+          <div class="form-grid">
+            {% for act in posting_activities %}
+            <c-field label="{{ act.label }}">
+              <div class="control is-select">
+                <select name="map_{{ act.key }}">
+                  <option value="">Default</option>
+                  {% if act.kind == 'income' %}
+                    {% for a in income_accounts %}<option value="{{ a.pk }}"{% if a.pk == act.current %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+                  {% else %}
+                    {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if a.pk == act.current %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+                  {% endif %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+            {% endfor %}
+          </div>
+        </c-field>
+      </div>
+    </c-card>
+    {% endif %}
+
     <c-card title="Details" icon="calendar-days">
       <div class="stack stack-16">
         <div class="grid-halves">
