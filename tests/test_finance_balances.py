@@ -29,7 +29,7 @@ JAN = datetime.date(2026, 1, 15)
 # (target account, side that increases it, balancing account, balancing side)
 NORMAL_CASES = [
     ("1110", "debit", "3100", "credit"),   # Asset — increases on debit
-    ("2100", "credit", "1110", "debit"),   # Liability — increases on credit
+    ("2300", "credit", "1110", "debit"),   # Liability — increases on credit (2100 is now a header)
     ("3100", "credit", "1110", "debit"),   # Equity — increases on credit
     ("4100", "credit", "1110", "debit"),   # Revenue — increases on credit
     ("5200", "debit", "1110", "credit"),   # Expense — increases on debit
