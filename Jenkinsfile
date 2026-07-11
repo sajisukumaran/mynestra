@@ -17,7 +17,16 @@ pipeline {
 
     options {
         timestamps()
+        timeout(time: 30, unit: 'MINUTES')
         disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+    }
+
+    // Poll GitHub every ~2 min and build when main moves. Matches the teams/lhive
+    // pattern; the edge Jenkins isn't publicly reachable, so a push webhook can't
+    // work — polling is how all the dockerlab jobs self-trigger.
+    triggers {
+        pollSCM('H/2 * * * *')
     }
 
     environment {
