@@ -1,0 +1,62 @@
+# MyNestra — PRODUCTION stack (deployed by Jenkins, fronted by the external dockerlab-edge nginx).
+# Two services only; no nginx/tailwind/mailpit here (edge provides nginx; prod email = the shared
+# `mailpit:1025` on edge_network). No host ports — the edge reaches everything by container name.
+# Auto-loads `.env` from the deploy dir for ${..} interpolation and injects it into web (env_file).
+name: mynestra
+
+services:
+  db:
+    image: postgres:17
+    container_name: mynestra-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-mynestra}
+      POSTGRES_USER: ${POSTGRES_USER:-mynestra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in the deploy .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mynestra} -d ${POSTGRES_DB:-mynestra}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    # Joins edge_network so pgAdmin + nightly pg_dump on the edge reach it as `mynestra-db`.
+    networks: [mynestra, edge_network]
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.prod.Dockerfile
+    # Distinct tag so a prod build never clobbers the dev image (same project/service name).
+    image: mynestra-web:prod
+    container_name: mynestra-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      # Runtime-mutable uploads (tenant logos, photos); static is baked into the image.
+      - media_files:/app/media
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    # `mynestra` reaches db; `edge_network` = the edge proxies to `mynestra-web:8000` + reach `mailpit`.
+    networks: [mynestra, edge_network]
+    # ENTRYPOINT waits for db -> migrate_schemas --shared -> ensure_public_tenant, then runs gunicorn (CMD).
+
+volumes:
+  pgdata:
+  media_files:
+    # Explicit name so the edge's media backup (`docker volume inspect mynestra_media_files`) finds it.
+    name: mynestra_media_files
+
+networks:
+  mynestra:
+    driver: bridge
+  edge_network:
+    external: true

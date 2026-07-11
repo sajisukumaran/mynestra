@@ -1,0 +1,32 @@
+# Build-context excludes for the docker images (prod bakes the source in; dev only copies
+# pyproject.toml/uv.lock/entrypoint, so this is a no-op for the dev build).
+
+# Secrets — NEVER bake the deploy .env into an image.
+.env
+.env.*
+
+# VCS + tooling
+.git
+.gitignore
+.github
+.ruff_cache
+.pytest_cache
+
+# Python virtualenv + caches
+.venv
+**/__pycache__
+*.pyc
+*.pyo
+
+# Build outputs (regenerated in the image: Tailwind build + collectstatic)
+staticfiles
+
+# Runtime-mutable data (kept in a named volume, not the image)
+media
+
+# Not needed at runtime
+tests
+docs
+sessions
+node_modules
+*.sqlite3
