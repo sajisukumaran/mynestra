@@ -17,6 +17,7 @@ Invariant (asserted in tests): `account_balance(gl) == cash_balance + Σ open-lo
 Soft-deletable + audited like every tenant model (DESIGN §5).
 """
 
+import datetime
 from decimal import Decimal
 
 from django.db import models
@@ -691,3 +692,121 @@ class LotConsumption(TimeStampedModel):
     @property
     def realized_gain(self):
         return self.proceeds - self.cost
+
+
+# --- Vesting (employer match & equity grants) ------------------------------------------------
+
+class VestingKind(models.TextChoices):
+    DOLLAR = "dollar", "Employer match ($)"
+    SHARES = "shares", "Equity grant (shares)"
+
+
+_FRAC = Decimal("0.000001")
+_HUNDRED = Decimal("100")
+
+
+class VestingGrant(SoftDeleteModel):
+    """A vesting overlay: a total (dollars for a 401(k)-style employer match, or shares for an RSU /
+    equity grant) that vests on a custom `VestingTranche` schedule. Purely a MODULE-level view — it
+    posts NOTHING to the GL and never touches tax lots (consistent with "cost in the GL, value in
+    the module"). `funded` marks whether the total already sits inside the account balance: funded
+    (typical match) → its unvested part is AT-RISK and reduces the module's vested value; unfunded
+    (typical RSU) → its unvested part is UPCOMING/future — shown but not subtracted."""
+
+    account = models.ForeignKey(
+        InvestmentAccount, on_delete=models.CASCADE, related_name="vesting_grants"
+    )
+    kind = models.CharField(max_length=8, choices=VestingKind.choices, default=VestingKind.DOLLAR)
+    security = models.ForeignKey(
+        Security, on_delete=models.PROTECT, null=True, blank=True, related_name="vesting_grants"
+    )
+    label = models.CharField(max_length=120)
+    grant_date = models.DateField()
+    total = _qty(default=ZERO)   # dollars (kind=dollar) or shares (kind=shares)
+    funded = models.BooleanField(default=True)  # already reflected in the account's balance?
+    notes = models.CharField(max_length=255, blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["grant_date", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(total__gte=0), name="vestinggrant_total_nonneg"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.label} ({self.get_kind_display()})"
+
+    @property
+    def is_shares(self) -> bool:
+        return self.kind == VestingKind.SHARES
+
+    @property
+    def glyph(self) -> str:
+        return "trending-up" if self.is_shares else "banknote"
+
+    @property
+    def tint(self) -> str:
+        if self.is_shares and self.security_id:
+            return self.security.tint
+        return "investments"
+
+    def vested_fraction(self, as_of=None) -> Decimal:
+        """Highest cumulative tranche % with vest_date <= as_of (else 0), as a 0..1 fraction."""
+        as_of = as_of or datetime.date.today()
+        pct = ZERO
+        for tr in self.tranches.all():
+            if tr.vest_date <= as_of:
+                pct = max(pct, tr.cumulative_percent)
+        return (pct / _HUNDRED).quantize(_FRAC)
+
+    def vested(self, as_of=None) -> Decimal:
+        return (self.total * self.vested_fraction(as_of)).quantize(_FRAC)
+
+    def unvested(self, as_of=None) -> Decimal:
+        return (self.total - self.vested(as_of)).quantize(_FRAC)
+
+    def _unit_value(self, qty: Decimal) -> Decimal:
+        """Dollar value of `qty` units: dollars are already $; shares × latest price (0 if none)."""
+        if not self.is_shares:
+            return qty.quantize(Decimal("0.0001"))
+        price = self.security.latest_price if self.security_id else None
+        if price is None:
+            return ZERO
+        return (qty * price).quantize(Decimal("0.0001"))
+
+    def vested_value(self, as_of=None) -> Decimal:
+        return self._unit_value(self.vested(as_of))
+
+    def unvested_value(self, as_of=None) -> Decimal:
+        return self._unit_value(self.unvested(as_of))
+
+    def next_vest(self, as_of=None):
+        """The next tranche strictly after `as_of` (the upcoming vest event), or None."""
+        as_of = as_of or datetime.date.today()
+        for tr in self.tranches.all():  # ordered by vest_date
+            if tr.vest_date > as_of:
+                return tr
+        return None
+
+
+class VestingTranche(TimeStampedModel):
+    """One step of a grant's custom vesting schedule: by `vest_date`, cumulatively
+    `cumulative_percent` of the grant is vested. Replace-all managed from the grant form."""
+
+    grant = models.ForeignKey(VestingGrant, on_delete=models.CASCADE, related_name="tranches")
+    vest_date = models.DateField()
+    cumulative_percent = models.DecimalField(max_digits=5, decimal_places=2)  # 0..100
+
+    class Meta:
+        ordering = ["vest_date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["grant", "vest_date"], name="vestingtranche_unique_date"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.cumulative_percent}% @ {self.vest_date}"
