@@ -13,7 +13,7 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
     </div>
   </c-field>
   <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
-  <div x-show="!['in_kind_out','in_kind_in','worthless'].includes(type)" x-cloak>
+  <div x-show="!['in_kind_out','in_kind_in','worthless','merger','spinoff'].includes(type)" x-cloak>
     <c-field label="Amount" required help="In {{ account.currency.code }}.">
       <div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
     </c-field>
@@ -21,8 +21,8 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
 </div>
 
 {# Security — for holdings-related types #}
-<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger'].includes(type)" x-cloak>
-  <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest).">
+<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff'].includes(type)" x-cloak>
+  <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest). For a merger/spin-off this is the original security (X).">
     <div class="control is-select">
       <select name="security">
         <option value="">— none / cash —</option>
@@ -97,6 +97,37 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
 {# Cash buyout / merger — whole position disposed for cash #}
 <div x-show="type === 'cash_merger'" x-cloak>
   <c-hint icon="info">Cash buyout of the whole position — enter the total cash received in Amount above; the gain/loss is realized.</c-hint>
+</div>
+
+{# Merger (stock-for-stock) / spin-off — target security Y + share ratio (+ basis % for a spin-off) #}
+<div x-show="type === 'merger' || type === 'spinoff'" x-cloak x-data="{ newTarget: false }">
+  <c-field label="Into security (Y)" help="The acquirer (merger) or spun-off (spin-off) security you receive.">
+    <div x-show="!newTarget" class="stack-8">
+      <div class="control is-select">
+        <select name="target_security" :disabled="newTarget">
+          <option value="">Choose a security…</option>
+          {% for s in securities %}<option value="{{ s.pk }}"{% if txn.target_security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+      <c-button type="button" variant="ghost" size="sm" @click="newTarget = true"><c-icon name="plus" size="sm" /> Add a new security</c-button>
+    </div>
+    <div x-show="newTarget" x-cloak class="stack-8">
+      <div class="grid-halves">
+        <div class="control"><input name="new_target_symbol" placeholder="Symbol (e.g. NEWCO)"></div>
+        <div class="control"><input name="new_target_name" placeholder="Name"></div>
+      </div>
+      <c-button type="button" variant="ghost" size="sm" @click="newTarget = false"><c-icon name="chevron-left" size="sm" /> Choose an existing security</c-button>
+    </div>
+  </c-field>
+  <div class="grid-halves">
+    <c-field label="New shares (Y)" help="Y shares received per old X share, e.g. 1.5."><div class="control"><input name="split_ratio_new" inputmode="decimal" value="{{ txn.split_ratio_new|default:'' }}" placeholder="1"></div></c-field>
+    <c-field label="Per old shares (X)" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
+  </div>
+  <div x-show="type === 'spinoff'" x-cloak>
+    <c-field label="Basis allocated to Y (%)" help="Percent of the original cost basis assigned to the spun-off security; the parent keeps the rest."><div class="control"><input name="basis_pct" inputmode="decimal" value="{{ txn.basis_pct|default:'' }}" placeholder="e.g. 20"></div></c-field>
+  </div>
+  <c-hint icon="info">Cash-neutral: cost basis carries from X to Y and the holding period is preserved; nothing posts to the ledger.</c-hint>
 </div>
 
 {# Contribution — optional income category (e.g. employer match) #}

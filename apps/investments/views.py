@@ -91,6 +91,8 @@ PICKER_TYPES = [
     (InvTxnType.IN_KIND_IN, "In-kind transfer in"),
     (InvTxnType.WORTHLESS, "Worthless write-off"),
     (InvTxnType.CASH_MERGER, "Cash buyout / merger"),
+    (InvTxnType.MERGER, "Merger (stock-for-stock)"),
+    (InvTxnType.SPINOFF, "Spin-off"),
     (InvTxnType.OPENING, "Opening / existing holding"),
 ]
 
@@ -439,6 +441,25 @@ def _parse_lot_carry(request):
     return rows
 
 
+def _resolve_target_security(request, source):
+    """The merger / spin-off target security Y: an existing pick, or created inline (symbol + name),
+    inheriting the source security's currency + asset class. Returns None if neither is provided."""
+    existing = Security.objects.filter(pk=request.POST.get("target_security") or 0).first()
+    if existing:
+        return existing
+    symbol = (request.POST.get("new_target_symbol") or "").strip()
+    name = (request.POST.get("new_target_name") or "").strip()
+    if not (symbol or name):
+        return None
+    return Security.objects.create(
+        symbol=symbol,
+        name=name or symbol,
+        kind=SecurityKind.STOCK,
+        asset_class=source.asset_class if source else AssetClass.EQUITY,
+        currency=source.currency if source else base_currency(),
+    )
+
+
 def _apply_txn_post(request, txn):
     """Populate a (new or existing) transaction from POST; save + return it, or None if invalid."""
     t = request.POST.get("txn_type", "")
@@ -483,6 +504,20 @@ def _apply_txn_post(request, txn):
     elif t == InvTxnType.CASH_MERGER:
         if security is None or amount <= 0:  # whole position bought out for cash
             return None
+    elif t in (InvTxnType.MERGER, InvTxnType.SPINOFF):
+        rn = _decimal(request.POST.get("split_ratio_new"))
+        ro = _decimal(request.POST.get("split_ratio_old"))
+        has_target = bool(
+            (request.POST.get("target_security") or "").strip()
+            or (request.POST.get("new_target_symbol") or "").strip()
+            or (request.POST.get("new_target_name") or "").strip()
+        )
+        if security is None or not (rn and ro and rn > 0 and ro > 0) or not has_target:
+            return None
+        if t == InvTxnType.SPINOFF:
+            bp = _decimal(request.POST.get("basis_pct"))
+            if bp is None or bp <= 0 or bp > 100:
+                return None
     else:  # cash types
         if amount <= 0:
             return None
@@ -499,12 +534,24 @@ def _apply_txn_post(request, txn):
     txn.cleared = request.POST.get("cleared") in ("on", "1", "true")
 
     txn.split_ratio_new = txn.split_ratio_old = None
+    txn.target_security = None
+    txn.basis_pct = None
     if t == InvTxnType.SPLIT:
         txn.split_ratio_new = _decimal(request.POST.get("split_ratio_new"))
         txn.split_ratio_old = _decimal(request.POST.get("split_ratio_old"))
         if not (txn.split_ratio_new and txn.split_ratio_old
                 and txn.split_ratio_new > 0 and txn.split_ratio_old > 0):
             return None
+    elif t in (InvTxnType.MERGER, InvTxnType.SPINOFF):
+        # Cash-neutral corporate action: X (`security`) → Y (`target_security`) at a share ratio.
+        txn.split_ratio_new = _decimal(request.POST.get("split_ratio_new"))
+        txn.split_ratio_old = _decimal(request.POST.get("split_ratio_old"))
+        txn.target_security = _resolve_target_security(request, security)
+        txn.amount = txn.quantity = txn.price = Decimal("0")
+        if txn.target_security is None:
+            return None
+        if t == InvTxnType.SPINOFF:
+            txn.basis_pct = _decimal(request.POST.get("basis_pct"))
 
     txn.cost_basis_method = (
         request.POST.get("cost_basis_method") if t == InvTxnType.SELL else "fifo"
@@ -771,6 +818,26 @@ def security_price(request, pk):
                 security=security, as_of=as_of,
                 defaults={"price": price, "source": request.POST.get("source", "").strip()},
             )
+    return redirect(tenant_url(request, f"investments/securities/{pk}/"))
+
+
+def security_rename(request, pk):
+    """Ticker / symbol change: the same security under a new symbol (no lot/basis/cash effect).
+    Keeps the Security row + all its lots; records a dated note. simple-history logs the change."""
+    security = get_object_or_404(Security, pk=pk)
+    if request.method == "POST":
+        new_symbol = (request.POST.get("new_symbol") or "").strip()
+        new_name = (request.POST.get("new_name") or "").strip()
+        effective = parse_date(request.POST.get("effective_date", "") or "")
+        if new_symbol and new_symbol != security.symbol:
+            old_symbol = security.symbol or security.name
+            when = (effective or datetime.date.today()).isoformat()
+            note = f"Ticker changed {old_symbol} → {new_symbol} effective {when}."
+            security.symbol = new_symbol
+            if new_name:
+                security.name = new_name
+            security.notes = f"{note}\n{security.notes}".strip() if security.notes else note
+            security.save()
     return redirect(tenant_url(request, f"investments/securities/{pk}/"))
 
 

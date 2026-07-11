@@ -24,6 +24,20 @@
         </div>
       </div>
       <div class="row">
+        <c-modal title="Change ticker">
+          <c-slot name="trigger"><c-button variant="default"><c-icon name="git-merge" /> Change ticker</c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/rename/">{% csrf_token %}
+            <div class="stack-16">
+              <c-hint icon="info">A ticker change keeps this same security and all its lots — only the symbol changes (e.g. FB → META). Basis, quantity and holding period are unaffected.</c-hint>
+              <div class="grid-halves">
+                <c-field label="New symbol" required><div class="control"><input name="new_symbol" value="{{ security.symbol }}" placeholder="e.g. META"></div></c-field>
+                <c-field label="Effective date"><div class="control"><input type="date" name="effective_date" value="{{ today|date:'Y-m-d' }}"></div></c-field>
+              </div>
+              <c-field label="New name" help="Optional — leave blank to keep the current name."><c-input name="new_name" placeholder="{{ security.name }}" /></c-field>
+              <div class="row"><c-button type="submit" variant="primary">Change ticker</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </div>
+          </form>
+        </c-modal>
         <c-button variant="primary" href="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
       </div>
     </div>
