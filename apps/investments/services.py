@@ -60,6 +60,8 @@ REALIZED_GAIN = "realized_capital_gain"        # 4320 (gains credit, losses debi
 CAPGAIN_DIST = "capital_gains_distribution"    # 4330
 INVEST_INTEREST = "investment_interest"        # 4340
 INVEST_FEES = "investment_fees"                # 5870
+INTEREST_EXPENSE = "interest_expense"          # 5860 (margin interest)
+SUBSTITUTE_DIVIDEND_EXPENSE = "substitute_dividend_expense"  # 5880 (dividends paid on a short)
 
 # Category legs the Expert-mode Accounting Setup tab can remap, per investment account. Structural
 # legs (opening equity, transfer clearing, realized-gain) are never remappable.
@@ -70,6 +72,10 @@ POSTING_ACTIVITIES = [
     {"key": "capital_gains_distribution", "label": "Capital-gain distributions", "kind": "income",
      "default": CAPGAIN_DIST},
     {"key": "fee_expense", "label": "Fees", "kind": "expense", "default": INVEST_FEES},
+    {"key": "margin_interest_expense", "label": "Margin interest", "kind": "expense",
+     "default": INTEREST_EXPENSE},
+    {"key": "substitute_dividend_expense", "label": "Payments in lieu (short dividends)",
+     "kind": "expense", "default": SUBSTITUTE_DIVIDEND_EXPENSE},
 ]
 
 _CENTS = Decimal("0.0001")

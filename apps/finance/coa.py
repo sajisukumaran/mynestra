@@ -113,5 +113,8 @@ CHART_OF_ACCOUNTS = [
     ("5860", "Interest Expense", EXPENSE, "5000", True, "interest_expense"),
     # Advisory / account fees are expensed here; buy/sell commissions are capitalized into basis.
     ("5870", "Investment Fees", EXPENSE, "5000", True, "investment_fees"),
+    # Payments-in-lieu of dividends to a share lender while holding a short position (distinct from
+    # interest expense and advisory fees).
+    ("5880", "Substitute Dividend Expense", EXPENSE, "5000", True, "substitute_dividend_expense"),
     ("5900", "Other Expenses", EXPENSE, "5000", True, ""),
 ]

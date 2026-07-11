@@ -22,6 +22,7 @@ def test_chart_of_accounts_seeded_and_locked(make_tenant):
             "opening_balance_equity", "current_year_earnings", "net_worth",
             "fx_gain_loss", "suspense", "taxes_payable", "transfer_clearing",
             "credit_cards", "interest_expense", "certificates_of_deposit",
+            "substitute_dividend_expense",
         ]:
             assert Account.objects.filter(system_key=key).count() == 1
 
