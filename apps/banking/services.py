@@ -55,7 +55,11 @@ def _gl_name(account: BankAccount) -> str:
 
 
 def _parent_code(account: BankAccount) -> str:
-    return "1120" if account.account_type == BankAccountType.CHECKING else "1130"
+    return {
+        BankAccountType.CHECKING: "1120",
+        BankAccountType.SAVINGS: "1130",
+        BankAccountType.CD: "1140",
+    }.get(account.account_type, "1130")
 
 
 def _next_child_code(parent: Account) -> str:
@@ -269,7 +273,27 @@ def dashboard_stats() -> dict:
     return {
         "accounts_count": len(accounts),
         "banks_count": len({a.bank_id for a in accounts}),
+        "cds_count": sum(1 for a in accounts if a.account_type == BankAccountType.CD),
         "total_balance": sum((a.balance for a in accounts), ZERO),
         "txns_this_month": BankTransaction.objects.filter(date__gte=month_start).count(),
         "accounts": accounts,
     }
+
+
+def cd_maturities(within_days: int = 365) -> list[BankAccount]:
+    """Bank CDs approaching (or past-due and still open) maturity within the window, soonest first.
+
+    Mirrors investments.services.upcoming_maturities but for bank CD accounts. Excludes CDs already
+    marked closed; past-due-but-open CDs (negative days_to_maturity) sort first as a nudge to act.
+    """
+    horizon = datetime.date.today() + datetime.timedelta(days=within_days)
+    return list(
+        BankAccount.objects.filter(
+            account_type=BankAccountType.CD,
+            maturity_date__isnull=False,
+            maturity_date__lte=horizon,
+            closed_year__isnull=True,
+        )
+        .select_related("bank")
+        .order_by("maturity_date")
+    )

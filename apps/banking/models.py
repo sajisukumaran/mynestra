@@ -1,14 +1,16 @@
-"""Banking — household bank accounts (checking & savings) and their transaction register.
+"""Banking — household bank accounts (checking, savings & CDs) and their transaction register.
 
 Banking is the first consumer of the finance general-ledger backbone (module 2). Each `BankAccount`
-owns exactly one postable `finance.Account`, nested under the `1120 Checking` / `1130 Savings` group
-header, so per-account balances roll up cleanly. Every `BankTransaction` posts a balanced journal
+owns exactly one postable `finance.Account`, nested under the `1120 Checking` / `1130 Savings` /
+`1140 Certificates of Deposit` group header, so per-account balances roll up cleanly. Every
+`BankTransaction` posts a balanced journal
 entry through `apps.finance.services` (never by writing ledger rows directly) and links back to it
 via the entry's `source` GenericFK + a versioned `external_key`. Balances are computed from posted
 lines — there is no stored balance. Soft-deletable + audited like every tenant model (DESIGN §5).
 """
 
 from django.db import models
+from django.utils import timezone
 from simple_history.models import HistoricalRecords
 
 from apps.core.models import SoftDeleteModel, TimeStampedModel
@@ -19,6 +21,7 @@ from apps.finance.models import AMOUNT_DECIMALS, AMOUNT_MAX_DIGITS, ZERO
 class AccountType(models.TextChoices):
     CHECKING = "checking", "Checking"
     SAVINGS = "savings", "Savings"
+    CD = "cd", "Certificate of Deposit"
 
 
 class TxnType(models.TextChoices):
@@ -93,6 +96,13 @@ class BankAccount(SoftDeleteModel):
     closed_month = models.SmallIntegerField(null=True, blank=True)
     closed_day = models.SmallIntegerField(null=True, blank=True)
 
+    # CD (certificate of deposit / term deposit) terms — only meaningful when account_type == CD.
+    # Maturity is an exact known date (a full DateField, unlike the opened/closed PartialDates); it
+    # matches the investments CD (Security.apr + maturity_date) and drives days-to-maturity.
+    apr = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)
+    term_months = models.PositiveSmallIntegerField(null=True, blank=True)
+    maturity_date = models.DateField(null=True, blank=True)
+
     notes = models.TextField(blank=True)
 
     history = HistoricalRecords()
@@ -155,6 +165,28 @@ class BankAccount(SoftDeleteModel):
     @property
     def is_closed(self) -> bool:
         return self.closed.is_set
+
+    @property
+    def is_cd(self) -> bool:
+        return self.account_type == AccountType.CD
+
+    @property
+    def is_matured(self) -> bool:
+        return bool(self.maturity_date and self.maturity_date <= timezone.localdate())
+
+    @property
+    def days_to_maturity(self):
+        """Whole days until maturity (negative if already matured); None when no maturity date."""
+        if not self.maturity_date:
+            return None
+        return (self.maturity_date - timezone.localdate()).days
+
+    @property
+    def apr_display(self) -> str:
+        """APR as a trimmed percent string, e.g. '4.5%' (empty when unset)."""
+        if self.apr is None:
+            return ""
+        return f"{self.apr.normalize():f}%"
 
 
 class BankAccountHolder(TimeStampedModel):

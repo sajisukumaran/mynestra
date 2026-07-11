@@ -22,6 +22,7 @@ from apps.banking.models import (
 )
 from apps.banking.services import (
     POSTING_ACTIVITIES,
+    cd_maturities,
     create_matching_leg,
     dashboard_stats,
     ensure_gl_account,
@@ -106,6 +107,11 @@ def _decimal(raw):
         return None
 
 
+def _int(raw):
+    raw = (raw or "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
 # --- Dashboard ------------------------------------------------------------------------------
 
 def dashboard(request):
@@ -113,7 +119,10 @@ def dashboard(request):
     recent = list(
         BankTransaction.objects.select_related("account").order_by("-date", "-id")[:8]
     )
-    ctx = bank_context(request, "dashboard", base=base_currency(), recent=recent, **stats)
+    ctx = bank_context(
+        request, "dashboard", base=base_currency(), recent=recent,
+        maturities=cd_maturities(), **stats,
+    )
     return render(request, "banking/dashboard.html", ctx)
 
 
@@ -141,6 +150,7 @@ def account_list(request):
     counts = {
         "checking": BankAccount.objects.filter(account_type=AccountType.CHECKING).count(),
         "savings": BankAccount.objects.filter(account_type=AccountType.SAVINGS).count(),
+        "cd": BankAccount.objects.filter(account_type=AccountType.CD).count(),
     }
     page = Paginator(qs, 12).get_page(request.GET.get("page"))
 
@@ -237,6 +247,14 @@ def _account_form(request, account, mode):
             account.currency = currency
             for field, value in parse_partial_dates(request.POST, "opened", "closed").items():
                 setattr(account, field, value)
+            # CD terms (apr / term / maturity) — only meaningful for CDs; cleared otherwise so a
+            # type change doesn't leave stale values behind.
+            if account_type == AccountType.CD:
+                account.apr = _decimal(request.POST.get("apr"))
+                account.term_months = _int(request.POST.get("term_months"))
+                account.maturity_date = parse_date(request.POST.get("maturity_date") or "") or None
+            else:
+                account.apr = account.term_months = account.maturity_date = None
             account.save()
             # Expert may direct where the account's own ledger node lives (create only).
             parent = existing = None
