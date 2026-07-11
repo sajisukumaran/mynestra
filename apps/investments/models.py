@@ -403,6 +403,12 @@ class InvTxnType(models.TextChoices):
     CASH_MERGER = "cash_merger", "Cash buyout / merger"  # going private: cash check for the shares
     MERGER = "merger", "Merger (stock-for-stock)"        # X → Y shares at a ratio; basis carries
     SPINOFF = "spinoff", "Spin-off"                      # allocate part of X's basis to a new Y
+    # Leverage (IP5): a short is a negative-quantity lot with credit basis; margin is negative
+    # settlement cash. No new liability accounts — the invariant absorbs both (see the docstring).
+    SELL_SHORT = "sell_short", "Sell short"              # open a short: receive proceeds
+    BUY_TO_COVER = "buy_to_cover", "Buy to cover"        # close a short: realized gain on cover
+    MARGIN_INTEREST = "margin_interest", "Margin interest"          # interest paid to the broker
+    DIV_PAID_SHORT = "div_paid_short", "Dividend paid (short)"      # payment-in-lieu to the lender
 
 
 # Types that require a security (the rest are cash-only / account-level).
@@ -412,6 +418,7 @@ SECURITY_TYPES = frozenset({
     InvTxnType.IN_KIND_IN, InvTxnType.IN_KIND_OUT,
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
     InvTxnType.MERGER, InvTxnType.SPINOFF,
+    InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER, InvTxnType.DIV_PAID_SHORT,
 })
 
 TXN_GLYPHS = {
@@ -435,6 +442,10 @@ TXN_GLYPHS = {
     InvTxnType.CASH_MERGER: "banknote",
     InvTxnType.MERGER: "git-merge",
     InvTxnType.SPINOFF: "git-branch",
+    InvTxnType.SELL_SHORT: "trending-down",
+    InvTxnType.BUY_TO_COVER: "trending-up",
+    InvTxnType.MARGIN_INTEREST: "percent",
+    InvTxnType.DIV_PAID_SHORT: "coins",
 }
 
 
@@ -594,12 +605,13 @@ class InvestmentTransaction(SoftDeleteModel):
                  InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL,
                  InvTxnType.CASH_MERGER):
             return self.amount  # CASH_MERGER: the buyout check comes in as cash
-        if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE):
+        if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE,
+                 InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT):
             return -self.amount
-        if t == InvTxnType.BUY:
-            return -(self.amount + self.fee)
-        if t == InvTxnType.SELL:
-            return self.net_proceeds
+        if t in (InvTxnType.BUY, InvTxnType.BUY_TO_COVER):
+            return -(self.amount + self.fee)  # BUY_TO_COVER: cash paid to buy the shares back
+        if t in (InvTxnType.SELL, InvTxnType.SELL_SHORT):
+            return self.net_proceeds  # SELL_SHORT: short-sale proceeds come in as cash
         # DIVIDEND_REINVEST, SPLIT, MERGER, SPINOFF, both in-kind transfers and WORTHLESS are
         # cash-neutral.
         return ZERO
