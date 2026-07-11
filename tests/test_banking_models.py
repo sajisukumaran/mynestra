@@ -43,9 +43,32 @@ def test_gl_codes_sequence_under_type_header(make_tenant):
     with schema_context(tenant.schema_name):
         a1, a2 = _account(), _account()
         s1 = _account(account_type=AccountType.SAVINGS)
+        cd1 = _account(account_type=AccountType.CD)
         assert ensure_gl_account(a1).code == "1120.01"
         assert ensure_gl_account(a2).code == "1120.02"
         assert ensure_gl_account(s1).code == "1130.01"
+        assert ensure_gl_account(cd1).code == "1140.01"  # CDs nest under the 1140 header
+
+
+def test_cd_fields_and_helpers(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        today = datetime.date.today()
+        cd = _account(account_type=AccountType.CD)
+        cd.apr = D("4.5")
+        cd.term_months = 12
+        cd.maturity_date = today + datetime.timedelta(days=30)
+        cd.save()
+        assert cd.is_cd
+        assert not cd.is_matured
+        assert cd.days_to_maturity == 30
+        assert cd.apr_display == "4.5%"
+        # A CD past its maturity reads as matured (negative days remaining).
+        cd.maturity_date = today - datetime.timedelta(days=5)
+        assert cd.is_matured and cd.days_to_maturity == -5
+        # Non-CD accounts report is_cd False and no maturity.
+        chk = _account(account_type=AccountType.CHECKING)
+        assert not chk.is_cd and chk.days_to_maturity is None
 
 
 def test_display_balance_zero_before_posting(make_tenant):

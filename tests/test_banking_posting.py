@@ -118,6 +118,24 @@ def test_interest_fee_and_charge_hit_fixed_accounts(make_tenant):
         assert interest_line.organization_id == acct.bank_id
 
 
+def test_cd_opens_under_1140_and_interest_posts(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        cd = _account(nickname="12-month CD", account_type=AccountType.CD, number="5555")
+        gl = ensure_gl_account(cd)
+        assert gl.parent.code == "1140" and gl.code.startswith("1140.")
+
+        _txn(cd, TxnType.OPENING, "5000")
+        interest = _txn(cd, TxnType.INTEREST, "50")
+        cd.refresh_from_db()
+        assert cd.balance == D("5050")  # 5000 + 50 interest
+        # Bank CD interest posts to 4400 (same as any bank interest).
+        assert interest.journal_entry.lines.get(account__code="4400").credit == D("50")
+        # The CD balance rolls up under the 1140 header and the 1100 Cash & Bank parent.
+        assert account_balance(Account.objects.get(code="1140")) == D("5050")
+        assert account_balance(Account.objects.get(code="1100")) == D("5050")
+
+
 def test_transfer_two_legs_via_clearing_with_auto_match(make_tenant):
     tenant = make_tenant()
     with schema_context(tenant.schema_name):

@@ -1,6 +1,9 @@
 """Banking screens: dashboard, accounts list, account create/detail, transaction capture, and the
 member/non-member gate. Drives the authenticated tenant client end-to-end."""
 
+import datetime
+from decimal import Decimal
+
 from django_tenants.utils import schema_context
 
 from apps.banking.models import BankAccount, BankTransaction
@@ -140,6 +143,67 @@ def test_account_detail_and_add_transaction(make_tenant, make_user, client):
 
     body = client.get(_url(tenant, f"accounts/{account.pk}/")).content.decode()
     assert "Gift" in body and 'class="amount' in body  # register renders via c-money
+
+
+def test_create_cd_with_terms_and_gl_under_1140(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        bank = _bank()
+    client.force_login(owner)
+    resp = client.post(
+        _url(tenant, "accounts/new/"),
+        {
+            "bank": bank.pk,
+            "account_type": "cd",
+            "nickname": "12-month CD",
+            "number": "5555",
+            "currency": "USD",
+            "is_active": "on",
+            "apr": "4.5",
+            "term_months": "12",
+            "maturity_date": "2027-01-05",
+            "opening_balance": "5000",
+            "opening_date": "2026-01-05",
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        cd = BankAccount.objects.get(nickname="12-month CD")
+        assert cd.account_type == "cd"
+        assert cd.apr == Decimal("4.5") and cd.term_months == 12
+        assert cd.maturity_date == datetime.date(2027, 1, 5)
+        assert cd.gl_account.parent.code == "1140"  # nested under the CD header
+        assert cd.balance == 5000
+
+
+def test_list_cd_filter_and_count(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        bank = _bank()
+        BankAccount.objects.create(
+            bank=bank, account_type="checking", nickname="Everyday", currency_id="USD"
+        )
+        BankAccount.objects.create(
+            bank=bank, account_type="cd", nickname="Nest Egg CD", currency_id="USD"
+        )
+    client.force_login(owner)
+    body = client.get(_url(tenant, "accounts/")).content.decode()
+    assert "CDs" in body  # the CD filter chip is present
+    cd_only = client.get(_url(tenant, "accounts/?type=cd")).content.decode()
+    assert "Nest Egg CD" in cd_only and "Everyday" not in cd_only
+
+
+def test_dashboard_shows_upcoming_cd_maturity(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        bank = _bank()
+        BankAccount.objects.create(
+            bank=bank, account_type="cd", nickname="Maturing CD", currency_id="USD",
+            maturity_date=datetime.date.today() + datetime.timedelta(days=20),
+        )
+    client.force_login(owner)
+    body = client.get(_url(tenant)).content.decode()
+    assert "Upcoming CD maturities" in body and "Maturing CD" in body
 
 
 def test_toggle_cleared(make_tenant, make_user, client):
