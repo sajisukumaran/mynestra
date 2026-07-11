@@ -36,6 +36,9 @@ from apps.investments.models import (
     Security,
     SecurityKind,
     SecurityPrice,
+    VestingGrant,
+    VestingKind,
+    VestingTranche,
 )
 from apps.investments.services import (
     POSTING_ACTIVITIES,
@@ -48,6 +51,9 @@ from apps.investments.services import (
     register,
     remove_transaction,
     sync_holder_p2o,
+    unvested_at_risk_total,
+    upcoming_vesting,
+    vesting_summary,
 )
 from apps.organizations.models import Branch, Organization
 from apps.relationships.services import parse_partial_dates
@@ -145,7 +151,8 @@ def dashboard(request):
     ctx = inv_context(
         request, "dashboard", base=base, donut=donut, group_bars=group_bars,
         group_total=group_total, unrealized_pct=unrealized_pct,
-        gain_dir="up" if stats["unrealized"] >= 0 else "down", **stats,
+        gain_dir="up" if stats["unrealized"] >= 0 else "down",
+        unvested_at_risk=unvested_at_risk_total(), upcoming_vesting=upcoming_vesting(), **stats,
     )
     return render(request, "investments/dashboard.html", ctx)
 
@@ -371,10 +378,13 @@ def account_detail(request, pk):
     )
     hold = holdings(account)
     market = sum((h.market_value for h in hold), Decimal("0"))
+    vesting_rows, vesting_totals = vesting_summary(account)
     ctx = inv_context(
         request, "accounts",
         account=account,
         holdings=hold,
+        vesting_rows=vesting_rows,
+        vesting_totals=vesting_totals,
         market_total=market,
         rows=register(account),
         holders=list(account.holders.select_related("person").all()),
@@ -595,6 +605,89 @@ def txn_toggle_cleared(request, pk, tx):
     if request.method == "POST":
         txn.cleared = not txn.cleared
         txn.save(update_fields=["cleared", "updated_at"])
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+
+
+# --- Vesting (employer match & equity grants; module-level overlay, no GL) -------------------
+
+def _parse_tranches(request):
+    """Build (vest_date, cumulative_percent) rows from the grant form's repeated inputs, validated
+    unique-date + non-decreasing within (0, 100]. Returns the list, or None if empty/invalid."""
+    dates = request.POST.getlist("tranche_date")
+    pcts = request.POST.getlist("tranche_pct")
+    rows = []
+    seen = set()
+    last = Decimal("0")
+    for d, p in zip(dates, pcts, strict=False):
+        vd = parse_date(d or "")
+        pc = _decimal(p)
+        if vd is None or pc is None:
+            continue
+        # reject duplicate dates, out-of-range %, or a non-monotonic (decreasing) schedule
+        if vd in seen or pc <= 0 or pc > 100 or pc < last:
+            return None
+        seen.add(vd)
+        rows.append((vd, pc))
+        last = pc
+    return rows or None
+
+
+def _apply_vesting_post(request, grant):
+    """Populate a (new or existing) vesting grant + replace its tranche schedule from POST; save +
+    return it, or None if invalid."""
+    kind = request.POST.get("kind", "")
+    label = request.POST.get("label", "").strip()
+    grant_date = parse_date(request.POST.get("grant_date", "") or "")
+    total = _decimal(request.POST.get("total")) or Decimal("0")
+    if kind not in VestingKind.values or not label or grant_date is None or total <= 0:
+        return None
+
+    security = None
+    if kind == VestingKind.SHARES:
+        security = Security.objects.filter(pk=request.POST.get("security") or 0).first()
+        if security is None:
+            return None  # a shares grant must name the security that vests
+
+    tranches = _parse_tranches(request)
+    if tranches is None:
+        return None
+
+    grant.kind = kind
+    grant.label = label
+    grant.grant_date = grant_date
+    grant.total = total
+    grant.security = security
+    grant.funded = request.POST.get("funded") in ("on", "1", "true")
+    grant.notes = request.POST.get("notes", "").strip()
+    grant.save()
+
+    grant.tranches.all().delete()
+    VestingTranche.objects.bulk_create([
+        VestingTranche(grant=grant, vest_date=vd, cumulative_percent=pc) for vd, pc in tranches
+    ])
+    return grant
+
+
+def vesting_create(request, pk):
+    account = get_object_or_404(InvestmentAccount, pk=pk)
+    if request.method == "POST":
+        _apply_vesting_post(request, VestingGrant(account=account))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+
+
+def vesting_edit(request, pk, vid):
+    account = get_object_or_404(InvestmentAccount, pk=pk)
+    grant = get_object_or_404(VestingGrant, pk=vid, account=account)
+    if request.method == "POST":
+        _apply_vesting_post(request, grant)
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+
+
+def vesting_delete(request, pk, vid):
+    account = get_object_or_404(InvestmentAccount, pk=pk)
+    grant = get_object_or_404(VestingGrant, pk=vid, account=account)
+    if request.method == "POST":
+        grant.delete()  # soft delete
     return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
 
 

@@ -19,6 +19,14 @@ urlpatterns = [
     path("accounts/<int:pk>/txns/<int:tx>/edit/", views.txn_edit, name="txn-edit"),
     path("accounts/<int:pk>/txns/<int:tx>/delete/", views.txn_delete, name="txn-delete"),
     path("accounts/<int:pk>/txns/<int:tx>/cleared/", views.txn_toggle_cleared, name="txn-cleared"),
+    # Vesting (employer match & equity grants)
+    path("accounts/<int:pk>/vesting/new/", views.vesting_create, name="vesting-create"),
+    path("accounts/<int:pk>/vesting/<int:vid>/edit/", views.vesting_edit, name="vesting-edit"),
+    path(
+        "accounts/<int:pk>/vesting/<int:vid>/delete/",
+        views.vesting_delete,
+        name="vesting-delete",
+    ),
     # Securities (instrument master)
     path("securities/", views.security_list, name="securities"),
     path("securities/new/", views.security_create, name="security-create"),

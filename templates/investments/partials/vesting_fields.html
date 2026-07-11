@@ -1,0 +1,55 @@
+{% comment %}Vesting grant fields — included inside a <form> whose Alpine x-data provides `kind`
+(the selected grant kind) + `tranches` ([{date, pct}] rows). Needs: securities. Pass `grant`
+(edit prefill) + a unique `suffix`.{% endcomment %}
+<div class="form-grid">
+  <c-field label="Kind" required>
+    <div class="control is-select">
+      <select name="kind" @change="kind = $event.target.value">
+        <option value="dollar"{% if grant.kind == 'dollar' or not grant %} selected{% endif %}>Employer match ($)</option>
+        <option value="shares"{% if grant.kind == 'shares' %} selected{% endif %}>Equity grant (shares)</option>
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Grant date" required><div class="control"><input type="date" name="grant_date" value="{% if grant %}{{ grant.grant_date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+</div>
+
+<c-field label="Label" required><c-input name="label" value="{{ grant.label|default:'' }}" placeholder="e.g. 2024 Employer Match, RSU 2023 grant" /></c-field>
+
+{# Security — equity (shares) grants only #}
+<div x-show="kind === 'shares'" x-cloak>
+  <c-field label="Security" help="Which instrument vests.">
+    <div class="control is-select">
+      <select name="security">
+        <option value="">— select —</option>
+        {% for s in securities %}<option value="{{ s.pk }}"{% if grant.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+<div class="form-grid">
+  <c-field label="Total" required help="Dollars for a match, or shares for an equity grant.">
+    <div class="control"><input name="total" inputmode="decimal" value="{% if grant and grant.total %}{{ grant.total|floatformat:'-6' }}{% endif %}" placeholder="0"></div>
+  </c-field>
+  <c-field label="Already in this account?" help="On for a 401(k) match (present but forfeitable); off for RSUs that vest in later.">
+    <label class="row"><input type="checkbox" name="funded"{% if grant.funded or not grant %} checked{% endif %}> <span class="muted">Funded / present in the balance</span></label>
+  </c-field>
+</div>
+
+{# Custom vesting schedule — cumulative % by date #}
+<c-field label="Vesting schedule" help="One row per vest date, cumulative % vested (non-decreasing, up to 100).">
+  <div class="stack-8">
+    <template x-for="(t, i) in tranches" :key="i">
+      <div class="row">
+        <div class="control grow"><input type="date" name="tranche_date" x-model="t.date"></div>
+        <div class="control grow"><input name="tranche_pct" inputmode="decimal" placeholder="Cumulative %" x-model="t.pct"></div>
+        <c-button type="button" variant="ghost" size="sm" @click="tranches.splice(i, 1)" x-show="tranches.length > 1"><c-icon name="x" size="sm" /></c-button>
+      </div>
+    </template>
+  </div>
+  <c-button type="button" variant="ghost" size="sm" @click="tranches.push({ date: '', pct: '' })"><c-icon name="plus" size="sm" /> Add vest date</c-button>
+</c-field>
+
+<c-field label="Notes"><c-input name="notes" value="{{ grant.notes|default:'' }}" placeholder="Optional" /></c-field>

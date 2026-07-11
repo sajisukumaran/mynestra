@@ -48,6 +48,7 @@
       <button type="button" class="tab" :class="{ active: tab === 'holdings' }" @click="tab = 'holdings'"><c-icon name="briefcase" size="sm" /> Holdings {% if holdings %}<span class="tcount tnum">{{ holdings|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="coins" size="sm" /> Register {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'holders' }" @click="tab = 'holders'"><c-icon name="users" size="sm" /> Holders {% if holders %}<span class="tcount tnum">{{ holders|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'vesting' }" @click="tab = 'vesting'"><c-icon name="shield-check" size="sm" /> Vesting {% if vesting_rows %}<span class="tcount tnum">{{ vesting_rows|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
     </c-tabs>
 
@@ -186,6 +187,83 @@
         </c-empty-state>
         {% endfor %}
       </c-card>
+    </div>
+
+    {# VESTING #}
+    <div x-show="tab === 'vesting'" x-cloak>
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Vesting grants</span>
+          <c-modal title="Add vesting grant" class="modal-wide">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add grant</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/vesting/new/"
+                  x-data="{ kind: 'dollar', tranches: [{ date: '', pct: '' }] }">{% csrf_token %}
+              <div class="stack-16">
+                {% include "investments/partials/vesting_fields.html" with suffix='new' %}
+                <div class="row"><c-button type="submit" variant="primary">Add grant</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-modal>
+        </div>
+
+        {% if vesting_rows %}
+        <div class="row wrap muted">
+          <span>Vested value <span class="strong"><c-money :amount="vesting_totals.vested_value" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>
+          {% if vesting_totals.at_risk %}<span> · at-risk <span class="amount-neg"><c-money :amount="vesting_totals.at_risk" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>{% endif %}
+          {% if vesting_totals.upcoming %}<span> · upcoming <c-money :amount="vesting_totals.upcoming" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span>{% endif %}
+        </div>
+
+        {% for r in vesting_rows %}{% with g=r.grant %}
+        <c-card>
+          <div class="between">
+            <span class="row">
+              <c-avatar tint="{{ g.tint }}" size="sm" square><c-icon name="{{ g.glyph }}" size="sm" /></c-avatar>
+              <span>
+                <span class="pc-name">{{ g.label }} <c-badge>{{ g.get_kind_display }}</c-badge>{% if g.funded %}<c-badge variant="info">Funded</c-badge>{% else %}<c-badge variant="warning">Upcoming</c-badge>{% endif %}</span>
+                <span class="pc-sub">Granted {{ g.grant_date|date:'d M Y' }}{% if g.is_shares and g.security %} · {{ g.security.display }}{% endif %}{% if g.notes %} · {{ g.notes }}{% endif %}</span>
+              </span>
+            </span>
+            <div class="cell-actions">
+              <c-modal title="Edit vesting grant" class="modal-wide">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/vesting/{{ g.pk }}/edit/"
+                      x-data="{ kind: '{{ g.kind }}', tranches: [{% for tr in g.tranches.all %}{ date: '{{ tr.vest_date|date:'Y-m-d' }}', pct: '{{ tr.cumulative_percent|floatformat:'-2' }}' }{% if not forloop.last %},{% endif %}{% endfor %}] }">{% csrf_token %}
+                  <div class="stack-16">
+                    {% include "investments/partials/vesting_fields.html" with grant=g suffix=g.pk %}
+                    <div class="between">
+                      <c-button type="submit" variant="primary">Save</c-button>
+                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/vesting/{{ g.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                    </div>
+                  </div>
+                </form>
+              </c-modal>
+            </div>
+          </div>
+
+          <div class="stack-8" style="margin-top:.75rem">
+            <c-meter value="{% widthratio r.fraction 1 100 %}" max="100" tint="success">
+              <span>{% widthratio r.fraction 1 100 %}% vested</span>
+              <span class="muted">{% if g.is_shares %}{{ r.vested|floatformat:'-4' }} / {{ g.total|floatformat:'-4' }} sh{% else %}<c-money :amount="r.vested" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> / <c-money :amount="g.total" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% endif %}</span>
+            </c-meter>
+          </div>
+
+          <c-table>
+            <thead><tr><c-th>Vests</c-th><th class="col-num">Cumulative</th></tr></thead>
+            <tbody>
+              {% for tr in g.tranches.all %}
+              <tr>
+                <td class="muted">{{ tr.vest_date|date:'d M Y' }}{% if r.next and tr.vest_date == r.next.vest_date %} <c-badge variant="info">next</c-badge>{% endif %}</td>
+                <td class="col-num tnum">{{ tr.cumulative_percent|floatformat:'-2' }}%</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </c-table>
+        </c-card>
+        {% endwith %}{% endfor %}
+        {% else %}
+        <c-card><c-empty-state icon="shield-check" title="No vesting grants" text="Track a 401(k) employer match or an RSU / equity grant and its vesting schedule here." /></c-card>
+        {% endif %}
+      </div>
     </div>
 
     {# HISTORY #}

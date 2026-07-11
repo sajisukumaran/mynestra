@@ -30,6 +30,11 @@
     <c-stat-tile icon="coins" tint="amber" value="{{ base.symbol }}{{ income_ytd|moneyfmt:'0' }}" label="Income YTD">
       <c-slot name="foot">dividends &amp; interest</c-slot>
     </c-stat-tile>
+    {% if unvested_at_risk %}
+    <c-stat-tile icon="clock" tint="rose" value="{{ base.symbol }}{{ unvested_at_risk|moneyfmt:'0' }}" label="Unvested (at-risk)">
+      <c-slot name="foot">forfeitable employer match</c-slot>
+    </c-stat-tile>
+    {% endif %}
   </div>
 
   {# ---- Allocation + breakdown ---- #}
@@ -89,6 +94,17 @@
         <c-rel-row name="{{ s.display }}" role="Matures {{ s.maturity_date|date:'d M Y' }}" href="{{ ui_tenant_url }}investments/securities/{{ s.pk }}/">
           <c-slot name="avatar"><c-avatar tint="blue" size="sm" square><c-icon name="calendar-days" size="sm" /></c-avatar></c-slot>
           {% if s.apr %}<c-slot name="tail"><c-badge variant="info">{{ s.apr|floatformat:2 }}% APR</c-badge></c-slot>{% endif %}
+        </c-rel-row>
+        {% endfor %}
+      </c-card>
+      {% endif %}
+
+      {% if upcoming_vesting %}
+      <c-card icon="shield-check" title="Upcoming vesting">
+        {% for r in upcoming_vesting %}
+        <c-rel-row name="{{ r.grant.label }}" role="{{ r.next.cumulative_percent|floatformat:'-2' }}% vests {{ r.next.vest_date|date:'d M Y' }}" href="{{ ui_tenant_url }}investments/accounts/{{ r.grant.account_id }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ r.grant.tint }}" size="sm" square><c-icon name="{{ r.grant.glyph }}" size="sm" /></c-avatar></c-slot>
+          <c-slot name="tail"><c-money :amount="r.unvested_value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-slot>
         </c-rel-row>
         {% endfor %}
       </c-card>
