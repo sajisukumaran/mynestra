@@ -93,6 +93,10 @@ PICKER_TYPES = [
     (InvTxnType.CASH_MERGER, "Cash buyout / merger"),
     (InvTxnType.MERGER, "Merger (stock-for-stock)"),
     (InvTxnType.SPINOFF, "Spin-off"),
+    (InvTxnType.SELL_SHORT, "Sell short"),
+    (InvTxnType.BUY_TO_COVER, "Buy to cover"),
+    (InvTxnType.MARGIN_INTEREST, "Margin interest"),
+    (InvTxnType.DIV_PAID_SHORT, "Dividend paid (short)"),
     (InvTxnType.OPENING, "Opening / existing holding"),
 ]
 
@@ -480,8 +484,12 @@ def _apply_txn_post(request, txn):
     lot_rows = _parse_lot_carry(request) if t == InvTxnType.IN_KIND_IN else []
 
     # Per-type required-field guards.
-    if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST):
+    if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST,
+             InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER):
         if security is None or quantity <= 0 or amount <= 0:
+            return None
+    elif t == InvTxnType.DIV_PAID_SHORT:
+        if security is None or amount <= 0:  # substitute dividend paid on the shorted security
             return None
     elif t == InvTxnType.SPLIT:
         if security is None:
@@ -525,7 +533,8 @@ def _apply_txn_post(request, txn):
     txn.txn_type = t
     txn.date = date
     txn.amount = amount
-    txn.fee = fee if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.FEE) else Decimal("0")
+    txn.fee = fee if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.FEE,
+                           InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER) else Decimal("0")
     txn.quantity = quantity
     txn.price = price
     txn.security = security
@@ -554,15 +563,18 @@ def _apply_txn_post(request, txn):
             txn.basis_pct = _decimal(request.POST.get("basis_pct"))
 
     txn.cost_basis_method = (
-        request.POST.get("cost_basis_method") if t == InvTxnType.SELL else "fifo"
+        request.POST.get("cost_basis_method")
+        if t in (InvTxnType.SELL, InvTxnType.BUY_TO_COVER) else "fifo"
     )
     if txn.cost_basis_method not in ("fifo", "specific"):
         txn.cost_basis_method = "fifo"
     txn.lot_selection = None
 
-    # Category override: an income account for a contribution (employer match), or expense for fee.
+    # Category override: an income account for a contribution (employer match), or an expense
+    # account for a fee / margin interest / substitute dividend.
     txn.category_account = None
-    if t in (InvTxnType.CONTRIBUTION, InvTxnType.FEE):
+    if t in (InvTxnType.CONTRIBUTION, InvTxnType.FEE,
+             InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT):
         txn.category_account = Account.objects.filter(
             pk=request.POST.get("category_account") or 0, is_postable=True
         ).first()

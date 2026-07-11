@@ -21,7 +21,7 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
 </div>
 
 {# Security — for holdings-related types #}
-<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff'].includes(type)" x-cloak>
+<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff','sell_short','buy_to_cover','div_paid_short'].includes(type)" x-cloak>
   <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest). For a merger/spin-off this is the original security (X).">
     <div class="control is-select">
       <select name="security">
@@ -33,16 +33,16 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
   </c-field>
 </div>
 
-{# Quantity + price — buy / sell / reinvest / opening-holding / in-kind-out (qty only) #}
-<div x-show="['buy','sell','dividend_reinvest','opening','in_kind_out'].includes(type)" x-cloak>
+{# Quantity + price — buy / sell / reinvest / opening-holding / in-kind-out (qty only) / short / cover #}
+<div x-show="['buy','sell','dividend_reinvest','opening','in_kind_out','sell_short','buy_to_cover'].includes(type)" x-cloak>
   <div class="grid-halves">
     <c-field label="Quantity" help="Shares / units."><div class="control"><input name="quantity" inputmode="decimal" value="{% if txn and txn.quantity %}{{ txn.quantity|floatformat:'-6' }}{% endif %}" placeholder="0"></div></c-field>
     <div x-show="type !== 'in_kind_out'"><c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field></div>
   </div>
 </div>
 
-{# Commission — buy / sell (capitalized into cost basis) #}
-<div x-show="type === 'buy' || type === 'sell'" x-cloak>
+{# Commission — buy / sell / short / cover (capitalized into cost basis) #}
+<div x-show="['buy','sell','sell_short','buy_to_cover'].includes(type)" x-cloak>
   <c-field label="Commission" help="Added to cost basis on a buy; nets out of proceeds on a sell.">
     <div class="control"><input name="fee" inputmode="decimal" value="{% if txn and txn.fee %}{{ txn.fee|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
   </c-field>
@@ -128,6 +128,40 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
     <c-field label="Basis allocated to Y (%)" help="Percent of the original cost basis assigned to the spun-off security; the parent keeps the rest."><div class="control"><input name="basis_pct" inputmode="decimal" value="{{ txn.basis_pct|default:'' }}" placeholder="e.g. 20"></div></c-field>
   </div>
   <c-hint icon="info">Cash-neutral: cost basis carries from X to Y and the holding period is preserved; nothing posts to the ledger.</c-hint>
+</div>
+
+{# Sell short — opens a negative position; proceeds come in as cash #}
+<div x-show="type === 'sell_short'" x-cloak><c-hint icon="info">Opens a short position: the sale proceeds come in as cash and a negative-quantity lot records the buy-back obligation. Nothing posts to the ledger until you cover.</c-hint></div>
+
+{# Buy to cover — closes the short; realized gain = short proceeds − buy-back cost #}
+<div x-show="type === 'buy_to_cover'" x-cloak><c-hint icon="info">Buys shares back to close the short (oldest short first). The realized gain — short proceeds less buy-back cost — posts to Realized Capital Gain/Loss.</c-hint></div>
+
+{# Margin interest — expense category (settlement cash may go negative) #}
+<div x-show="type === 'margin_interest'" x-cloak>
+  <c-field label="Expense category">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'margin_interest'">
+        <option value="">Default (Interest Expense)</option>
+        {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-hint icon="info">Interest paid to the broker on a margin loan — your settlement cash can go negative.</c-hint>
+</div>
+
+{# Dividend paid on a short — substitute-dividend expense category #}
+<div x-show="type === 'div_paid_short'" x-cloak>
+  <c-field label="Expense category">
+    <div class="control is-select">
+      <select name="category_account" :disabled="type !== 'div_paid_short'">
+        <option value="">Default (Substitute Dividend Expense)</option>
+        {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if txn.category_account_id == a.pk %} selected{% endif %}>{{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-hint icon="info">A payment in lieu of dividends to the share lender while you carry the short.</c-hint>
 </div>
 
 {# Contribution — optional income category (e.g. employer match) #}
