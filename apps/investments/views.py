@@ -492,6 +492,18 @@ def _apply_txn_post(request, txn):
     elif t == InvTxnType.DIV_PAID_SHORT:
         if security is None or amount <= 0:  # substitute dividend paid on the shorted security
             return None
+    elif t in (InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_CLOSE,
+               InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_BUY_CLOSE):
+        contracts = _decimal(request.POST.get("contracts"))
+        if (security is None or not security.is_option or not contracts or contracts <= 0
+                or price <= 0):  # premium per share
+            return None
+    elif t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
+        contracts = _decimal(request.POST.get("contracts"))
+        if (security is None or not security.is_option or security.strike is None
+                or not security.option_right or security.underlying_id is None
+                or not contracts or contracts <= 0):
+            return None
     elif t == InvTxnType.SPLIT:
         if security is None:
             return None
@@ -562,6 +574,21 @@ def _apply_txn_post(request, txn):
             return None
         if t == InvTxnType.SPINOFF:
             txn.basis_pct = _decimal(request.POST.get("basis_pct"))
+
+    # Options: expand contracts → shares-equivalent once (quantity = contracts × multiplier) and
+    # derive the cash amount. Open/close use the premium/share; exercise/assignment use the strike.
+    if t in (InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_SELL_OPEN,
+             InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
+        contracts = _decimal(request.POST.get("contracts")) or Decimal("0")
+        mult = security.multiplier or Decimal("100")
+        txn.quantity = contracts * mult
+        txn.fee = fee
+        if t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
+            txn.price = security.strike
+            txn.amount = security.strike * txn.quantity   # strike × shares
+        else:
+            txn.price = price                             # premium per share
+            txn.amount = price * txn.quantity             # total premium
 
     txn.cost_basis_method = (
         request.POST.get("cost_basis_method")

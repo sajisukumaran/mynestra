@@ -709,6 +709,14 @@ class InvestmentTransaction(SoftDeleteModel):
         return ""
 
     @property
+    def option_contracts(self):
+        """Contract count for an option transaction (`quantity` is stored shares-equivalent =
+        contracts × the contract multiplier); the raw quantity otherwise."""
+        if self.security_id and self.security.is_option and self.security.multiplier:
+            return self.quantity / self.security.multiplier
+        return self.quantity
+
+    @property
     def is_managed_in_leg(self) -> bool:
         """True for the auto-created IN leg of an *internal* in-kind transfer — it is a managed
         mirror of its paired OUT leg, so the UI blocks editing/deleting it directly (external

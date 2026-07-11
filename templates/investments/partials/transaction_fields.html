@@ -13,15 +13,15 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
     </div>
   </c-field>
   <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
-  <div x-show="!['in_kind_out','in_kind_in','worthless','merger','spinoff'].includes(type)" x-cloak>
+  <div x-show="!['in_kind_out','in_kind_in','worthless','merger','spinoff','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
     <c-field label="Amount" required help="In {{ account.currency.code }}.">
       <div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
     </c-field>
   </div>
 </div>
 
-{# Security — for holdings-related types #}
-<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff','sell_short','buy_to_cover','div_paid_short'].includes(type)" x-cloak>
+{# Security — for holdings-related types (for options, the contract; underlying is on it) #}
+<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff','sell_short','buy_to_cover','div_paid_short','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
   <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest). For a merger/spin-off this is the original security (X).">
     <div class="control is-select">
       <select name="security">
@@ -162,6 +162,32 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
     </div>
   </c-field>
   <c-hint icon="info">A payment in lieu of dividends to the share lender while you carry the short.</c-hint>
+</div>
+
+{# Option open/close — contracts + premium per share (the option contract is the Security above) #}
+<div x-show="['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" x-cloak>
+  <div class="grid-halves">
+    <c-field label="Contracts" help="Each controls the contract's multiplier (usually 100) shares.">
+      <div class="control"><input name="contracts" inputmode="decimal" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
+    </c-field>
+    <c-field label="Premium / share" help="Per underlying share; total = premium × multiplier × contracts.">
+      <div class="control"><input name="price" inputmode="decimal" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div>
+    </c-field>
+  </div>
+  <c-hint icon="info">Buy/sell to open creates the position and posts nothing; closing realizes the gain to Realized Capital Gain/Loss.</c-hint>
+</div>
+
+{# Option exercise / assignment — contracts; strike, right and underlying come from the contract #}
+<div x-show="type === 'opt_exercise' || type === 'opt_assign'" x-cloak>
+  <c-field label="Contracts" help="Strike, right and underlying are taken from the selected option contract.">
+    <div class="control"><input name="contracts" inputmode="decimal" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
+  </c-field>
+  <c-hint icon="info">The option closes at zero gain; its premium rolls into the underlying — a call exercise / put assignment BUYS at strike, a put exercise / call assignment SELLS at strike.</c-hint>
+</div>
+
+{# Option expire — whole position for nothing #}
+<div x-show="type === 'opt_expire'" x-cloak>
+  <c-hint icon="info">The option expires worthless: a long position is a full loss; a written position keeps the premium as a gain.</c-hint>
 </div>
 
 {# Contribution — optional income category (e.g. employer match) #}
