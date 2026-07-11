@@ -188,7 +188,7 @@ def test_native_balance_for_currency_tagged_account(make_tenant):
 
         eur = Currency.objects.get(code="EUR")
         eur_savings = Account.objects.create(
-            code="1140",
+            code="1160",  # a free postable code (1140 is now the seeded CD header)
             name="EUR Savings",
             type=AccountType.ASSET,
             normal_side=Side.DEBIT,
@@ -198,7 +198,7 @@ def test_native_balance_for_currency_tagged_account(make_tenant):
         post_entry(
             date=JAN,
             lines=[
-                LineInput("1140", debit=D("100"), currency="EUR", fx_rate=D("1.1")),
+                LineInput("1160", debit=D("100"), currency="EUR", fx_rate=D("1.1")),
                 LineInput("3100", credit=D("110")),
             ],
         )

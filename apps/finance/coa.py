@@ -41,6 +41,9 @@ CHART_OF_ACCOUNTS = [
     # bank account beneath them, so per-account balances roll up here (never posted to directly).
     ("1120", "Checking Account", ASSET, "1100", False, ""),
     ("1130", "Savings Account", ASSET, "1100", False, ""),
+    # 1140 is a group header too: the Banking module nests one postable sub-account per bank CD
+    # (certificate of deposit / term deposit) beneath it, so per-CD balances roll up here.
+    ("1140", "Certificates of Deposit", ASSET, "1100", False, "certificates_of_deposit"),
     ("1150", "Inter-account Transfer", ASSET, "1100", True, "transfer_clearing"),
     # 1200 groups all investment holdings; 1210/1220/1230 are group headers (like 1120/1130 for
     # banking): the Investments module nests one postable sub-account per real investment account
