@@ -85,23 +85,40 @@ Pipeline stages ([`Jenkinsfile`](../Jenkinsfile)): **Checkout** → **Build**
 (`docker compose -f compose.prod.yaml build`) → **Deploy** (`… up -d`) → **Prune**
 (`docker image prune -f`) → **Verify** (`… ps` + poll `/health/` inside the web container).
 Database migrations run automatically via the image entrypoint on container start (waits for db →
-`migrate_schemas --shared` → `ensure_public_tenant`).
+`migrate_schemas --shared` → `ensure_public_tenant` → `migrate_schemas --tenant`).
 
 ## Post-deploy: create the first tenant + owner
 
-A fresh prod DB has only the public tenant. Create a household + owner login with the shipped
-management command:
+A fresh prod DB has only the public tenant. Cold-start the first user + household + OWNER
+membership with `bootstrap` (`--email` and `--password` are required; the rest have defaults):
 ```sh
 cd /home/docker/deployments/mynestra
-docker compose -f compose.prod.yaml exec web python manage.py bootstrap    # or: create_tenant
+docker compose -f compose.prod.yaml exec web python manage.py bootstrap \
+  --email you@example.com \
+  --password 'YourStrongPassword1' \
+  --full-name 'Your Name' \
+  --name 'My Household' \
+  --slug home
 ```
+`--full-name` defaults to `""`, `--name` to `Demo Household`, `--slug` to `demo`.
 Then log in at `http://mynestra.dockerlab.test/` and open `/t/<slug>/`.
+
+To add **another** household to an existing login, use `create_tenant` (the owner user must
+already exist — all three flags required):
+```sh
+docker compose -f compose.prod.yaml exec web python manage.py create_tenant \
+  --name 'Second Household' --slug second --owner-email you@example.com
+```
 
 ## Migrations note
 
-The entrypoint runs `migrate_schemas --shared` on every start (shared/public apps). Brand-new
-tenants are migrated when they're created. If you later add **tenant-app** migrations, existing
-tenant schemas need a one-off:
+The entrypoint migrates automatically on every start: `migrate_schemas --shared` (public schema)
+→ `ensure_public_tenant` → `migrate_schemas --tenant` (every existing tenant schema). So both new
+**shared** and new **tenant-app** migrations are applied on deploy — existing tenants no longer
+need a manual step. (Brand-new tenants are still migrated at creation time.)
+
+If you ever need to run it by hand — e.g. to migrate before a container restart — plain
+`migrate_schemas` covers every schema (public + all tenants):
 ```sh
 docker compose -f compose.prod.yaml exec web python manage.py migrate_schemas
 ```

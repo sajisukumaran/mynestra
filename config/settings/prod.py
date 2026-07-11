@@ -52,3 +52,23 @@ if SECURE_SSL:
     SECURE_SSL_REDIRECT = True
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+
+# --- Logging ---------------------------------------------------------------------------------
+# Django's default config routes 500 tracebacks to the (unconfigured) mail-admins handler and NOT
+# to the console when DEBUG=False, so `docker compose logs web` stays silent on errors. Send
+# everything to stderr so unhandled exceptions are visible in container logs.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {"format": "[{asctime}] {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "verbose"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+    "loggers": {
+        # ERROR here carries the full traceback for unhandled 500s.
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}

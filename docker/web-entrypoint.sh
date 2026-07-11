@@ -17,4 +17,10 @@ python manage.py migrate_schemas --shared --noinput
 echo "Ensuring public tenant exists ..."
 python manage.py ensure_public_tenant
 
+# Apply TENANT_APPS migrations to every existing tenant schema. `--shared` above only touches the
+# public schema, so without this a newly added tenant-app migration (e.g. a new column) breaks
+# existing tenants at request time until migrated by hand. Idempotent — a no-op when up to date.
+echo "Applying tenant migrations (migrate_schemas --tenant) ..."
+python manage.py migrate_schemas --tenant --noinput
+
 exec "$@"
