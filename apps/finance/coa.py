@@ -75,6 +75,9 @@ CHART_OF_ACCOUNTS = [
     # --- Revenue / Income ---
     ("4000", "Revenue", REVENUE, None, False, ""),
     ("4100", "Salary & Wages", REVENUE, "4000", True, ""),
+    # Employer retirement-plan match / contributions (categorize a match contribution here so it
+    # reports as compensation income distinct from salary).
+    ("4150", "Employer Match", REVENUE, "4000", True, "employer_match"),
     ("4200", "Business Income", REVENUE, "4000", True, ""),
     # 4300 is a group header for investment income; the Investments module posts dividends, realized
     # gains, capital-gains distributions and investment interest to its postable children below.
