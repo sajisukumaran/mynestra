@@ -1,10 +1,13 @@
 """Public-schema URLs (served for every path NOT under /t/<slug>/)."""
 
+import re
+
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.contrib.auth import views as auth_views
-from django.urls import path
+from django.urls import path, re_path
+from django.views.static import serve as serve_media
 
 from apps.accounts import views as account_views
 from apps.core.views import health, styleguide
@@ -40,10 +43,17 @@ urlpatterns = [
     path("", account_views.chooser, name="chooser"),
 ]
 
-# Serve uploaded media (e.g. tenant logos) via Django in dev; nginx proxies /media/ to web.
-# In production this is served by the web server / object storage instead.
+# Serve uploaded media (tenant logos, person/family photos) via Django. In dev the app-local nginx
+# proxies /media/ here; in prod the edge proxy forwards /media/ here too (WhiteNoise serves only
+# /static/), so prod opts in via SERVE_MEDIA. object storage would replace this at larger scale.
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+elif getattr(settings, "SERVE_MEDIA", False):
+    # static() no-ops when DEBUG is False, so route /media/ straight at the serve view in prod.
+    _media = re.escape(settings.MEDIA_URL.lstrip("/"))
+    urlpatterns += [
+        re_path(rf"^{_media}(?P<path>.*)$", serve_media, {"document_root": settings.MEDIA_ROOT}),
+    ]
 
 # Match the tenant urlconf: define error handlers so 404/500 render under DEBUG=False. The default
 # views render our on-brand templates/{400,403,404,500}.html (P7).

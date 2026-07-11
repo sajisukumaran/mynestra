@@ -11,6 +11,10 @@ dependencies = [
     "pillow>=11",
     "django-cotton>=2.7,<3",
     "django-simple-history>=3.12.0",
+    # Production serving: WSGI server + static file serving from the web process (the edge proxy
+    # sends /static/ to the app). Installed everywhere but only activated in config.settings.prod.
+    "gunicorn>=23",
+    "whitenoise>=6",
 ]
 
 [dependency-groups]
