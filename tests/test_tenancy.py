@@ -162,6 +162,8 @@ def test_investments_accounts_securities_lots_and_ledger_are_isolated(make_tenan
         InvTxnType,
         Lot,
         Security,
+        VestingGrant,
+        VestingTranche,
     )
     from apps.investments.services import apply_transaction, ensure_gl_account
 
@@ -183,8 +185,14 @@ def test_investments_accounts_securities_lots_and_ledger_are_isolated(make_tenan
             account=acct, txn_type=InvTxnType.BUY, date=datetime.date(2026, 1, 6),
             security=sec, quantity=Decimal("10"), price=Decimal("50"), amount=Decimal("500"))
         apply_transaction(buy, is_new=True)
+        grant = VestingGrant.objects.create(
+            account=acct, kind="dollar", label="Alpha Match",
+            grant_date=datetime.date(2026, 1, 1), total=Decimal("1000"), funded=True)
+        VestingTranche.objects.create(
+            grant=grant, vest_date=datetime.date(2027, 1, 1), cumulative_percent=Decimal("100"))
         assert InvestmentAccount.objects.count() == 1
         assert Lot.objects.count() == 1
+        assert VestingGrant.objects.count() == 1
         assert acct.balance == Decimal("1000")  # cash 500 + cost 500
 
     with schema_context(b.schema_name):
@@ -192,5 +200,7 @@ def test_investments_accounts_securities_lots_and_ledger_are_isolated(make_tenan
         assert Security.objects.count() == 0
         assert Lot.objects.count() == 0
         assert InvestmentTransaction.objects.count() == 0
+        assert VestingGrant.objects.count() == 0
+        assert VestingTranche.objects.count() == 0
         assert not InvestmentAccount.objects.filter(nickname="Alpha Taxable").exists()
         assert JournalEntry.objects.count() == 0
