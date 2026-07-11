@@ -48,6 +48,7 @@ from apps.investments.models import (
     Lot,
     LotConsumption,
     Security,
+    VestingGrant,
 )
 
 # --- Fixed contras / remappable activities ---------------------------------------------------
@@ -948,3 +949,57 @@ def dashboard_stats() -> dict:
         "recent": recent,
         "maturities": upcoming_maturities(),
     }
+
+
+# --- Vesting overlay (module-level view; never touches the GL) --------------------------------
+
+def grant_row(grant, as_of=None) -> dict:
+    """A grant's vested/unvested split, $ values, and next vest event, as of a date."""
+    return {
+        "grant": grant,
+        "fraction": grant.vested_fraction(as_of),
+        "vested": grant.vested(as_of),
+        "unvested": grant.unvested(as_of),
+        "vested_value": grant.vested_value(as_of),
+        "unvested_value": grant.unvested_value(as_of),
+        "next": grant.next_vest(as_of),
+    }
+
+
+def vesting_summary(account, as_of=None):
+    """(rows, totals) for an account's vesting grants. `at_risk` = unvested $ of FUNDED grants
+    (present but forfeitable → reduces the module's vested value); `upcoming` = unvested $ of
+    UNFUNDED grants (future inflows, not in the balance yet); `vested_value` = account total value
+    − at_risk. Pure read — no GL involvement."""
+    grants = list(account.vesting_grants.prefetch_related("tranches"))
+    rows = [grant_row(g, as_of) for g in grants]
+    at_risk = _q_amount(sum((r["unvested_value"] for r in rows if r["grant"].funded), ZERO))
+    upcoming = _q_amount(sum((r["unvested_value"] for r in rows if not r["grant"].funded), ZERO))
+    return rows, {
+        "at_risk": at_risk,
+        "upcoming": upcoming,
+        "vested_value": _q_amount(account.total_value - at_risk),
+        "has_grants": bool(rows),
+    }
+
+
+def unvested_at_risk_total(as_of=None) -> Decimal:
+    """Portfolio-wide unvested-but-present (forfeitable) value — the sum over FUNDED grants."""
+    total = ZERO
+    for g in VestingGrant.objects.filter(funded=True).prefetch_related("tranches"):
+        total += g.unvested_value(as_of)
+    return _q_amount(total)
+
+
+def upcoming_vesting(within_days: int = 365, as_of=None) -> list[dict]:
+    """UNFUNDED grants (e.g. RSUs) whose next vest event falls within the window, soonest first —
+    the household's upcoming equity/match vesting feed."""
+    as_of = as_of or datetime.date.today()
+    horizon = as_of + datetime.timedelta(days=within_days)
+    out = []
+    for g in VestingGrant.objects.filter(funded=False).prefetch_related("tranches"):
+        nxt = g.next_vest(as_of)
+        if nxt is not None and nxt.vest_date <= horizon:
+            out.append({"grant": g, "next": nxt, "unvested_value": g.unvested_value(as_of)})
+    out.sort(key=lambda r: r["next"].vest_date)
+    return out
