@@ -14,7 +14,7 @@
 {% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
 
 <form method="post">{% csrf_token %}
-  <div class="stack stack-20">
+  <div class="stack stack-20" x-data="{ atype: '{{ account.account_type|default:'checking' }}' }">
 
     <c-card title="Account" icon="coins">
       <div x-data="{ newBank: {% if banks %}false{% else %}true{% endif %} }">
@@ -47,7 +47,7 @@
             <div class="control"><input name="new_bank_city" placeholder="City"></div>
           </c-field>
           <c-field label="Account type" required>
-            <c-select name="account_type">
+            <c-select name="account_type" x-model="atype">
               {% for val, label in account_types %}<option value="{{ val }}"{% if account.account_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </c-select>
           </c-field>
@@ -60,6 +60,20 @@
           </c-field>
         </div>
         <label class="row">{{ form.is_active }} <span class="muted">Active account</span></label>
+      </div>
+    </c-card>
+
+    <c-card title="CD terms" icon="calendar-days" x-show="atype === 'cd'" x-cloak>
+      <div class="form-grid">
+        <c-field label="APR %" help="Annual percentage rate, e.g. 4.5">
+          <div class="control"><input name="apr" inputmode="decimal" placeholder="0.00" value="{{ account.apr|default:'' }}"></div>
+        </c-field>
+        <c-field label="Term (months)" help="e.g. 12">
+          <div class="control"><input name="term_months" inputmode="numeric" placeholder="12" value="{{ account.term_months|default:'' }}"></div>
+        </c-field>
+        <c-field label="Maturity date" help="When the CD matures.">
+          <div class="control"><input type="date" name="maturity_date" value="{{ account.maturity_date|date:'Y-m-d' }}"></div>
+        </c-field>
       </div>
     </c-card>
 

@@ -22,6 +22,7 @@
     <a class="fchip{% if not type %} active{% endif %}" href="{% querystring type=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
     <a class="fchip{% if type == 'checking' %} active{% endif %}" href="{% querystring type='checking' page=None %}">Checking <span class="cnt tnum">{{ counts.checking }}</span></a>
     <a class="fchip{% if type == 'savings' %} active{% endif %}" href="{% querystring type='savings' page=None %}">Savings <span class="cnt tnum">{{ counts.savings }}</span></a>
+    <a class="fchip{% if type == 'cd' %} active{% endif %}" href="{% querystring type='cd' page=None %}">CDs <span class="cnt tnum">{{ counts.cd }}</span></a>
   </div>
 
   <c-card flush>
@@ -74,7 +75,7 @@
     {% else %}
     <c-empty-state icon="landmark"
       title="{% if q or type %}No accounts match{% else %}No accounts yet{% endif %}"
-      text="{% if q or type %}Try a different search or filter.{% else %}Add a checking or savings account held at one of your banks.{% endif %}">
+      text="{% if q or type %}Try a different search or filter.{% else %}Add a checking, savings or CD account held at one of your banks.{% endif %}">
       {% if not q and not type %}<c-button variant="primary" href="{{ ui_tenant_url }}banking/accounts/new/"><c-icon name="plus" /> New account</c-button>{% endif %}
     </c-empty-state>
     {% endif %}

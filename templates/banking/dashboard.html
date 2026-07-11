@@ -54,5 +54,16 @@
       {% endfor %}
     </c-card>
   </div>
+
+  {% if maturities %}
+  <c-card icon="calendar-days" title="Upcoming CD maturities">
+    {% for a in maturities %}
+    <c-rel-row name="{{ a.nickname }}" role="{{ a.bank.display }} · matures {{ a.maturity_date|date:'d M Y' }}" href="{{ ui_tenant_url }}banking/accounts/{{ a.pk }}/">
+      <c-slot name="avatar"><c-avatar tint="blue" size="sm" square><c-icon name="calendar-days" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail">{% if a.is_matured %}<c-badge variant="warning">Matured</c-badge>{% else %}<c-badge variant="info">{{ a.days_to_maturity }} {{ a.days_to_maturity|pluralize:'day,days' }}</c-badge>{% endif %}</c-slot>
+    </c-rel-row>
+    {% endfor %}
+  </c-card>
+  {% endif %}
 </div>
 {% endblock %}

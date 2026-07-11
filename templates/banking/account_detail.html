@@ -20,10 +20,12 @@
           <c-badge>{{ account.type_label }}</c-badge>
           {% if not account.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
           {% if account.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
+          {% if account.is_cd and account.maturity_date %}{% if account.is_matured %}<c-badge variant="warning">Matured</c-badge>{% else %}<c-badge variant="info">Matures in {{ account.days_to_maturity }} {{ account.days_to_maturity|pluralize:'day,days' }}</c-badge>{% endif %}{% endif %}
         </div>
         <div class="muted">{{ account.bank.display }}{% if account.branch %} · {{ account.branch.name }}{% endif %}{% if account.masked_number %} · <span class="tnum">{{ account.masked_number }}</span>{% endif %}</div>
         <div class="ph-meta">
           <span class="row"><c-icon name="coins" size="sm" class="subtle" /><span class="strong"><c-money :amount="account.display_balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> {{ account.currency.code }}</span>
+          {% if account.is_cd %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />{% if account.apr %}{{ account.apr_display }} APR{% endif %}{% if account.term_months %} · {{ account.term_months }}-month term{% endif %}{% if account.maturity_date %} · matures {{ account.maturity_date|date:'d M Y' }}{% endif %}</span>{% endif %}
           {% if holders %}<span class="row"><c-icon name="users" size="sm" class="subtle" />{% for h in holders %}{{ h.person.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</span>{% endif %}
         </div>
       </div>
