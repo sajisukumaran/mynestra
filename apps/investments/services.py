@@ -245,10 +245,92 @@ def _consume_lots(txn) -> Decimal:
     return _consume_draws(txn, _plan_draws(txn), txn.net_proceeds)
 
 
+def _plan_short_draws(txn) -> list[tuple[Lot, Decimal]]:
+    """Which SHORT (negative-quantity) lots a buy-to-cover / buy-to-close draws from — FIFO (oldest
+    short first) by default, else the specific short lots the user chose (keyed by the opening txn,
+    which survives a replay). `txn.quantity` is the positive count to buy back."""
+    account, security = txn.account, txn.security
+    qty_needed = _q_qty(txn.quantity)
+    short_lots = [lot for lot in _open_lots(account, security) if lot.remaining_quantity < ZERO]
+
+    draws: list[tuple[Lot, Decimal]] = []
+    if txn.cost_basis_method == "specific" and txn.lot_selection:
+        by_src = {lot.source_txn_id: lot for lot in short_lots}
+        for sel in txn.lot_selection:
+            lot = by_src.get(sel.get("buy_txn"))
+            take = _q_qty(sel.get("qty", 0))
+            if lot is None or take <= ZERO or take > -lot.remaining_quantity:
+                raise InsufficientShares(
+                    f"Short lot for {security} unavailable or insufficient to cover."
+                )
+            draws.append((lot, take))
+        if _q_qty(sum(q for _, q in draws)) != qty_needed:
+            raise InsufficientShares("Selected lots do not sum to the cover quantity.")
+        return draws
+
+    remaining = qty_needed
+    for lot in short_lots:
+        if remaining <= ZERO:
+            break
+        take = min(-lot.remaining_quantity, remaining)  # magnitude available in this short lot
+        if take > ZERO:
+            draws.append((lot, _q_qty(take)))
+            remaining = _q_qty(remaining - take)
+    if remaining > ZERO:
+        raise InsufficientShares(
+            f"Not enough short {security} to buy back {qty_needed} (short by {remaining})."
+        )
+    return draws
+
+
+def _consume_short(txn, draws, cash_out) -> Decimal:
+    """Close the given SHORT lot draws, paying `cash_out` to buy the shares back (recording a
+    LotConsumption per draw), and return the realized gain (short proceeds released − cash paid).
+    Shared by buy-to-cover, option buy-to-close and the short side of an option expiry.
+
+    A short lot carries `remaining_quantity < 0` and `cost_basis < 0` (credit = proceeds owed). The
+    close condition is `remaining >= 0` — a full cover lands at exactly 0 (the OPPOSITE of the long
+    path's `<= 0` in `_consume_draws`; this is the most error-prone line in the engine)."""
+    cash_out = _q_amount(cash_out)
+    total_qty = _q_qty(sum((q for _, q in draws), ZERO))
+    total_proceeds = ZERO
+    allocated = ZERO
+    n = len(draws)
+    for i, (lot, take) in enumerate(draws):
+        mag = -lot.remaining_quantity  # positive open short magnitude
+        if mag and mag != ZERO:
+            proceeds = _q_amount(-lot.cost_basis * (take / mag))  # short proceeds released
+        else:
+            proceeds = ZERO
+        if i == n - 1:
+            cost = _q_amount(cash_out - allocated)  # last draw absorbs the rounding remainder
+        else:
+            cost = _q_amount(cash_out * (take / total_qty)) if total_qty else ZERO
+        allocated = _q_amount(allocated + cost)
+
+        lot.remaining_quantity = _q_qty(lot.remaining_quantity + take)  # −Q + q → toward 0
+        lot.cost_basis = _q_amount(lot.cost_basis + proceeds)           # −P + P·q/Q → toward 0
+        if lot.remaining_quantity >= ZERO:
+            lot.remaining_quantity = ZERO
+            lot.cost_basis = ZERO
+            lot.open = False
+        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
+        LotConsumption.objects.create(
+            sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=proceeds
+        )
+        total_proceeds = _q_amount(total_proceeds + proceeds)
+    return _q_amount(total_proceeds - cash_out)
+
+
 def _all_open_draws(txn) -> list[tuple[Lot, Decimal]]:
-    """Every open lot of the transaction's security, drawn in full — for whole-position events
-    (worthless write-off, cash buyout/merger)."""
-    return [(lot, lot.remaining_quantity) for lot in _open_lots(txn.account, txn.security)]
+    """Every open LONG lot of the transaction's security, drawn in full — for whole-position events
+    (worthless write-off, cash buyout/merger). Short lots are excluded; disposing a short position
+    through these corporate-action events is unsupported (close it with a buy-to-cover instead)."""
+    return [
+        (lot, lot.remaining_quantity)
+        for lot in _open_lots(txn.account, txn.security)
+        if lot.remaining_quantity > ZERO
+    ]
 
 
 def _apply_worthless(txn) -> Decimal:
@@ -353,19 +435,26 @@ def _apply_return_of_capital(txn) -> Decimal:
     return _q_amount(amount - total_basis)
 
 
-def _create_lot(txn, cost: Decimal) -> None:
-    qty = _q_qty(txn.quantity)
+def _make_lot(txn, security, qty, cost: Decimal, acquired) -> None:
+    """Create a lot for `security` under `txn`'s account. `qty`/`cost` may be NEGATIVE — a short
+    position (sell-short, written option) is a lot with negative quantity and a credit basis (the
+    proceeds received = the buy-back obligation). `open` is true whenever the lot is non-flat."""
+    qty = _q_qty(qty)
     Lot.objects.create(
         account=txn.account,
-        security=txn.security,
-        acquired_date=txn.date,
+        security=security,
+        acquired_date=acquired,
         original_quantity=qty,
         remaining_quantity=qty,
         original_cost=cost,
         cost_basis=cost,
-        open=qty > ZERO,
+        open=qty != ZERO,
         source_txn=txn,
     )
+
+
+def _create_lot(txn, cost: Decimal) -> None:
+    _make_lot(txn, txn.security, txn.quantity, cost, txn.date)
 
 
 def _apply_in_kind_out(txn) -> Decimal:
@@ -430,6 +519,12 @@ def _apply_lot_effect(txn) -> Decimal:
         return ZERO
     if t == InvTxnType.SELL:
         return _consume_lots(txn)
+    if t == InvTxnType.SELL_SHORT:
+        # Open a short: a negative-quantity lot whose credit basis is the proceeds received.
+        _make_lot(txn, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds), txn.date)
+        return ZERO
+    if t == InvTxnType.BUY_TO_COVER:
+        return _consume_short(txn, _plan_short_draws(txn), _q_amount(txn.amount + txn.fee))
     if t == InvTxnType.SPLIT:
         _apply_split(txn)
         return ZERO
@@ -464,6 +559,7 @@ class RebuildResult:
 _GAIN_TYPES = frozenset({
     InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
+    InvTxnType.BUY_TO_COVER,
 })
 
 
@@ -552,6 +648,16 @@ def _lines_for(txn) -> list[LineInput]:
     if t == InvTxnType.FEE:
         contra = txn.category_account or resolve_posting_account(acct, "fee_expense", INVEST_FEES)
         return [line(contra, debit=amount, **payee), line(gl, credit=amount)]
+    if t == InvTxnType.MARGIN_INTEREST:
+        contra = txn.category_account or resolve_posting_account(
+            acct, "margin_interest_expense", INTEREST_EXPENSE
+        )
+        return [line(contra, debit=amount, **payee), line(gl, credit=amount)]
+    if t == InvTxnType.DIV_PAID_SHORT:
+        contra = txn.category_account or resolve_posting_account(
+            acct, "substitute_dividend_expense", SUBSTITUTE_DIVIDEND_EXPENSE
+        )
+        return [line(contra, debit=amount, **payee), line(gl, credit=amount)]
     if t in (InvTxnType.IN_KIND_IN, InvTxnType.IN_KIND_OUT):
         # Securities move at cost. Internal transfers net via 1150 clearing (the paired leg posts
         # the other side); external transfers cross the household boundary against opening equity.
@@ -567,10 +673,11 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(gl, debit=cost), line(contra, credit=cost)]
         return [line(contra, debit=cost), line(gl, credit=cost)]
     if t in (InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
-             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER):
+             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.BUY_TO_COVER):
         # Only the realized gain/loss hits the ledger — the gl node already carries the position at
         # cost, so a disposition changes it by exactly (proceeds − cost). Cash-merger's cash comes
-        # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss).
+        # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss);
+        # buy-to-cover pays cash via `signed_cash`, realizing (short proceeds − buy-back cost).
         gain = _q_amount(txn.realized_gain)
         if gain > ZERO:
             return [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
@@ -578,8 +685,10 @@ def _lines_for(txn) -> list[LineInput]:
             g = -gain
             return [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
         return []
-    if t in (InvTxnType.BUY, InvTxnType.SPLIT, InvTxnType.MERGER, InvTxnType.SPINOFF):
-        # Cost-neutral: cash and total cost basis are unchanged, so nothing posts to the ledger.
+    if t in (InvTxnType.BUY, InvTxnType.SELL_SHORT,
+             InvTxnType.SPLIT, InvTxnType.MERGER, InvTxnType.SPINOFF):
+        # Cost-neutral: cash and total cost basis move equal-and-opposite, so nothing posts.
+        # SELL_SHORT mirrors BUY — proceeds in via `signed_cash`, offset by a credit-basis lot.
         return []
     raise ValueError(f"Unknown transaction type {t!r}")
 
@@ -820,7 +929,9 @@ class Holding:
 
     @property
     def unrealized_pct(self) -> Decimal:
-        return _q_amount(self.unrealized_gain / self.cost_basis * 100) if self.cost_basis else ZERO
+        # abs() keeps the sign meaningful for shorts/written options (negative credit basis).
+        base = abs(self.cost_basis)
+        return _q_amount(self.unrealized_gain / base * 100) if base else ZERO
 
 
 def holdings(account) -> list[Holding]:
@@ -835,9 +946,9 @@ def holdings(account) -> list[Holding]:
     out: list[Holding] = []
     for r in rows.values():
         qty = _q_qty(r["qty"])
-        if qty <= ZERO:
-            continue
         cost = _q_amount(r["cost"])
+        if qty == ZERO and cost == ZERO:
+            continue  # fully flat (e.g. a fully-covered short) — drop; shorts show as negatives
         price = r["security"].latest_price
         mv = _q_amount(qty * price) if price is not None else cost
         out.append(Holding(security=r["security"], quantity=qty, cost_basis=cost,
