@@ -46,6 +46,27 @@
       </div>
     </c-card>
 
+    <c-card title="Option contract" icon="file-text" x-show="kind === 'option'" x-cloak>
+      <div class="form-grid">
+        <c-field label="Underlying" help="The equity this option is written on.">
+          <c-select name="underlying">
+            <option value="">—</option>
+            {% for s in underlyings %}<option value="{{ s.pk }}"{% if security.underlying_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Right">
+          <c-select name="option_right">
+            <option value="">—</option>
+            {% for val, label in rights %}<option value="{{ val }}"{% if security.option_right == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Strike" help="Per underlying share."><div class="control">{{ form.strike }}</div></c-field>
+        <c-field label="Expiration"><div class="control">{{ form.expiration }}</div></c-field>
+        <c-field label="Multiplier" help="Underlying shares per contract (usually 100)."><div class="control"><input name="multiplier" inputmode="decimal" value="{{ security.multiplier|default:'100'|floatformat:'-6' }}"></div></c-field>
+      </div>
+      <c-hint icon="info">Options mark to cost until you enter a price; long and written positions net into the account's value.</c-hint>
+    </c-card>
+
     <c-card title="Notes" icon="file-text">
       <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea></c-field>
     </c-card>

@@ -57,6 +57,7 @@ class SecurityKind(models.TextChoices):
     BOND = "bond", "Bond"
     CD = "cd", "CD / Term deposit"
     MONEY_MARKET = "money_market", "Money market"
+    OPTION = "option", "Option"
     OTHER = "other", "Other"
 
 
@@ -65,7 +66,13 @@ class AssetClass(models.TextChoices):
     FIXED_INCOME = "fixed_income", "Fixed income"
     CASH = "cash", "Cash & equivalents"
     REAL_ASSET = "real_asset", "Real assets"
+    DERIVATIVE = "derivative", "Derivatives"
     OTHER = "other", "Other"
+
+
+class OptionRight(models.TextChoices):
+    CALL = "call", "Call"
+    PUT = "put", "Put"
 
 
 # Chip tint per asset class (drives the allocation donut / bars). From the curated chip set.
@@ -74,6 +81,7 @@ ASSET_CLASS_TINT = {
     AssetClass.FIXED_INCOME: "blue",
     AssetClass.CASH: "slate",
     AssetClass.REAL_ASSET: "amber",
+    AssetClass.DERIVATIVE: "rose",
     AssetClass.OTHER: "violet",
 }
 
@@ -94,6 +102,18 @@ class Security(SoftDeleteModel):
     apr = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)  # e.g. 5.25 %
     maturity_date = models.DateField(null=True, blank=True)
 
+    # Option-contract attributes (only meaningful when kind == OPTION). The underlying is the equity
+    # the option is written on; the multiplier is shares controlled per contract (usually 100).
+    underlying = models.ForeignKey(
+        "self", on_delete=models.PROTECT, null=True, blank=True, related_name="option_contracts"
+    )
+    option_right = models.CharField(
+        max_length=4, choices=OptionRight.choices, blank=True
+    )
+    strike = _price(null=True, blank=True)                 # strike price, per underlying share
+    expiration = models.DateField(null=True, blank=True)
+    multiplier = _qty(default=Decimal("100"))              # underlying shares per contract
+
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 
@@ -107,9 +127,30 @@ class Security(SoftDeleteModel):
 
     @property
     def display(self) -> str:
+        if self.kind == SecurityKind.OPTION and self.underlying_id:
+            return self.option_display
         if self.symbol:
             return f"{self.symbol} · {self.name}" if self.name else self.symbol
         return self.name
+
+    @property
+    def is_option(self) -> bool:
+        return self.kind == SecurityKind.OPTION
+
+    @property
+    def option_display(self) -> str:
+        """A compact contract label, e.g. `AAPL 250C 19-Jul` (underlying, strike, right, expiry)."""
+        und = self.underlying.symbol if self.underlying_id else (self.symbol or "?")
+        strike = f"{self.strike:g}" if self.strike is not None else "?"
+        right = "C" if self.option_right == OptionRight.CALL else (
+            "P" if self.option_right == OptionRight.PUT else "")
+        exp = self.expiration.strftime("%d-%b") if self.expiration else ""
+        return f"{und} {strike}{right} {exp}".strip()
+
+    def contracts_of(self, quantity) -> Decimal:
+        """Convert a shares-equivalent quantity back to a contract count for display."""
+        mult = self.multiplier or Decimal("1")
+        return (quantity / mult) if mult else quantity
 
     @property
     def kind_label(self) -> str:
@@ -409,6 +450,15 @@ class InvTxnType(models.TextChoices):
     BUY_TO_COVER = "buy_to_cover", "Buy to cover"        # close a short: realized gain on cover
     MARGIN_INTEREST = "margin_interest", "Margin interest"          # interest paid to the broker
     DIV_PAID_SHORT = "div_paid_short", "Dividend paid (short)"      # payment-in-lieu to the lender
+    # Options (IP5). `security` is the option contract (kind=OPTION); the underlying stock is on
+    # `security.underlying`. A written (short) option is a negative-quantity lot, like a short.
+    OPT_BUY_OPEN = "opt_buy_open", "Option — buy to open"      # long option: pay premium
+    OPT_SELL_CLOSE = "opt_sell_close", "Option — sell to close"  # close a long option
+    OPT_SELL_OPEN = "opt_sell_open", "Option — sell to open"   # write a short option: get premium
+    OPT_BUY_CLOSE = "opt_buy_close", "Option — buy to close"   # close a written option
+    OPT_EXPIRE = "opt_expire", "Option — expire"              # expires worthless (long loss / gain)
+    OPT_EXERCISE = "opt_exercise", "Option — exercise"        # you exercise a long option
+    OPT_ASSIGN = "opt_assign", "Option — assignment"          # your written option is assigned
 
 
 # Types that require a security (the rest are cash-only / account-level).
@@ -419,6 +469,9 @@ SECURITY_TYPES = frozenset({
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
     InvTxnType.MERGER, InvTxnType.SPINOFF,
     InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER, InvTxnType.DIV_PAID_SHORT,
+    InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_SELL_OPEN,
+    InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE, InvTxnType.OPT_EXERCISE,
+    InvTxnType.OPT_ASSIGN,
 })
 
 TXN_GLYPHS = {
@@ -446,6 +499,13 @@ TXN_GLYPHS = {
     InvTxnType.BUY_TO_COVER: "trending-up",
     InvTxnType.MARGIN_INTEREST: "percent",
     InvTxnType.DIV_PAID_SHORT: "coins",
+    InvTxnType.OPT_BUY_OPEN: "download",
+    InvTxnType.OPT_SELL_CLOSE: "upload",
+    InvTxnType.OPT_SELL_OPEN: "pencil",
+    InvTxnType.OPT_BUY_CLOSE: "circle-check",
+    InvTxnType.OPT_EXPIRE: "clock",
+    InvTxnType.OPT_EXERCISE: "shield-check",
+    InvTxnType.OPT_ASSIGN: "inbox",
 }
 
 
@@ -608,11 +668,22 @@ class InvestmentTransaction(SoftDeleteModel):
         if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE,
                  InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT):
             return -self.amount
-        if t in (InvTxnType.BUY, InvTxnType.BUY_TO_COVER):
-            return -(self.amount + self.fee)  # BUY_TO_COVER: cash paid to buy the shares back
-        if t in (InvTxnType.SELL, InvTxnType.SELL_SHORT):
-            return self.net_proceeds  # SELL_SHORT: short-sale proceeds come in as cash
-        # DIVIDEND_REINVEST, SPLIT, MERGER, SPINOFF, both in-kind transfers and WORTHLESS are
+        if t in (InvTxnType.BUY, InvTxnType.BUY_TO_COVER,
+                 InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_BUY_CLOSE):
+            return -(self.amount + self.fee)  # cash paid to buy / cover / open-long / close-written
+        if t in (InvTxnType.SELL, InvTxnType.SELL_SHORT,
+                 InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE):
+            return self.net_proceeds  # short-sale / option-write proceeds come in as cash
+        if t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
+            # Cash = strike × shares (self.amount). Exercising a long PUT or being assigned on a
+            # written CALL SELLS the underlying (cash in); the mirror cases BUY it (cash out).
+            right = self.security.option_right if self.security_id else ""
+            cash_in = (
+                (t == InvTxnType.OPT_EXERCISE and right == OptionRight.PUT)
+                or (t == InvTxnType.OPT_ASSIGN and right == OptionRight.CALL)
+            )
+            return self.net_proceeds if cash_in else -(self.amount + self.fee)
+        # DIVIDEND_REINVEST, SPLIT, MERGER, SPINOFF, in-kind, WORTHLESS and OPT_EXPIRE are
         # cash-neutral.
         return ZERO
 

@@ -32,6 +32,7 @@ from apps.investments.models import (
     InvestmentTransaction,
     InvTxnType,
     Lot,
+    OptionRight,
     Registration,
     Security,
     SecurityKind,
@@ -788,6 +789,8 @@ def _security_form(request, security, mode):
         if form.is_valid():
             security = form.save(commit=False)
             security.currency = currency
+            if security.kind == SecurityKind.OPTION:
+                security.multiplier = _decimal(request.POST.get("multiplier")) or Decimal("100")
             security.save()
             return redirect(tenant_url(request, f"investments/securities/{security.pk}/"))
     ctx = inv_context(
@@ -797,6 +800,8 @@ def _security_form(request, security, mode):
         base=base_currency(),
         kinds=SecurityKind.choices,
         asset_classes=AssetClass.choices,
+        rights=OptionRight.choices,
+        underlyings=Security.objects.exclude(kind=SecurityKind.OPTION).order_by("symbol", "name"),
     )
     return render(request, "investments/security_form.html", ctx)
 
