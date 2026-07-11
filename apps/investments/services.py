@@ -47,6 +47,7 @@ from apps.investments.models import (
     InvTxnType,
     Lot,
     LotConsumption,
+    OptionRight,
     Security,
     VestingGrant,
 )
@@ -169,12 +170,14 @@ def _open_lots(account, security):
     )
 
 
-def _plan_draws(txn) -> list[tuple[Lot, Decimal]]:
-    """Which lots (and how much of each) a SELL draws from — FIFO by default, else the specific
-    lots the user chose (keyed by source buy txn, which survives a replay)."""
-    account, security = txn.account, txn.security
-    qty_needed = _q_qty(txn.quantity)
-    open_lots = _open_lots(account, security)
+def _plan_draws(txn, security=None, qty=None) -> list[tuple[Lot, Decimal]]:
+    """Which LONG lots (and how much of each) a disposition draws from — FIFO by default, else the
+    specific lots the user chose (keyed by source buy txn, which survives a replay). `security` and
+    `qty` default to the txn's; option exercise/assignment passes the underlying + its shares."""
+    account = txn.account
+    security = security or txn.security
+    qty_needed = _q_qty(txn.quantity if qty is None else qty)
+    open_lots = [lot for lot in _open_lots(account, security) if lot.remaining_quantity > ZERO]
 
     draws: list[tuple[Lot, Decimal]] = []
     if txn.cost_basis_method == "specific" and txn.lot_selection:
@@ -245,12 +248,14 @@ def _consume_lots(txn) -> Decimal:
     return _consume_draws(txn, _plan_draws(txn), txn.net_proceeds)
 
 
-def _plan_short_draws(txn) -> list[tuple[Lot, Decimal]]:
+def _plan_short_draws(txn, security=None, qty=None) -> list[tuple[Lot, Decimal]]:
     """Which SHORT (negative-quantity) lots a buy-to-cover / buy-to-close draws from — FIFO (oldest
     short first) by default, else the specific short lots the user chose (keyed by the opening txn,
-    which survives a replay). `txn.quantity` is the positive count to buy back."""
-    account, security = txn.account, txn.security
-    qty_needed = _q_qty(txn.quantity)
+    which survives a replay). `security`/`qty` default to the txn's; `qty` is the positive count to
+    buy back."""
+    account = txn.account
+    security = security or txn.security
+    qty_needed = _q_qty(txn.quantity if qty is None else qty)
     short_lots = [lot for lot in _open_lots(account, security) if lot.remaining_quantity < ZERO]
 
     draws: list[tuple[Lot, Decimal]] = []
@@ -505,6 +510,110 @@ def _apply_in_kind_in(txn) -> None:
         )
 
 
+# --- Options ---------------------------------------------------------------------------------
+
+def _draws_cost(draws) -> Decimal:
+    """Total remaining-basis of the given LONG draws (matches `_consume_draws`'s per-lot cost)."""
+    return _q_amount(sum(
+        (_q_amount(lot.cost_basis * (take / lot.remaining_quantity)) if lot.remaining_quantity
+         else ZERO)
+        for lot, take in draws
+    ))
+
+
+def _draws_credit(draws) -> Decimal:
+    """Total credit (proceeds owed) of the given SHORT draws (matches `_consume_short`)."""
+    return _q_amount(sum(
+        (_q_amount(-lot.cost_basis * (take / -lot.remaining_quantity)) if lot.remaining_quantity
+         else ZERO)
+        for lot, take in draws
+    ))
+
+
+def _roll_out_option(txn, opt, qty) -> Decimal:
+    """Close `qty` (shares-equivalent) of the option position at ZERO realized gain — the premium
+    basis rolls into/out of the underlying rather than being recognized. A long option (positive
+    lots) is consumed at its cost; a written option (negative lots) is closed at its credit. Returns
+    the absolute premium basis released."""
+    open_lots = _open_lots(txn.account, opt)
+    is_long = any(lot.remaining_quantity > ZERO for lot in open_lots)
+    if is_long:
+        draws = _plan_draws(txn, security=opt, qty=qty)
+        premium = _draws_cost(draws)
+        _consume_draws(txn, draws, premium)      # proceeds = cost → zero gain
+        return premium
+    draws = _plan_short_draws(txn, security=opt, qty=qty)
+    premium = _draws_credit(draws)
+    _consume_short(txn, draws, premium)          # cash paid = credit → zero gain
+    return premium
+
+
+def _dispose_underlying(txn, underlying, qty, proceeds) -> Decimal:
+    """Sell `qty` underlying shares for `proceeds` (total): consume held LONG lots first (realizing
+    gain); if fewer are held than `qty`, open a SHORT lot for the shortfall (credit basis = its
+    pro-rata share of the proceeds). Returns the realized gain from the long portion."""
+    qty = _q_qty(qty)
+    proceeds = _q_amount(proceeds)
+    long_lots = [lt for lt in _open_lots(txn.account, underlying) if lt.remaining_quantity > ZERO]
+    held = _q_qty(sum((lot.remaining_quantity for lot in long_lots), ZERO))
+    pps = (proceeds / qty) if qty else ZERO
+    long_take = min(held, qty)
+    gain = ZERO
+    long_proceeds = ZERO
+    if long_take > ZERO:
+        long_proceeds = _q_amount(pps * long_take)
+        gain = _consume_draws(txn, _plan_draws(txn, security=underlying, qty=long_take),
+                              long_proceeds)
+    short_qty = _q_qty(qty - long_take)
+    if short_qty > ZERO:  # naked: create a short underlying lot for the shortfall
+        _make_lot(txn, underlying, -short_qty, -_q_amount(proceeds - long_proceeds), txn.date)
+    return gain
+
+
+def _apply_exercise(txn) -> Decimal:
+    """You exercise a LONG option. Roll the option out at zero gain, then affect the underlying:
+    a call BUYS at strike (option premium capitalizes into the new lot's basis, posts nothing); a
+    put SELLS at strike (premium reduces proceeds, realizes gain)."""
+    opt = txn.security
+    und = opt.underlying if opt else None
+    if und is None:
+        return ZERO
+    qty, strike_cash, fee = _q_qty(txn.quantity), _q_amount(txn.amount), _q_amount(txn.fee)
+    premium = _roll_out_option(txn, opt, qty)
+    if opt.option_right == OptionRight.CALL:
+        _make_lot(txn, und, qty, _q_amount(strike_cash + premium + fee), txn.date)
+        return ZERO
+    return _dispose_underlying(txn, und, qty, _q_amount(strike_cash - premium - fee))
+
+
+def _apply_assign(txn) -> Decimal:
+    """Your WRITTEN option is assigned. Roll the option out at zero gain, then hit the underlying:
+    a call SELLS at strike (premium received adds to proceeds, realizes gain); a put BUYS at strike
+    (premium reduces the new lot's basis, posts nothing)."""
+    opt = txn.security
+    und = opt.underlying if opt else None
+    if und is None:
+        return ZERO
+    qty, strike_cash, fee = _q_qty(txn.quantity), _q_amount(txn.amount), _q_amount(txn.fee)
+    premium = _roll_out_option(txn, opt, qty)
+    if opt.option_right == OptionRight.CALL:
+        return _dispose_underlying(txn, und, qty, _q_amount(strike_cash + premium - fee))
+    _make_lot(txn, und, qty, _q_amount(strike_cash - premium + fee), txn.date)
+    return ZERO
+
+
+def _apply_option_expire(txn) -> Decimal:
+    """The option expires worthless: dispose the whole position for nothing. A long option is a full
+    loss (basis written off); a written option is a full gain (the premium is kept)."""
+    open_lots = _open_lots(txn.account, txn.security)
+    net = _q_qty(sum((lot.remaining_quantity for lot in open_lots), ZERO))
+    if net > ZERO:
+        return _consume_draws(txn, _all_open_draws(txn), ZERO)
+    short_draws = [(lot, -lot.remaining_quantity) for lot in open_lots
+                   if lot.remaining_quantity < ZERO]
+    return _consume_short(txn, short_draws, ZERO)
+
+
 def _apply_lot_effect(txn) -> Decimal:
     """Apply a transaction's lot effect during a replay; return its realized gain (0 if n/a)."""
     t = txn.txn_type
@@ -545,6 +654,23 @@ def _apply_lot_effect(txn) -> Decimal:
     if t == InvTxnType.SPINOFF:
         _apply_spinoff(txn)
         return ZERO
+    if t == InvTxnType.OPT_BUY_OPEN:
+        _make_lot(txn, txn.security, txn.quantity, _q_amount(txn.amount + txn.fee), txn.date)
+        return ZERO
+    if t == InvTxnType.OPT_SELL_OPEN:
+        # Write a short option: a negative-quantity lot with credit basis = premium received.
+        _make_lot(txn, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds), txn.date)
+        return ZERO
+    if t == InvTxnType.OPT_SELL_CLOSE:
+        return _consume_lots(txn)
+    if t == InvTxnType.OPT_BUY_CLOSE:
+        return _consume_short(txn, _plan_short_draws(txn), _q_amount(txn.amount + txn.fee))
+    if t == InvTxnType.OPT_EXPIRE:
+        return _apply_option_expire(txn)
+    if t == InvTxnType.OPT_EXERCISE:
+        return _apply_exercise(txn)
+    if t == InvTxnType.OPT_ASSIGN:
+        return _apply_assign(txn)
     return ZERO
 
 
@@ -560,6 +686,8 @@ _GAIN_TYPES = frozenset({
     InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
     InvTxnType.BUY_TO_COVER,
+    InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
+    InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN,
 })
 
 
@@ -673,11 +801,14 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(gl, debit=cost), line(contra, credit=cost)]
         return [line(contra, debit=cost), line(gl, credit=cost)]
     if t in (InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
-             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.BUY_TO_COVER):
+             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.BUY_TO_COVER,
+             InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
+             InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
         # Only the realized gain/loss hits the ledger — the gl node already carries the position at
         # cost, so a disposition changes it by exactly (proceeds − cost). Cash-merger's cash comes
         # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss);
-        # buy-to-cover pays cash via `signed_cash`, realizing (short proceeds − buy-back cost).
+        # buy-to-cover pays cash via `signed_cash`, realizing (short proceeds − buy-back cost). An
+        # option exercise/assignment that ACQUIRES the underlying rolls basis in at zero gain → [].
         gain = _q_amount(txn.realized_gain)
         if gain > ZERO:
             return [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
@@ -686,9 +817,11 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
         return []
     if t in (InvTxnType.BUY, InvTxnType.SELL_SHORT,
-             InvTxnType.SPLIT, InvTxnType.MERGER, InvTxnType.SPINOFF):
+             InvTxnType.SPLIT, InvTxnType.MERGER, InvTxnType.SPINOFF,
+             InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_OPEN):
         # Cost-neutral: cash and total cost basis move equal-and-opposite, so nothing posts.
-        # SELL_SHORT mirrors BUY — proceeds in via `signed_cash`, offset by a credit-basis lot.
+        # SELL_SHORT / OPT_SELL_OPEN mirror BUY — proceeds in via `signed_cash`, offset by a
+        # credit-basis lot; OPT_BUY_OPEN mirrors BUY.
         return []
     raise ValueError(f"Unknown transaction type {t!r}")
 
@@ -902,7 +1035,9 @@ def sync_holder_p2o(account, *, user=None) -> None:
 
 def cash_balance(account) -> Decimal:
     """Settlement cash held in the account (from the register)."""
-    return _q_amount(sum((t.signed_cash for t in account.transactions.all()), ZERO))
+    # select_related the security so signed_cash can read an option's right without an N+1.
+    txns = account.transactions.select_related("security")
+    return _q_amount(sum((t.signed_cash for t in txns), ZERO))
 
 
 def cost_basis(account) -> Decimal:
@@ -991,6 +1126,8 @@ def allocation(accounts=None, *, by: str = "asset_class") -> list[Slice]:
     for acct in accounts:
         total_cash += acct.cash_balance
         for h in holdings(acct):
+            if h.security.asset_class == AssetClass.DERIVATIVE:
+                continue  # options never render as a donut arc (may be net-negative when written)
             if by == "asset_class":
                 add(h.security.asset_class, h.security.asset_class_label, h.security.tint,
                     h.market_value)
@@ -1042,7 +1179,11 @@ def register(account) -> list[dict]:
     """The account's transactions with a running settlement-cash balance, newest-first."""
     running = ZERO
     rows = []
-    for txn in account.transactions.order_by("date", "id"):
+    txns = account.transactions.select_related(
+        "security", "security__underlying", "counter_account", "counter_investment_account",
+        "target_security", "payee_person", "payee_organization",
+    ).order_by("date", "id")
+    for txn in txns:
         running = _q_amount(running + txn.signed_cash)
         rows.append({"txn": txn, "balance": running})
     rows.reverse()
