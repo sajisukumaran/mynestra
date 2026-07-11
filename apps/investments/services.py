@@ -267,6 +267,62 @@ def _apply_split(txn) -> None:
         lot.save(update_fields=["remaining_quantity", "original_quantity", "updated_at"])
 
 
+def _apply_merger(txn) -> None:
+    """Stock-for-stock merger: each open lot of the original security (`txn.security` = X) becomes a
+    lot of `txn.target_security` (Y) at the exchange ratio (Y shares per X share), carrying cost
+    basis and acquisition date over unchanged. Nothing is realized; total basis is preserved."""
+    if not (txn.split_ratio_new and txn.split_ratio_old and txn.target_security_id):
+        return
+    ratio = txn.split_ratio_new / txn.split_ratio_old
+    for lot in _open_lots(txn.account, txn.security):
+        qty = _q_qty(lot.remaining_quantity * ratio)
+        Lot.objects.create(
+            account=txn.account,
+            security_id=txn.target_security_id,
+            acquired_date=lot.acquired_date,
+            original_quantity=qty,
+            remaining_quantity=qty,
+            original_cost=lot.cost_basis,
+            cost_basis=lot.cost_basis,  # basis carries over entirely
+            open=lot.cost_basis > ZERO or qty > ZERO,
+            source_txn=txn,
+        )
+        lot.remaining_quantity = ZERO
+        lot.cost_basis = ZERO
+        lot.open = False
+        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
+
+
+def _apply_spinoff(txn) -> None:
+    """Spin-off: allocate `basis_pct`% of each open X lot's basis to a new lot of `target_security`
+    (Y); the parent (X) keeps the remainder. Distribute `ratio` Y shares per original X share; new Y
+    lots inherit X's acquisition date (holding period tacks). X's share count is unchanged. Cost
+    basis is conserved per lot (X_after + Y == X_before, exactly)."""
+    if not (
+        txn.split_ratio_new and txn.split_ratio_old
+        and txn.target_security_id and txn.basis_pct is not None
+    ):
+        return
+    dist = txn.split_ratio_new / txn.split_ratio_old
+    f = txn.basis_pct / Decimal("100")
+    for lot in _open_lots(txn.account, txn.security):
+        alloc = _q_amount(lot.cost_basis * f)
+        qty = _q_qty(lot.remaining_quantity * dist)
+        Lot.objects.create(
+            account=txn.account,
+            security_id=txn.target_security_id,
+            acquired_date=lot.acquired_date,
+            original_quantity=qty,
+            remaining_quantity=qty,
+            original_cost=alloc,
+            cost_basis=alloc,
+            open=alloc > ZERO or qty > ZERO,
+            source_txn=txn,
+        )
+        lot.cost_basis = _q_amount(lot.cost_basis - alloc)
+        lot.save(update_fields=["cost_basis", "updated_at"])
+
+
 def _apply_return_of_capital(txn) -> Decimal:
     """Reduce open-lot basis by the distribution; any excess over total basis is a realized gain."""
     lots = _open_lots(txn.account, txn.security)
@@ -382,6 +438,12 @@ def _apply_lot_effect(txn) -> Decimal:
         return _apply_worthless(txn)
     if t == InvTxnType.CASH_MERGER:
         return _apply_cash_merger(txn)
+    if t == InvTxnType.MERGER:
+        _apply_merger(txn)
+        return ZERO
+    if t == InvTxnType.SPINOFF:
+        _apply_spinoff(txn)
+        return ZERO
     return ZERO
 
 
@@ -510,7 +572,8 @@ def _lines_for(txn) -> list[LineInput]:
             g = -gain
             return [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
         return []
-    if t in (InvTxnType.BUY, InvTxnType.SPLIT):
+    if t in (InvTxnType.BUY, InvTxnType.SPLIT, InvTxnType.MERGER, InvTxnType.SPINOFF):
+        # Cost-neutral: cash and total cost basis are unchanged, so nothing posts to the ledger.
         return []
     raise ValueError(f"Unknown transaction type {t!r}")
 

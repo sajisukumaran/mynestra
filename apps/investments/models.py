@@ -401,6 +401,8 @@ class InvTxnType(models.TextChoices):
     IN_KIND_OUT = "in_kind_out", "Securities transfer out (in-kind)"
     WORTHLESS = "worthless", "Worthless write-off"      # bankruptcy: whole position → capital loss
     CASH_MERGER = "cash_merger", "Cash buyout / merger"  # going private: cash check for the shares
+    MERGER = "merger", "Merger (stock-for-stock)"        # X → Y shares at a ratio; basis carries
+    SPINOFF = "spinoff", "Spin-off"                      # allocate part of X's basis to a new Y
 
 
 # Types that require a security (the rest are cash-only / account-level).
@@ -409,6 +411,7 @@ SECURITY_TYPES = frozenset({
     InvTxnType.RETURN_OF_CAPITAL, InvTxnType.SPLIT,
     InvTxnType.IN_KIND_IN, InvTxnType.IN_KIND_OUT,
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
+    InvTxnType.MERGER, InvTxnType.SPINOFF,
 })
 
 TXN_GLYPHS = {
@@ -430,6 +433,8 @@ TXN_GLYPHS = {
     InvTxnType.IN_KIND_OUT: "upload",
     InvTxnType.WORTHLESS: "trending-down",
     InvTxnType.CASH_MERGER: "banknote",
+    InvTxnType.MERGER: "git-merge",
+    InvTxnType.SPINOFF: "git-branch",
 }
 
 
@@ -458,12 +463,20 @@ class InvestmentTransaction(SoftDeleteModel):
     fee = _amount(default=ZERO)     # commission (capitalized) or advisory/account fee (expensed)
 
     # Stock split ratio, e.g. 2-for-1 → new=2, old=1; 1-for-10 reverse → new=1, old=10.
+    # Reused by MERGER/SPINOFF as the share ratio (Y shares per old X share).
     split_ratio_new = models.DecimalField(
         max_digits=12, decimal_places=6, null=True, blank=True
     )
     split_ratio_old = models.DecimalField(
         max_digits=12, decimal_places=6, null=True, blank=True
     )
+
+    # Corporate actions (MERGER/SPINOFF): the acquirer / spun-off security Y (`security` stays the
+    # original X). Basis carries to Y for a merger; a spin-off moves `basis_pct`% of X's basis to Y.
+    target_security = models.ForeignKey(
+        Security, on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    basis_pct = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)
 
     # Contra override: for CONTRIBUTION a revenue account marks it as income (e.g. employer match);
     # for FEE an alternate expense account. Null → the service's default contra for the type.
@@ -587,7 +600,8 @@ class InvestmentTransaction(SoftDeleteModel):
             return -(self.amount + self.fee)
         if t == InvTxnType.SELL:
             return self.net_proceeds
-        # DIVIDEND_REINVEST, SPLIT, both in-kind transfers and WORTHLESS are cash-neutral.
+        # DIVIDEND_REINVEST, SPLIT, MERGER, SPINOFF, both in-kind transfers and WORTHLESS are
+        # cash-neutral.
         return ZERO
 
     @property
