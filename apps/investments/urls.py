@@ -27,6 +27,16 @@ urlpatterns = [
         views.vesting_delete,
         name="vesting-delete",
     ),
+    # Institutions (brokerages — grouped view over accounts)
+    path("institutions/", views.institution_list, name="institutions"),
+    path("institutions/new/", views.institution_create, name="institution-create"),
+    path("institutions/<int:org>/", views.institution_detail, name="institution-detail"),
+    path("institutions/<int:org>/edit/", views.institution_edit, name="institution-edit"),
+    path(
+        "institutions/<int:org>/branches/new/",
+        views.branch_create,
+        name="institution-branch-create",
+    ),
     # Securities (instrument master)
     path("securities/", views.security_list, name="securities"),
     path("securities/new/", views.security_create, name="security-create"),

@@ -44,6 +44,7 @@ from apps.investments.models import (
 )
 from apps.investments.services import (
     POSTING_ACTIVITIES,
+    allocation,
     apply_transaction,
     contribution_summary,
     create_matching_leg,
@@ -51,6 +52,8 @@ from apps.investments.services import (
     donut_segments,
     ensure_gl_account,
     holdings,
+    institution_row,
+    institution_summary,
     line_chart_points,
     register,
     remove_transaction,
@@ -122,6 +125,7 @@ def inv_context(request, active, **extra):
         "is_owner": _is_owner(request),
         "nav_accounts": InvestmentAccount.objects.count(),
         "nav_securities": Security.objects.count(),
+        "nav_institutions": _brokerages().count(),
     }
     ctx.update(extra)
     return ctx
@@ -260,7 +264,16 @@ def _maybe_opening_cash(request, account):
 
 
 def account_create(request):
-    return _account_form(request, InvestmentAccount(), "create")
+    account = InvestmentAccount()
+    # Prefill the institution when arriving from a brokerage's detail page (?institution=<id>).
+    if request.method == "GET":
+        inst = Organization.objects.filter(
+            pk=request.GET.get("institution") or 0,
+            categories__kind="ORG", categories__name="Brokerage",
+        ).first()
+        if inst:
+            account.institution = inst
+    return _account_form(request, account, "create")
 
 
 def account_edit(request, pk):
@@ -440,6 +453,92 @@ def _bank_accounts():
     from apps.banking.models import BankAccount
 
     return BankAccount.objects.select_related("bank").all()
+
+
+# --- Institutions (brokerages — a grouped lens over the accounts) ---------------------------
+
+def institution_list(request):
+    """The Institutions index: every brokerage with its combined value, plus household-wide totals
+    and a value-by-institution breakdown."""
+    rows = institution_summary()
+    total_value = sum((r["total_value"] for r in rows), Decimal("0"))
+    total_market = sum((r["market"] for r in rows), Decimal("0"))
+    total_cash = sum((r["cash"] for r in rows), Decimal("0"))
+    account_count = sum(r["account_count"] for r in rows)
+    bars = [
+        {"label": r["org"].display, "value": r["total_value"], "tint": r["org"].avatar_tint}
+        for r in rows if r["total_value"] > 0
+    ]
+    ctx = inv_context(
+        request, "institutions",
+        rows=rows, bars=bars, total_value=total_value, total_market=total_market,
+        total_cash=total_cash, account_count=account_count, base=base_currency(),
+    )
+    return render(request, "investments/institution_list.html", ctx)
+
+
+def institution_create(request):
+    """Add a brokerage with minimal info (name + optional city / website); tags it Brokerage so it
+    joins the institutions seam, then opens its detail page."""
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        if name:
+            org = Organization.objects.create(
+                name=name, website=request.POST.get("website", "").strip()
+            )
+            org.categories.add(Category.objects.get(kind=Category.Kind.ORG, name="Brokerage"))
+            city = request.POST.get("city", "").strip()
+            if city:
+                Address.objects.create(organization=org, city=city, is_primary=True)
+            return redirect(tenant_url(request, f"investments/institutions/{org.pk}/"))
+    return redirect(tenant_url(request, "investments/institutions/"))
+
+
+def institution_detail(request, org):
+    """One brokerage: totals, its accounts (with per-account breakdown), an asset-class allocation
+    over just its holdings, and its branches."""
+    organization = get_object_or_404(_brokerages(), pk=org)
+    accounts = list(organization.investment_accounts.select_related("currency", "branch"))
+    summary = institution_row(organization, accounts)
+    donut = donut_segments(allocation(accounts=accounts, by="asset_class"))
+    ctx = inv_context(
+        request, "institutions",
+        organization=organization, summary=summary, accounts=accounts, donut=donut,
+        branches=list(organization.branches.all()), base=base_currency(),
+    )
+    return render(request, "investments/institution_detail.html", ctx)
+
+
+def institution_edit(request, org):
+    """Edit a brokerage's name / website / primary city inline from its detail page."""
+    organization = get_object_or_404(_brokerages(), pk=org)
+    if request.method == "POST":
+        name = request.POST.get("name", "").strip()
+        if name:
+            organization.name = name
+            organization.website = request.POST.get("website", "").strip()
+            organization.save()
+            city = request.POST.get("city", "").strip()
+            addr = organization.addresses.filter(is_primary=True).first()
+            if city and addr:
+                addr.city = city
+                addr.save()
+            elif city:
+                Address.objects.create(organization=organization, city=city, is_primary=True)
+    return redirect(tenant_url(request, f"investments/institutions/{organization.pk}/"))
+
+
+def branch_create(request, org):
+    """Add a branch / office to a brokerage."""
+    organization = get_object_or_404(_brokerages(), pk=org)
+    if request.method == "POST":
+        name = request.POST.get("branch_name", "").strip()
+        if name:
+            Branch.objects.create(
+                organization=organization, name=name,
+                number=request.POST.get("branch_number", "").strip(),
+            )
+    return redirect(tenant_url(request, f"investments/institutions/{organization.pk}/"))
 
 
 def holding_detail(request, pk, sec):

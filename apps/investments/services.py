@@ -1306,6 +1306,45 @@ def contribution_summary(account) -> list[dict]:
     return [{"year": r["tax_year"], "total": _q_amount(r["total"] or ZERO)} for r in rows]
 
 
+def institution_summary() -> list[dict]:
+    """Per-brokerage rollup for the Institutions index: every Brokerage-tagged organization with its
+    investment accounts and their combined totals (value / market / cash / cost / unrealized), most
+    valuable first. Brokerages with no accounts yet are included (zero totals) so a freshly-added
+    one still appears and can receive accounts. Pure read — no GL involvement."""
+    from apps.organizations.models import Organization
+
+    orgs = list(
+        Organization.objects.filter(categories__kind="ORG", categories__name="Brokerage")
+        .distinct().order_by("name")
+    )
+    by_org: dict[int, list] = {}
+    for acct in InvestmentAccount.objects.select_related("institution", "currency"):
+        by_org.setdefault(acct.institution_id, []).append(acct)
+
+    rows = [institution_row(org, by_org.get(org.id, [])) for org in orgs]
+    rows.sort(key=lambda r: r["total_value"], reverse=True)
+    return rows
+
+
+def institution_row(org, accounts=None) -> dict:
+    """Totals for one brokerage over the given accounts (defaults to its investment accounts)."""
+    if accounts is None:
+        accounts = list(org.investment_accounts.select_related("currency"))
+    market = _q_amount(sum((a.market_value for a in accounts), ZERO))
+    cash = _q_amount(sum((a.cash_balance for a in accounts), ZERO))
+    cost = _q_amount(sum((a.cost_basis for a in accounts), ZERO))
+    return {
+        "org": org,
+        "accounts": accounts,
+        "account_count": len(accounts),
+        "market": market,
+        "cash": cash,
+        "cost": cost,
+        "total_value": _q_amount(market + cash),
+        "unrealized": _q_amount(market - cost),
+    }
+
+
 def total_portfolio_value() -> Decimal:
     """Total market value (securities + cash) across every account — base/native assumed equal."""
     return _q_amount(sum((a.total_value for a in InvestmentAccount.objects.all()), ZERO))

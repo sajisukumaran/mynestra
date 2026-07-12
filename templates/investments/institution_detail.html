@@ -1,0 +1,122 @@
+{% extends "investments/base.html" %}
+{% block inv_heading %}{{ organization.display }}{% endblock %}
+
+{% block inv %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/institutions/">Institutions</a><c-icon name="chevron-right" />
+  <span class="strong">{{ organization.display }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ organization.avatar_tint }}"><c-icon name="building-2" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ organization.display }}</h1>
+          <c-badge>Brokerage</c-badge>
+        </div>
+        <div class="muted">
+          {% if organization.primary_city %}{{ organization.primary_city }}{% endif %}
+          {% if organization.website %}{% if organization.primary_city %} · {% endif %}<a href="{{ organization.website }}" target="_blank" rel="noopener">{{ organization.website }}</a>{% endif %}
+        </div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="trending-up" size="sm" class="subtle" /><span class="strong"><c-money :amount="summary.total_value" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></span> value</span>
+          <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><c-money :amount="summary.cash" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /> cash</span>
+          <span class="row"><c-icon name="percent" size="sm" class="subtle" />{% if summary.unrealized >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="summary.unrealized" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></span> unrealized</span>
+          <span class="row"><c-icon name="briefcase" size="sm" class="subtle" />{{ summary.account_count }} {{ summary.account_count|pluralize:'account,accounts' }}</span>
+        </div>
+      </div>
+      <div class="row">
+        <c-modal title="Edit brokerage">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Edit"><c-icon name="pencil" /></c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}investments/institutions/{{ organization.pk }}/edit/">{% csrf_token %}
+            <div class="stack-16">
+              <c-field label="Name" required><c-input name="name" value="{{ organization.name }}" /></c-field>
+              <div class="grid-halves">
+                <c-field label="City"><c-input name="city" value="{{ organization.primary_city }}" placeholder="e.g. Boston" /></c-field>
+                <c-field label="Website"><c-input name="website" value="{{ organization.website }}" placeholder="https://" /></c-field>
+              </div>
+              <div class="row"><c-button type="submit" variant="primary">Save</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </div>
+          </form>
+        </c-modal>
+        <c-button variant="primary" href="{{ ui_tenant_url }}investments/accounts/new/?institution={{ organization.pk }}"><c-icon name="plus" /> Add account</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  <div class="grid-2">
+    {# Allocation over this institution's holdings #}
+    <c-card icon="pie-chart" title="Allocation">
+      <c-slot name="actions"><span class="subtle">by asset class</span></c-slot>
+      <c-donut :segments="donut" :total="summary.total_value" total_label="{{ organization.display }}" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" empty_text="Add holdings to see this institution's allocation." />
+    </c-card>
+
+    {# Branches #}
+    <c-card icon="map-pin" title="Branches">
+      <c-slot name="actions">
+        <c-modal title="Add branch">
+          <c-slot name="trigger"><c-button size="sm" variant="ghost"><c-icon name="plus" size="sm" /> Add branch</c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}investments/institutions/{{ organization.pk }}/branches/new/">{% csrf_token %}
+            <div class="stack-16">
+              <c-field label="Branch name" required><c-input name="branch_name" placeholder="e.g. Boston HQ" /></c-field>
+              <c-field label="Number" help="Branch code / internal number (optional)."><c-input name="branch_number" placeholder="Optional" /></c-field>
+              <div class="row"><c-button type="submit" variant="primary">Add branch</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </div>
+          </form>
+        </c-modal>
+      </c-slot>
+      {% for b in branches %}
+      <div class="chan">
+        <span class="chan-ic"><c-icon name="map-pin" size="sm" /></span>
+        <div><div class="c-val">{{ b.name }}</div>{% if b.primary_city or b.number %}<div class="c-lbl">{{ b.primary_city }}{% if b.primary_city and b.number %} · {% endif %}{% if b.number %}<span class="tnum">{{ b.number }}</span>{% endif %}</div>{% endif %}</div>
+      </div>
+      {% empty %}
+      <c-empty-state icon="map-pin" title="No branches" text="Add a branch or office if you want to track it." />
+      {% endfor %}
+    </c-card>
+  </div>
+
+  {# Accounts held here #}
+  <div class="stack stack-16">
+    <span class="eyebrow">Accounts at {{ organization.display }}</span>
+    <c-card flush>
+      {% if accounts %}
+      <c-table>
+        <thead><tr>
+          <c-th>Account</c-th>
+          <c-th>Registration</c-th>
+          <th class="col-num">Cash</th>
+          <th class="col-num">Unrealized</th>
+          <th class="col-num">Value</th>
+        </tr></thead>
+        <tbody>
+          {% for a in accounts %}
+          <tr>
+            <td>
+              <a class="person-cell" href="{{ ui_tenant_url }}investments/accounts/{{ a.pk }}/">
+                <c-avatar tint="{{ a.group_tint }}" size="sm" square><c-icon name="briefcase" size="sm" /></c-avatar>
+                <div><div class="pc-name">{{ a.nickname }}{% if a.is_closed %} <c-badge variant="warning">Closed</c-badge>{% endif %}</div>{% if a.masked_number %}<div class="pc-sub tnum">{{ a.masked_number }}</div>{% endif %}</div>
+              </a>
+            </td>
+            <td><c-badge>{{ a.registration_label }}</c-badge></td>
+            <td class="col-num"><c-money :amount="a.cash_balance" symbol="{{ a.currency.symbol }}" dp="{{ a.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+            <td class="col-num">{% if a.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="a.unrealized_gain" symbol="{{ a.currency.symbol }}" dp="{{ a.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></td>
+            <td class="col-num strong"><c-money :amount="a.total_value" symbol="{{ a.currency.symbol }}" dp="{{ a.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </c-table>
+      {% else %}
+      <c-empty-state icon="briefcase" title="No accounts here yet" text="Add the first account you hold at {{ organization.display }}.">
+        <c-button variant="primary" href="{{ ui_tenant_url }}investments/accounts/new/?institution={{ organization.pk }}"><c-icon name="plus" /> Add account</c-button>
+      </c-empty-state>
+      {% endif %}
+    </c-card>
+  </div>
+</div>
+{% endblock %}

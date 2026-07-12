@@ -11,6 +11,7 @@
     <c-sidebar title="Investments" subtitle="{{ ui_tenant_name }}" glyph="trending-up">
       <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}investments/" {% if active == 'dashboard' %}active="true"{% endif %} />
       <c-sidebar-item label="Accounts" icon="briefcase" count="{{ nav_accounts }}" href="{{ ui_tenant_url }}investments/accounts/" {% if active == 'accounts' %}active="true"{% endif %} />
+      <c-sidebar-item label="Institutions" icon="building-2" count="{{ nav_institutions }}" href="{{ ui_tenant_url }}investments/institutions/" {% if active == 'institutions' %}active="true"{% endif %} />
       <c-sidebar-item label="Securities" icon="tag" count="{{ nav_securities }}" href="{{ ui_tenant_url }}investments/securities/" {% if active == 'securities' %}active="true"{% endif %} />
       <c-slot name="foot">
         <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />

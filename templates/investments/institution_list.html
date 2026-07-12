@@ -1,0 +1,97 @@
+{% extends "investments/base.html" %}
+{% load money %}
+{% block inv_heading %}Institutions{% endblock %}
+
+{% block inv %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" /><span class="strong">Institutions</span></c-breadcrumb>
+
+<c-page-header title="Institutions" subtitle="Your portfolio grouped by the brokerage that holds it.">
+  <c-slot name="actions">
+    <c-modal title="Add brokerage">
+      <c-slot name="trigger"><c-button variant="primary"><c-icon name="plus" /> Add brokerage</c-button></c-slot>
+      <form method="post" action="{{ ui_tenant_url }}investments/institutions/new/">{% csrf_token %}
+        <div class="stack-16">
+          <c-field label="Name" required><c-input name="name" placeholder="e.g. Fidelity" /></c-field>
+          <div class="grid-halves">
+            <c-field label="City" help="Optional."><c-input name="city" placeholder="e.g. Boston" /></c-field>
+            <c-field label="Website" help="Optional."><c-input name="website" placeholder="https://" /></c-field>
+          </div>
+          <div class="row"><c-button type="submit" variant="primary">Add brokerage</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+        </div>
+      </form>
+    </c-modal>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  {# ---- Headline stats ---- #}
+  <div class="stat-grid">
+    <c-stat-tile icon="trending-up" tint="violet" value="{{ base.symbol }}{{ total_value|moneyfmt:'0' }}" label="Total value">
+      <c-slot name="foot">{{ rows|length }} {{ rows|length|pluralize:'institution,institutions' }} · {{ account_count }} {{ account_count|pluralize:'account,accounts' }}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="briefcase" tint="teal" value="{{ base.symbol }}{{ total_market|moneyfmt:'0' }}" label="Invested">
+      <c-slot name="foot">securities at market</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="banknote" tint="blue" value="{{ base.symbol }}{{ total_cash|moneyfmt:'0' }}" label="Cash">
+      <c-slot name="foot">settlement cash</c-slot>
+    </c-stat-tile>
+  </div>
+
+  {# ---- Value by institution ---- #}
+  {% if bars %}
+  <c-card icon="building-2" title="Value by institution">
+    <c-bar-list :items="bars" :total="total_value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" empty_text="No holdings yet." />
+  </c-card>
+  {% endif %}
+
+  {# ---- The institutions ---- #}
+  <c-card flush>
+    {% if rows %}
+    <c-table>
+      <thead><tr>
+        <c-th>Institution</c-th>
+        <c-th>Accounts</c-th>
+        <th class="col-num">Cash</th>
+        <th class="col-num">Unrealized</th>
+        <th class="col-num">Value</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}investments/institutions/{{ r.org.pk }}/">
+              <c-avatar tint="{{ r.org.avatar_tint }}" size="sm" square><c-icon name="building-2" size="sm" /></c-avatar>
+              <div><div class="pc-name">{{ r.org.display }}</div>{% if r.org.primary_city %}<div class="pc-sub">{{ r.org.primary_city }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td class="tnum">{{ r.account_count }}</td>
+          <td class="col-num"><c-money :amount="r.cash" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num">{% if r.unrealized >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="r.unrealized" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></td>
+          <td class="col-num strong"><c-money :amount="r.total_value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}investments/institutions/{{ r.org.pk }}/"><c-icon name="chevron-right" size="sm" /></c-button></div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    {% else %}
+    <c-empty-state icon="building-2" title="No institutions yet"
+      text="Add a brokerage, then add the accounts you hold there — or add an account and its institution is created for you.">
+      <c-modal title="Add brokerage">
+        <c-slot name="trigger"><c-button variant="primary"><c-icon name="plus" /> Add brokerage</c-button></c-slot>
+        <form method="post" action="{{ ui_tenant_url }}investments/institutions/new/">{% csrf_token %}
+          <div class="stack-16">
+            <c-field label="Name" required><c-input name="name" placeholder="e.g. Fidelity" /></c-field>
+            <div class="grid-halves">
+              <c-field label="City" help="Optional."><c-input name="city" placeholder="e.g. Boston" /></c-field>
+              <c-field label="Website" help="Optional."><c-input name="website" placeholder="https://" /></c-field>
+            </div>
+            <div class="row"><c-button type="submit" variant="primary">Add brokerage</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+          </div>
+        </form>
+      </c-modal>
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}
