@@ -62,10 +62,34 @@
       </c-slot>
       {% if prices %}
       <c-table>
-        <thead><tr><c-th>As of</c-th><th class="col-num">Price</th><c-th>Source</c-th></tr></thead>
+        <thead><tr><c-th>As of</c-th><th class="col-num">Price</th><c-th>Source</c-th><th></th></tr></thead>
         <tbody>
           {% for p in prices %}
-          <tr><td class="muted tnum">{{ p.as_of|date:"d M Y" }}</td><td class="col-num"><c-money :amount="p.price" symbol="{{ security.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td><td class="muted">{{ p.source|default:"—" }}</td></tr>
+          <tr>
+            <td class="muted tnum">{{ p.as_of|date:"d M Y" }}</td>
+            <td class="col-num"><c-money :amount="p.price" symbol="{{ security.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+            <td class="muted">{{ p.source|default:"—" }}</td>
+            <td>
+              <div class="cell-actions">
+                <c-modal title="Edit price">
+                  <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit / correct"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                  <form method="post" action="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/price/{{ p.pk }}/edit/">{% csrf_token %}
+                    <div class="stack-16">
+                      <div class="grid-halves">
+                        <c-field label="Price / unit" required><div class="control"><input name="price" inputmode="decimal" value="{{ p.price|floatformat:'-6' }}"></div></c-field>
+                        <c-field label="As of" required><div class="control"><input type="date" name="as_of" value="{{ p.as_of|date:'Y-m-d' }}"></div></c-field>
+                      </div>
+                      <c-field label="Source"><c-input name="source" value="{{ p.source }}" placeholder="e.g. Broker statement" /></c-field>
+                      <div class="between">
+                        <c-button type="submit" variant="primary">Save</c-button>
+                        <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}investments/securities/{{ security.pk }}/price/{{ p.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                      </div>
+                    </div>
+                  </form>
+                </c-modal>
+              </div>
+            </td>
+          </tr>
           {% endfor %}
         </tbody>
       </c-table>

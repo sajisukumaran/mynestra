@@ -43,6 +43,16 @@ urlpatterns = [
     path("securities/<int:pk>/", views.security_detail, name="security-detail"),
     path("securities/<int:pk>/edit/", views.security_edit, name="security-edit"),
     path("securities/<int:pk>/price/", views.security_price, name="security-price"),
+    path(
+        "securities/<int:pk>/price/<int:price_id>/edit/",
+        views.security_price_edit,
+        name="security-price-edit",
+    ),
+    path(
+        "securities/<int:pk>/price/<int:price_id>/delete/",
+        views.security_price_delete,
+        name="security-price-delete",
+    ),
     path("securities/<int:pk>/rename/", views.security_rename, name="security-rename"),
     path("securities/<int:pk>/delete/", views.security_delete, name="security-delete"),
     # htmx fragments

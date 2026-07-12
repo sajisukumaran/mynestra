@@ -1023,6 +1023,41 @@ def security_price(request, pk):
     return redirect(tenant_url(request, f"investments/securities/{pk}/"))
 
 
+def security_price_edit(request, pk, price_id):
+    """Correct a mistaken price mark (value / date / source). Moving it onto a date another mark
+    already holds overwrites that one and drops this row (the (security, as_of) unique rule). Prices
+    are market-value marks only — no GL or lot effect, so no rebuild."""
+    security = get_object_or_404(Security, pk=pk)
+    row = get_object_or_404(SecurityPrice, pk=price_id, security=security)
+    if request.method == "POST":
+        price = _decimal(request.POST.get("price"))
+        as_of = parse_date(request.POST.get("as_of", "") or "") or row.as_of
+        source = request.POST.get("source", "").strip()
+        if price is not None and price >= 0:
+            clash = (
+                SecurityPrice.objects.filter(security=security, as_of=as_of)
+                .exclude(pk=row.pk).first()
+            )
+            if clash is not None:
+                clash.price = price
+                clash.source = source
+                clash.save(update_fields=["price", "source", "updated_at"])
+                row.delete()
+            else:
+                row.as_of = as_of
+                row.price = price
+                row.source = source
+                row.save(update_fields=["as_of", "price", "source", "updated_at"])
+    return redirect(tenant_url(request, f"investments/securities/{pk}/"))
+
+
+def security_price_delete(request, pk, price_id):
+    security = get_object_or_404(Security, pk=pk)
+    if request.method == "POST":
+        SecurityPrice.objects.filter(pk=price_id, security=security).delete()
+    return redirect(tenant_url(request, f"investments/securities/{pk}/"))
+
+
 def security_rename(request, pk):
     """Ticker / symbol change: the same security under a new symbol (no lot/basis/cash effect).
     Keeps the Security row + all its lots; records a dated note. simple-history logs the change."""
