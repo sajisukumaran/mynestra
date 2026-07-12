@@ -1290,6 +1290,22 @@ def register(account) -> list[dict]:
     return rows
 
 
+def contribution_summary(account) -> list[dict]:
+    """Per-tax-year contribution totals for a year-tracked account (IRA/HSA/529): the sum of
+    contributions + transfers-in tagged with a `tax_year`, newest year first. Pure module rollup —
+    reads the attribution metadata, touches no GL. Empty for accounts with no tracked year."""
+    from apps.investments.models import CONTRIBUTION_TAX_YEAR_TYPES
+
+    rows = (
+        account.transactions
+        .filter(tax_year__isnull=False, txn_type__in=CONTRIBUTION_TAX_YEAR_TYPES)
+        .values("tax_year")
+        .annotate(total=Sum("amount"))
+        .order_by("-tax_year")
+    )
+    return [{"year": r["tax_year"], "total": _q_amount(r["total"] or ZERO)} for r in rows]
+
+
 def total_portfolio_value() -> Decimal:
     """Total market value (securities + cash) across every account — base/native assumed equal."""
     return _q_amount(sum((a.total_value for a in InvestmentAccount.objects.all()), ZERO))

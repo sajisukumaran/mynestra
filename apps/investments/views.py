@@ -23,6 +23,7 @@ from apps.finance.services import (
 )
 from apps.investments.forms import InvestmentAccountForm, SecurityForm
 from apps.investments.models import (
+    CONTRIBUTION_TAX_YEAR_TYPES,
     REGISTRATION_GROUP,
     SECURITY_TYPES,
     AccountGroup,
@@ -44,6 +45,7 @@ from apps.investments.models import (
 from apps.investments.services import (
     POSTING_ACTIVITIES,
     apply_transaction,
+    contribution_summary,
     create_matching_leg,
     dashboard_stats,
     donut_segments,
@@ -429,6 +431,7 @@ def account_detail(request, pk):
         expense_accounts=_expense_accounts(),
         bank_accounts=_bank_accounts(),
         investment_accounts=InvestmentAccount.objects.exclude(pk=account.pk).order_by("nickname"),
+        contribution_rows=contribution_summary(account) if account.tracks_contribution_year else [],
     )
     return render(request, "investments/account_detail.html", ctx)
 
@@ -673,6 +676,14 @@ def _apply_txn_post(request, txn):
         txn.payee_person = Person.objects.filter(pk=pid).first()
     elif oid:
         txn.payee_organization = Organization.objects.filter(pk=oid).first()
+
+    # Contribution tax year — only on year-tracked accounts (IRA/HSA/529) for contribution /
+    # transfer-in; cleared otherwise so switching type or account never leaves a stale year.
+    txn.tax_year = None
+    if txn.account.tracks_contribution_year and t in CONTRIBUTION_TAX_YEAR_TYPES:
+        ty = (request.POST.get("tax_year") or "").strip()
+        if ty.isdigit():
+            txn.tax_year = int(ty)
 
     txn.save()
     return txn

@@ -12,7 +12,7 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
       <c-icon name="chevron-down" size="sm" class="subtle" />
     </div>
   </c-field>
-  <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+  <c-field label="Date" required><div class="control"><input type="date" name="date" x-model="date"></div></c-field>
   <div x-show="!['in_kind_out','in_kind_in','worthless','merger','spinoff','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
     <c-field label="Amount" required help="In {{ account.currency.code }}.">
       <div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
@@ -229,6 +229,24 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
   </div>
   {% if not txn %}<label class="row"><input type="checkbox" name="auto_match" checked> <span class="muted">Also record the matching leg in the bank account</span></label>{% endif %}
 </div>
+
+{# Contribution tax year — IRA/HSA/529 only; prior-year contributions allowed until the deadline. Options track the entered date's year and the year before, reactive to the parent `date`. #}
+{% if account.tracks_contribution_year %}
+<div x-show="['contribution','transfer_in'].includes(type)" x-cloak
+     x-data="{ get yr(){ return parseInt((date || '').slice(0, 4)) || {% now 'Y' %} } }"
+     x-init="taxYear = taxYear || yr"
+     x-effect="if (![yr, yr - 1].includes(parseInt(taxYear))) taxYear = yr">
+  <c-field label="Contribution tax year" help="The tax year this contribution counts toward. You can make a prior-year contribution up to the tax filing deadline.">
+    <div class="control is-select">
+      <select name="tax_year" x-model="taxYear">
+        <option :value="yr" x-text="yr"></option>
+        <option :value="yr - 1" x-text="yr - 1"></option>
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+{% endif %}
 
 {# Payee — income / cash-in / cash-out #}
 <div x-show="['contribution','withdrawal','dividend','interest','cap_gain_dist'].includes(type)" x-cloak>

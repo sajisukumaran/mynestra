@@ -254,6 +254,20 @@ GROUP_TINT = {
     AccountGroup.HSA: "emerald",
 }
 
+# Registrations whose contributions are attributed to a specific tax year — the IRS lets you make a
+# prior-year contribution up to the filing deadline (e.g. a 2025 IRA/HSA contribution in early
+# 2026). 401(k)/403(b)/457(b) are payroll, calendar-year (no prior-year mechanism) and taxable/
+# custodial/trust have no annual-contribution concept, so neither carries a tax year.
+CONTRIBUTION_YEAR_REGISTRATIONS = frozenset({
+    Registration.TRADITIONAL_IRA,
+    Registration.ROTH_IRA,
+    Registration.ROLLOVER_IRA,
+    Registration.SEP_IRA,
+    Registration.SIMPLE_IRA,
+    Registration.HSA,
+    Registration.ESA_529,
+})
+
 
 class InvestmentAccount(SoftDeleteModel):
     """A household investment account at an institution (Fidelity, Vanguard, …). Its balance lives
@@ -330,6 +344,12 @@ class InvestmentAccount(SoftDeleteModel):
     @property
     def group_tint(self) -> str:
         return GROUP_TINT.get(self.group, "slate")
+
+    @property
+    def tracks_contribution_year(self) -> bool:
+        """IRA / HSA / 529 accounts attribute contributions to a specific tax year (prior-year
+        contributions allowed until the filing deadline)."""
+        return self.registration in CONTRIBUTION_YEAR_REGISTRATIONS
 
     # -- GL delegators (base currency; the account at cost) --
 
@@ -474,6 +494,13 @@ SECURITY_TYPES = frozenset({
     InvTxnType.OPT_ASSIGN,
 })
 
+# Inflow types that count as a contribution on a tax-year-tracked account (IRA/HSA/529) and so carry
+# a `tax_year`: money added from outside, whether an explicit contribution or a transfer from a
+# tracked bank account (the usual IRA-funding path). Purely module metadata — never posted.
+CONTRIBUTION_TAX_YEAR_TYPES = frozenset({
+    InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN,
+})
+
 TXN_GLYPHS = {
     InvTxnType.OPENING: "pin",
     InvTxnType.CONTRIBUTION: "arrow-down",
@@ -609,6 +636,10 @@ class InvestmentTransaction(SoftDeleteModel):
     )
     lot_selection = models.JSONField(null=True, blank=True)
     realized_gain = _amount(default=ZERO)  # computed on SELL / excess return-of-capital
+
+    # Contribution tax year (IRA/HSA/529 only): the tax year an incoming contribution / transfer-in
+    # counts toward. Null for everything else. Module metadata — attribution only, never posted.
+    tax_year = models.SmallIntegerField(null=True, blank=True)
 
     memo = models.CharField(max_length=255, blank=True)
     reference = models.CharField(max_length=60, blank=True)
