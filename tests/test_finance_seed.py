@@ -23,8 +23,15 @@ def test_chart_of_accounts_seeded_and_locked(make_tenant):
             "fx_gain_loss", "suspense", "taxes_payable", "transfer_clearing",
             "credit_cards", "interest_expense", "certificates_of_deposit",
             "substitute_dividend_expense",
+            # Payables (module 6).
+            "accounts_payable", "household_goods", "purchase_discounts",
+            "shipping_expense", "sales_tax_paid",
         ]:
             assert Account.objects.filter(system_key=key).count() == 1
+        # 2300 is the AP control account (renamed from "Bills Payable").
+        ap = Account.objects.get(system_key="accounts_payable")
+        assert ap.code == "2300" and ap.name == "Accounts Payable"
+        assert ap.type == AccountType.LIABILITY and ap.is_postable is True
 
 
 def test_currencies_seeded(make_tenant):

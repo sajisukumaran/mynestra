@@ -57,6 +57,9 @@ CHART_OF_ACCOUNTS = [
     ("1400", "Property & Vehicles", ASSET, "1000", False, ""),
     ("1410", "Real Estate", ASSET, "1400", True, ""),
     ("1420", "Vehicles", ASSET, "1400", True, ""),
+    # Capitalized durable household goods (electronics/appliances/furniture): the Payables module
+    # nests warranty-tracked purchases here instead of expensing them.
+    ("1430", "Household Goods & Equipment", ASSET, "1400", True, "household_goods"),
     ("1900", "Other Assets", ASSET, "1000", True, ""),
     ("1990", "Suspense", ASSET, "1000", True, "suspense"),
     # --- Liabilities ---
@@ -68,7 +71,9 @@ CHART_OF_ACCOUNTS = [
     ("2210", "Mortgage", LIABILITY, "2200", True, ""),
     ("2220", "Auto Loan", LIABILITY, "2200", True, ""),
     ("2230", "Personal Loan", LIABILITY, "2200", True, ""),
-    ("2300", "Bills Payable", LIABILITY, "2000", True, ""),
+    # 2300 is the Accounts-Payable control account: vendor bills credit it (accrual), payments
+    # debit it. Per-vendor aging uses the line-level party dimension, not sub-accounts.
+    ("2300", "Accounts Payable", LIABILITY, "2000", True, "accounts_payable"),
     ("2400", "Taxes Payable", LIABILITY, "2000", True, "taxes_payable"),
     # --- Equity ---
     ("3000", "Equity", EQUITY, None, False, ""),
@@ -92,6 +97,8 @@ CHART_OF_ACCOUNTS = [
     # 4400 stays a standalone postable account (Banking posts bank interest here by code).
     ("4400", "Interest & Dividends", REVENUE, "4000", True, ""),
     ("4900", "Other Income", REVENUE, "4000", True, ""),
+    # Early-payment / purchase discounts taken on vendor bills (reduces the net cost of purchases).
+    ("4920", "Purchase Discounts", REVENUE, "4000", True, "purchase_discounts"),
     ("4950", "Foreign Exchange Gain/Loss", REVENUE, "4000", True, "fx_gain_loss"),
     # --- Expenses ---
     ("5000", "Expenses", EXPENSE, None, False, ""),
@@ -117,4 +124,8 @@ CHART_OF_ACCOUNTS = [
     # interest expense and advisory fees).
     ("5880", "Substitute Dividend Expense", EXPENSE, "5000", True, "substitute_dividend_expense"),
     ("5900", "Other Expenses", EXPENSE, "5000", True, ""),
+    # Payables: shipping/freight on purchases, and non-recoverable sales tax paid on purchases
+    # (defaults for explicit Shipping / Tax bill lines; line-level tax otherwise folds into cost).
+    ("5920", "Shipping & Delivery", EXPENSE, "5000", True, "shipping_expense"),
+    ("5930", "Sales Tax", EXPENSE, "5000", True, "sales_tax_paid"),
 ]

@@ -8,6 +8,7 @@ from django.db import IntegrityError, transaction
 from django_tenants.utils import schema_context
 
 from apps.finance.exceptions import (
+    ClosedPeriod,
     EmptyEntry,
     InvalidLine,
     PostedEntryImmutable,
@@ -21,7 +22,15 @@ from apps.finance.models import (
     JournalEntry,
     JournalLine,
 )
-from apps.finance.services import LineInput, post_entry, resolve_period, reverse_entry, void_entry
+from apps.finance.services import (
+    LineInput,
+    account_balance,
+    post_entry,
+    repost_entry,
+    resolve_period,
+    reverse_entry,
+    void_entry,
+)
 
 D = Decimal
 JAN = datetime.date(2026, 1, 15)
@@ -67,6 +76,84 @@ def test_unbalanced_entry_raises(make_tenant):
                 ],
             )
         assert JournalEntry.objects.count() == 0  # nothing persisted
+
+
+def test_repost_entry_edits_in_place_without_reversal(make_tenant):
+    """The Payables in-place edit path: rewrite a posted entry's lines with no reversal, keeping the
+    same entry_no / external_key and adding no new JournalEntry."""
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        entry = post_entry(
+            date=JAN,
+            description="Grocery bill",
+            lines=[
+                LineInput("5200", debit=D("100")),
+                LineInput("2300", credit=D("100")),
+            ],
+            external_key="test:bill:1:v1",
+        )
+        pk, entry_no = entry.pk, entry.entry_no
+        je_count = JournalEntry.objects.count()
+
+        # Edit in place: raise the amount and move the expense to a different account.
+        repost_entry(
+            entry,
+            lines=[
+                LineInput("5400", debit=D("150")),
+                LineInput("2300", credit=D("150")),
+            ],
+            description="Grocery bill (fixed)",
+        )
+
+        assert JournalEntry.objects.count() == je_count  # no reversal, no new entry
+        entry.refresh_from_db()
+        assert entry.pk == pk and entry.entry_no == entry_no
+        assert entry.description == "Grocery bill (fixed)"
+        assert entry.external_key == "test:bill:1:v1"
+        assert entry.lines.count() == 2
+        assert account_balance("2300") == D("150")  # AP (credit-normal) reflects the new total
+        assert account_balance("5400") == D("150")
+        assert account_balance("5200") == D("0")  # old expense line gone
+
+
+def test_repost_entry_refuses_closed_period(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        entry = post_entry(
+            date=JAN,
+            lines=[
+                LineInput("5200", debit=D("100")),
+                LineInput("2300", credit=D("100")),
+            ],
+        )
+        period = entry.period
+        period.status = FiscalPeriod.Status.CLOSED
+        period.save(update_fields=["status", "updated_at"])
+        with pytest.raises(ClosedPeriod):
+            repost_entry(
+                entry,
+                lines=[
+                    LineInput("5200", debit=D("120")),
+                    LineInput("2300", credit=D("120")),
+                ],
+            )
+        entry.refresh_from_db()
+        assert entry.lines.get(account__code="5200").debit == D("100")  # untouched
+
+
+def test_repost_entry_rejects_reversal(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        entry = _opening("500")
+        rev = reverse_entry(entry)
+        with pytest.raises(PostedEntryImmutable):
+            repost_entry(
+                rev,
+                lines=[
+                    LineInput("1110", debit=D("500")),
+                    LineInput("opening_balance_equity", credit=D("500")),
+                ],
+            )
 
 
 def test_single_line_raises(make_tenant):

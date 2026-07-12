@@ -24,6 +24,7 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.finance.exceptions import (
+    ClosedPeriod,
     COAEditError,
     EmptyEntry,
     InvalidLine,
@@ -389,31 +390,10 @@ def _existing_by_key(external_key: str):
     )
 
 
-def post_entry(
-    *,
-    date: datetime.date,
-    lines: Sequence[LineInput],
-    description: str = "",
-    memo: str = "",
-    reference: str = "",
-    entry_type: str = JournalEntry.EntryType.STANDARD,
-    currency=None,
-    source=None,
-    external_key: str = "",
-    status: str = JournalEntry.Status.POSTED,
-    user=None,
-) -> JournalEntry:
-    """Create a balanced entry. Raises on imbalance/bad lines. Idempotent on external_key."""
-    prior = _existing_by_key(external_key)
-    if prior is not None:
-        return prior
-
-    if len(lines) < 2:
-        raise EmptyEntry("A journal entry needs at least two lines.")
-
-    base = base_currency()
-    entry_currency = _resolve_currency(currency) or base
-
+def _prepare_lines(lines: Sequence[LineInput], date: datetime.date, base: Currency) -> list:
+    """Validate + FX-convert each line and assert base-currency balance. Returns prepared tuples
+    (account, currency, debit, credit, rate, base_debit, base_credit, li) for row creation. Shared
+    by `post_entry` and `repost_entry` so both apply identical integrity rules."""
     total_debit = ZERO
     total_credit = ZERO
     prepared = []
@@ -448,6 +428,34 @@ def post_entry(
         raise UnbalancedEntry(
             f"Entry unbalanced in {base.code}: debits {total_debit} != credits {total_credit}."
         )
+    return prepared
+
+
+def post_entry(
+    *,
+    date: datetime.date,
+    lines: Sequence[LineInput],
+    description: str = "",
+    memo: str = "",
+    reference: str = "",
+    entry_type: str = JournalEntry.EntryType.STANDARD,
+    currency=None,
+    source=None,
+    external_key: str = "",
+    status: str = JournalEntry.Status.POSTED,
+    user=None,
+) -> JournalEntry:
+    """Create a balanced entry. Raises on imbalance/bad lines. Idempotent on external_key."""
+    prior = _existing_by_key(external_key)
+    if prior is not None:
+        return prior
+
+    if len(lines) < 2:
+        raise EmptyEntry("A journal entry needs at least two lines.")
+
+    base = base_currency()
+    entry_currency = _resolve_currency(currency) or base
+    prepared = _prepare_lines(lines, date, base)
 
     with transaction.atomic():
         period = resolve_period(date)
@@ -544,6 +552,70 @@ def void_entry(entry: JournalEntry, *, user=None) -> JournalEntry:
         raise PostedEntryImmutable("A posted entry must be reversed, not voided.")
     entry.status = JournalEntry.Status.VOID
     entry.save(update_fields=["status", "updated_at"])
+    return entry
+
+
+def repost_entry(
+    entry: JournalEntry,
+    *,
+    lines: Sequence[LineInput],
+    date=None,
+    description: str | None = None,
+    memo: str | None = None,
+    user=None,
+) -> JournalEntry:
+    """**In-place edit** of a posted entry: rewrite its lines (and optionally date/description) to
+    the new values with NO reversal — the same `JournalEntry` row, its `entry_no`, `external_key`
+    and `source` preserved, its lines replaced.
+
+    This deliberately departs from the ledger's immutable reverse-and-repost rule and is scoped to
+    editable subledger *documents* (Payables bills) whose source module owns them; Banking / Cards /
+    Investments keep `reverse_entry`. Refused for reversal entries and for entries whose new period
+    is closed, so the derived-close guarantee still holds for closed periods. Trade-off: no GL-level
+    history of the prior lines (the source document's own simple-history records the change)."""
+    if entry.status != JournalEntry.Status.POSTED:
+        raise PostedEntryImmutable("Only a posted entry can be reposted in place.")
+    if entry.entry_type == JournalEntry.EntryType.REVERSAL:
+        raise PostedEntryImmutable("A reversal entry cannot be reposted.")
+    if len(lines) < 2:
+        raise EmptyEntry("A journal entry needs at least two lines.")
+
+    base = base_currency()
+    new_date = date or entry.date
+    prepared = _prepare_lines(lines, new_date, base)
+
+    with transaction.atomic():
+        period = resolve_period(new_date)
+        if period is None or period.is_closed or period.fiscal_year.is_closed:
+            raise ClosedPeriod("The target period is closed; this entry can't be edited.")
+
+        entry.date = new_date
+        entry.period = period
+        if description is not None:
+            entry.description = description
+        if memo is not None:
+            entry.memo = memo
+        # entry_no is per fiscal year; if the date moved to a different year, take a fresh number.
+        if entry.fiscal_year != period.fiscal_year.year:
+            entry.fiscal_year = period.fiscal_year.year
+            entry.entry_no = _next_entry_no(period.fiscal_year)
+        entry.save()
+
+        entry.lines.all().delete()  # JournalLine is append-only, not soft-deleted: a real delete
+        for account, line_currency, debit, credit, rate, base_debit, base_credit, li in prepared:
+            JournalLine.objects.create(
+                entry=entry,
+                account=account,
+                currency=line_currency,
+                debit=debit,
+                credit=credit,
+                fx_rate=rate,
+                base_debit=base_debit,
+                base_credit=base_credit,
+                memo=li.memo,
+                person=li.person,
+                organization=li.organization,
+            )
     return entry
 
 
