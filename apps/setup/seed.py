@@ -14,6 +14,7 @@ ORG_CATEGORIES = [
     ("Employer", "teal"),
     ("Utility", "sky"),
     ("Merchant/Store", "orange"),
+    ("Vendor", "amber"),
     ("Religious", "fuchsia"),
     ("Club/Association", "blue"),
 ]

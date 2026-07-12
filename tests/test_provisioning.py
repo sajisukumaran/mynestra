@@ -20,8 +20,9 @@ def test_new_tenant_is_seeded_with_locked_system_catalogs(make_tenant):
         assert RelationshipType.objects.filter(is_system=True).count() == len(P2P_TYPES)
         assert PersonOrgRelationshipType.objects.filter(is_system=True).count() == len(P2O_TYPES)
 
-        # Spot-check the seams future modules rely on (§9): "Bank" category + gendered P2P labels.
+        # Spot-check the seams future modules rely on (§9): "Bank"/"Vendor" categories + P2P labels.
         assert Category.objects.get(kind="ORG", name="Bank").is_system
+        assert Category.objects.get(kind="ORG", name="Vendor").is_system  # Payables (module 6)
         parent = RelationshipType.objects.get(code="parent_child")
         assert (parent.a_label_m, parent.b_label_f) == ("Father", "Daughter")
 
