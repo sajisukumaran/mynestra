@@ -161,6 +161,16 @@ def ensure_gl_account(account: InvestmentAccount, *, parent=None, existing=None)
 
 
 # --- Tax-lot engine --------------------------------------------------------------------------
+#
+# The engine replays the register through `_apply_lot_effect`, touching lots ONLY via an injected
+# `store` (a LotStore). `DbLotStore` is the live path (persists Lot/LotConsumption — behaviour
+# identical to before this abstraction). `MemLotStore` is a non-mutating in-memory path the
+# value-over-time overlay uses to reconstruct holdings as of a past date, without writing anything.
+
+def _sid(security):
+    """Normalize a Security instance or pk to a pk."""
+    return security.pk if hasattr(security, "pk") else security
+
 
 def _open_lots(account, security):
     return list(
@@ -170,14 +180,99 @@ def _open_lots(account, security):
     )
 
 
-def _plan_draws(txn, security=None, qty=None) -> list[tuple[Lot, Decimal]]:
+class DbLotStore:
+    """The live lot store: reads/writes the real Lot + LotConsumption tables (unchanged)."""
+
+    def __init__(self, account):
+        self.account = account
+
+    def open_lots(self, security):
+        return _open_lots(self.account, security)
+
+    def add_lot(self, *, security_id, acquired_date, original_quantity, remaining_quantity,
+                original_cost, cost_basis, open, source_txn):
+        return Lot.objects.create(
+            account=self.account, security_id=security_id, acquired_date=acquired_date,
+            original_quantity=original_quantity, remaining_quantity=remaining_quantity,
+            original_cost=original_cost, cost_basis=cost_basis, open=open, source_txn=source_txn,
+        )
+
+    def save(self, lot, fields):
+        lot.save(update_fields=[*fields, "updated_at"])
+
+    def record_consumption(self, *, sale_txn, lot, quantity, cost, proceeds):
+        LotConsumption.objects.create(
+            sale_txn=sale_txn, lot=lot, quantity=quantity, cost=cost, proceeds=proceeds
+        )
+
+
+@dataclass
+class _MemLot:
+    """In-memory stand-in for a Lot row (value-over-time reconstruction only)."""
+    security_id: int
+    acquired_date: datetime.date
+    original_quantity: Decimal
+    remaining_quantity: Decimal
+    original_cost: Decimal
+    cost_basis: Decimal
+    open: bool
+    source_txn_id: int
+    seq: int  # insertion order — mirrors the DB autoincrement id used as the FIFO tie-break
+
+
+class MemLotStore:
+    """A non-mutating, in-memory lot store. The SAME engine handlers build lots here during a
+    date-bounded replay, so reconstructed as-of-date holdings match a live rebuild exactly — with
+    no DB writes. `save`/`record_consumption` are no-ops (MemLots are mutated in place)."""
+
+    def __init__(self):
+        self._by_sec: dict[int, list[_MemLot]] = {}
+        self._seq = 0
+
+    def open_lots(self, security):
+        lots = [lot for lot in self._by_sec.get(_sid(security), []) if lot.open]
+        lots.sort(key=lambda lot: (lot.acquired_date, lot.seq))
+        return lots
+
+    def add_lot(self, *, security_id, acquired_date, original_quantity, remaining_quantity,
+                original_cost, cost_basis, open, source_txn):
+        lot = _MemLot(
+            security_id=security_id, acquired_date=acquired_date,
+            original_quantity=_q_qty(original_quantity),
+            remaining_quantity=_q_qty(remaining_quantity),
+            original_cost=_q_amount(original_cost), cost_basis=_q_amount(cost_basis),
+            open=open, source_txn_id=source_txn.pk, seq=self._seq,
+        )
+        self._seq += 1
+        self._by_sec.setdefault(security_id, []).append(lot)
+        return lot
+
+    def save(self, lot, fields):
+        pass
+
+    def record_consumption(self, *, sale_txn, lot, quantity, cost, proceeds):
+        pass
+
+    def open_positions(self):
+        """Aggregate open lots into {security_id: (quantity, cost)} — for as-of-date holdings."""
+        out: dict[int, list[Decimal]] = {}
+        for lots in self._by_sec.values():
+            for lot in lots:
+                if not lot.open:
+                    continue
+                agg = out.setdefault(lot.security_id, [ZERO, ZERO])
+                agg[0] += lot.remaining_quantity
+                agg[1] += lot.cost_basis
+        return {sid: (_q_qty(q), _q_amount(c)) for sid, (q, c) in out.items()}
+
+
+def _plan_draws(txn, store, security=None, qty=None) -> list[tuple]:
     """Which LONG lots (and how much of each) a disposition draws from — FIFO by default, else the
     specific lots the user chose (keyed by source buy txn, which survives a replay). `security` and
     `qty` default to the txn's; option exercise/assignment passes the underlying + its shares."""
-    account = txn.account
     security = security or txn.security
     qty_needed = _q_qty(txn.quantity if qty is None else qty)
-    open_lots = [lot for lot in _open_lots(account, security) if lot.remaining_quantity > ZERO]
+    open_lots = [lot for lot in store.open_lots(security) if lot.remaining_quantity > ZERO]
 
     draws: list[tuple[Lot, Decimal]] = []
     if txn.cost_basis_method == "specific" and txn.lot_selection:
@@ -209,7 +304,7 @@ def _plan_draws(txn, security=None, qty=None) -> list[tuple[Lot, Decimal]]:
     return draws
 
 
-def _consume_draws(txn, draws, net_proceeds) -> Decimal:
+def _consume_draws(txn, store, draws, net_proceeds) -> Decimal:
     """Consume the given lot draws at cost, allocating `net_proceeds` across them (recording a
     LotConsumption per draw), and return the realized gain (proceeds − cost). Shared by SELL,
     cash-merger (whole position for the buyout cash) and worthless (whole position for zero)."""
@@ -235,28 +330,25 @@ def _consume_draws(txn, draws, net_proceeds) -> Decimal:
             lot.remaining_quantity = ZERO
             lot.cost_basis = ZERO
             lot.open = False
-        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
-        LotConsumption.objects.create(
-            sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=proceeds
-        )
+        store.save(lot, ["remaining_quantity", "cost_basis", "open"])
+        store.record_consumption(sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=proceeds)
         total_cost = _q_amount(total_cost + cost)
     return _q_amount(net_proceeds - total_cost)
 
 
-def _consume_lots(txn) -> Decimal:
+def _consume_lots(txn, store) -> Decimal:
     """Draw the sale's quantity from lots (FIFO or specific); return the realized gain."""
-    return _consume_draws(txn, _plan_draws(txn), txn.net_proceeds)
+    return _consume_draws(txn, store, _plan_draws(txn, store), txn.net_proceeds)
 
 
-def _plan_short_draws(txn, security=None, qty=None) -> list[tuple[Lot, Decimal]]:
+def _plan_short_draws(txn, store, security=None, qty=None) -> list[tuple]:
     """Which SHORT (negative-quantity) lots a buy-to-cover / buy-to-close draws from — FIFO (oldest
     short first) by default, else the specific short lots the user chose (keyed by the opening txn,
     which survives a replay). `security`/`qty` default to the txn's; `qty` is the positive count to
     buy back."""
-    account = txn.account
     security = security or txn.security
     qty_needed = _q_qty(txn.quantity if qty is None else qty)
-    short_lots = [lot for lot in _open_lots(account, security) if lot.remaining_quantity < ZERO]
+    short_lots = [lot for lot in store.open_lots(security) if lot.remaining_quantity < ZERO]
 
     draws: list[tuple[Lot, Decimal]] = []
     if txn.cost_basis_method == "specific" and txn.lot_selection:
@@ -288,7 +380,7 @@ def _plan_short_draws(txn, security=None, qty=None) -> list[tuple[Lot, Decimal]]
     return draws
 
 
-def _consume_short(txn, draws, cash_out) -> Decimal:
+def _consume_short(txn, store, draws, cash_out) -> Decimal:
     """Close the given SHORT lot draws, paying `cash_out` to buy the shares back (recording a
     LotConsumption per draw), and return the realized gain (short proceeds released − cash paid).
     Shared by buy-to-cover, option buy-to-close and the short side of an option expiry.
@@ -319,58 +411,55 @@ def _consume_short(txn, draws, cash_out) -> Decimal:
             lot.remaining_quantity = ZERO
             lot.cost_basis = ZERO
             lot.open = False
-        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
-        LotConsumption.objects.create(
-            sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=proceeds
-        )
+        store.save(lot, ["remaining_quantity", "cost_basis", "open"])
+        store.record_consumption(sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=proceeds)
         total_proceeds = _q_amount(total_proceeds + proceeds)
     return _q_amount(total_proceeds - cash_out)
 
 
-def _all_open_draws(txn) -> list[tuple[Lot, Decimal]]:
+def _all_open_draws(txn, store) -> list[tuple]:
     """Every open LONG lot of the transaction's security, drawn in full — for whole-position events
     (worthless write-off, cash buyout/merger). Short lots are excluded; disposing a short position
     through these corporate-action events is unsupported (close it with a buy-to-cover instead)."""
     return [
         (lot, lot.remaining_quantity)
-        for lot in _open_lots(txn.account, txn.security)
+        for lot in store.open_lots(txn.security)
         if lot.remaining_quantity > ZERO
     ]
 
 
-def _apply_worthless(txn) -> Decimal:
+def _apply_worthless(txn, store) -> Decimal:
     """Write the entire position off: dispose every open lot at cost for zero proceeds, realizing a
     capital loss equal to the remaining basis. Cash-neutral."""
-    return _consume_draws(txn, _all_open_draws(txn), ZERO)
+    return _consume_draws(txn, store, _all_open_draws(txn, store), ZERO)
 
 
-def _apply_cash_merger(txn) -> Decimal:
+def _apply_cash_merger(txn, store) -> Decimal:
     """Cash buyout of the whole position: dispose every open lot for the buyout cash, realizing the
     gain/loss (a full sell whose proceeds are the cash received)."""
-    return _consume_draws(txn, _all_open_draws(txn), _q_amount(txn.amount))
+    return _consume_draws(txn, store, _all_open_draws(txn, store), _q_amount(txn.amount))
 
 
-def _apply_split(txn) -> None:
+def _apply_split(txn, store) -> None:
     if not (txn.split_ratio_new and txn.split_ratio_old):
         return
     ratio = txn.split_ratio_new / txn.split_ratio_old
-    for lot in _open_lots(txn.account, txn.security):
+    for lot in store.open_lots(txn.security):
         lot.remaining_quantity = _q_qty(lot.remaining_quantity * ratio)
         lot.original_quantity = _q_qty(lot.original_quantity * ratio)
-        lot.save(update_fields=["remaining_quantity", "original_quantity", "updated_at"])
+        store.save(lot, ["remaining_quantity", "original_quantity"])
 
 
-def _apply_merger(txn) -> None:
+def _apply_merger(txn, store) -> None:
     """Stock-for-stock merger: each open lot of the original security (`txn.security` = X) becomes a
     lot of `txn.target_security` (Y) at the exchange ratio (Y shares per X share), carrying cost
     basis and acquisition date over unchanged. Nothing is realized; total basis is preserved."""
     if not (txn.split_ratio_new and txn.split_ratio_old and txn.target_security_id):
         return
     ratio = txn.split_ratio_new / txn.split_ratio_old
-    for lot in _open_lots(txn.account, txn.security):
+    for lot in store.open_lots(txn.security):
         qty = _q_qty(lot.remaining_quantity * ratio)
-        Lot.objects.create(
-            account=txn.account,
+        store.add_lot(
             security_id=txn.target_security_id,
             acquired_date=lot.acquired_date,
             original_quantity=qty,
@@ -383,10 +472,10 @@ def _apply_merger(txn) -> None:
         lot.remaining_quantity = ZERO
         lot.cost_basis = ZERO
         lot.open = False
-        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
+        store.save(lot, ["remaining_quantity", "cost_basis", "open"])
 
 
-def _apply_spinoff(txn) -> None:
+def _apply_spinoff(txn, store) -> None:
     """Spin-off: allocate `basis_pct`% of each open X lot's basis to a new lot of `target_security`
     (Y); the parent (X) keeps the remainder. Distribute `ratio` Y shares per original X share; new Y
     lots inherit X's acquisition date (holding period tacks). X's share count is unchanged. Cost
@@ -398,11 +487,10 @@ def _apply_spinoff(txn) -> None:
         return
     dist = txn.split_ratio_new / txn.split_ratio_old
     f = txn.basis_pct / Decimal("100")
-    for lot in _open_lots(txn.account, txn.security):
+    for lot in store.open_lots(txn.security):
         alloc = _q_amount(lot.cost_basis * f)
         qty = _q_qty(lot.remaining_quantity * dist)
-        Lot.objects.create(
-            account=txn.account,
+        store.add_lot(
             security_id=txn.target_security_id,
             acquired_date=lot.acquired_date,
             original_quantity=qty,
@@ -413,12 +501,12 @@ def _apply_spinoff(txn) -> None:
             source_txn=txn,
         )
         lot.cost_basis = _q_amount(lot.cost_basis - alloc)
-        lot.save(update_fields=["cost_basis", "updated_at"])
+        store.save(lot, ["cost_basis"])
 
 
-def _apply_return_of_capital(txn) -> Decimal:
+def _apply_return_of_capital(txn, store) -> Decimal:
     """Reduce open-lot basis by the distribution; any excess over total basis is a realized gain."""
-    lots = _open_lots(txn.account, txn.security)
+    lots = store.open_lots(txn.security)
     total_basis = _q_amount(sum(lot.cost_basis for lot in lots))
     amount = _q_amount(txn.amount)
     if amount <= total_basis and total_basis > ZERO:
@@ -431,23 +519,22 @@ def _apply_return_of_capital(txn) -> Decimal:
                 cut = _q_amount(amount * (lot.cost_basis / total_basis))
             lot.cost_basis = _q_amount(lot.cost_basis - cut)
             reduced = _q_amount(reduced + cut)
-            lot.save(update_fields=["cost_basis", "updated_at"])
+            store.save(lot, ["cost_basis"])
         return ZERO
     # Basis exhausted — zero every lot and recognize the excess as a realized gain.
     for lot in lots:
         lot.cost_basis = ZERO
-        lot.save(update_fields=["cost_basis", "updated_at"])
+        store.save(lot, ["cost_basis"])
     return _q_amount(amount - total_basis)
 
 
-def _make_lot(txn, security, qty, cost: Decimal, acquired) -> None:
+def _make_lot(txn, store, security, qty, cost: Decimal, acquired) -> None:
     """Create a lot for `security` under `txn`'s account. `qty`/`cost` may be NEGATIVE — a short
     position (sell-short, written option) is a lot with negative quantity and a credit basis (the
     proceeds received = the buy-back obligation). `open` is true whenever the lot is non-flat."""
     qty = _q_qty(qty)
-    Lot.objects.create(
-        account=txn.account,
-        security=security,
+    store.add_lot(
+        security_id=_sid(security),
         acquired_date=acquired,
         original_quantity=qty,
         remaining_quantity=qty,
@@ -458,15 +545,15 @@ def _make_lot(txn, security, qty, cost: Decimal, acquired) -> None:
     )
 
 
-def _create_lot(txn, cost: Decimal) -> None:
-    _make_lot(txn, txn.security, txn.quantity, cost, txn.date)
+def _create_lot(txn, store, cost: Decimal) -> None:
+    _make_lot(txn, store, txn.security, txn.quantity, cost, txn.date)
 
 
-def _apply_in_kind_out(txn) -> Decimal:
+def _apply_in_kind_out(txn, store) -> Decimal:
     """Consume lots at cost (FIFO or specific), realizing NO gain, and materialize the consumed
     lots onto `txn.lot_carry` (persisted by `rebuild_account_lots`) so the paired IN leg can
     recreate them with their original acquisition date + cost basis."""
-    draws = _plan_draws(txn)
+    draws = _plan_draws(txn, store)
     carry = []
     for lot, take in draws:
         if lot.remaining_quantity and lot.remaining_quantity != ZERO:
@@ -480,10 +567,9 @@ def _apply_in_kind_out(txn) -> Decimal:
             lot.remaining_quantity = ZERO
             lot.cost_basis = ZERO
             lot.open = False
-        lot.save(update_fields=["remaining_quantity", "cost_basis", "open", "updated_at"])
-        LotConsumption.objects.create(  # proceeds = cost → zero realized gain
-            sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=cost
-        )
+        store.save(lot, ["remaining_quantity", "cost_basis", "open"])
+        # proceeds = cost → zero realized gain
+        store.record_consumption(sale_txn=txn, lot=lot, quantity=take, cost=cost, proceeds=cost)
         carry.append(
             {"acquired_date": acquired.isoformat(), "quantity": str(take), "cost": str(cost)}
         )
@@ -491,15 +577,14 @@ def _apply_in_kind_out(txn) -> Decimal:
     return ZERO
 
 
-def _apply_in_kind_in(txn) -> None:
+def _apply_in_kind_in(txn, store) -> None:
     """Recreate the transferred lots from the snapshot, preserving each lot's original acquisition
     date + cost basis exactly (multiple carry entries → multiple lots)."""
     for e in (txn.lot_carry or []):
         qty = _q_qty(Decimal(str(e["quantity"])))
         cost = _q_amount(Decimal(str(e["cost"])))
-        Lot.objects.create(
-            account=txn.account,
-            security=txn.security,
+        store.add_lot(
+            security_id=txn.security_id,
             acquired_date=datetime.date.fromisoformat(e["acquired_date"]),
             original_quantity=qty,
             remaining_quantity=qty,
@@ -530,31 +615,31 @@ def _draws_credit(draws) -> Decimal:
     ))
 
 
-def _roll_out_option(txn, opt, qty) -> Decimal:
+def _roll_out_option(txn, store, opt, qty) -> Decimal:
     """Close `qty` (shares-equivalent) of the option position at ZERO realized gain — the premium
     basis rolls into/out of the underlying rather than being recognized. A long option (positive
     lots) is consumed at its cost; a written option (negative lots) is closed at its credit. Returns
     the absolute premium basis released."""
-    open_lots = _open_lots(txn.account, opt)
+    open_lots = store.open_lots(opt)
     is_long = any(lot.remaining_quantity > ZERO for lot in open_lots)
     if is_long:
-        draws = _plan_draws(txn, security=opt, qty=qty)
+        draws = _plan_draws(txn, store, security=opt, qty=qty)
         premium = _draws_cost(draws)
-        _consume_draws(txn, draws, premium)      # proceeds = cost → zero gain
+        _consume_draws(txn, store, draws, premium)      # proceeds = cost → zero gain
         return premium
-    draws = _plan_short_draws(txn, security=opt, qty=qty)
+    draws = _plan_short_draws(txn, store, security=opt, qty=qty)
     premium = _draws_credit(draws)
-    _consume_short(txn, draws, premium)          # cash paid = credit → zero gain
+    _consume_short(txn, store, draws, premium)          # cash paid = credit → zero gain
     return premium
 
 
-def _dispose_underlying(txn, underlying, qty, proceeds) -> Decimal:
+def _dispose_underlying(txn, store, underlying, qty, proceeds) -> Decimal:
     """Sell `qty` underlying shares for `proceeds` (total): consume held LONG lots first (realizing
     gain); if fewer are held than `qty`, open a SHORT lot for the shortfall (credit basis = its
     pro-rata share of the proceeds). Returns the realized gain from the long portion."""
     qty = _q_qty(qty)
     proceeds = _q_amount(proceeds)
-    long_lots = [lt for lt in _open_lots(txn.account, underlying) if lt.remaining_quantity > ZERO]
+    long_lots = [lt for lt in store.open_lots(underlying) if lt.remaining_quantity > ZERO]
     held = _q_qty(sum((lot.remaining_quantity for lot in long_lots), ZERO))
     pps = (proceeds / qty) if qty else ZERO
     long_take = min(held, qty)
@@ -562,15 +647,16 @@ def _dispose_underlying(txn, underlying, qty, proceeds) -> Decimal:
     long_proceeds = ZERO
     if long_take > ZERO:
         long_proceeds = _q_amount(pps * long_take)
-        gain = _consume_draws(txn, _plan_draws(txn, security=underlying, qty=long_take),
-                              long_proceeds)
+        draws = _plan_draws(txn, store, security=underlying, qty=long_take)
+        gain = _consume_draws(txn, store, draws, long_proceeds)
     short_qty = _q_qty(qty - long_take)
     if short_qty > ZERO:  # naked: create a short underlying lot for the shortfall
-        _make_lot(txn, underlying, -short_qty, -_q_amount(proceeds - long_proceeds), txn.date)
+        short_cost = -_q_amount(proceeds - long_proceeds)
+        _make_lot(txn, store, underlying, -short_qty, short_cost, txn.date)
     return gain
 
 
-def _apply_exercise(txn) -> Decimal:
+def _apply_exercise(txn, store) -> Decimal:
     """You exercise a LONG option. Roll the option out at zero gain, then affect the underlying:
     a call BUYS at strike (option premium capitalizes into the new lot's basis, posts nothing); a
     put SELLS at strike (premium reduces proceeds, realizes gain)."""
@@ -579,14 +665,14 @@ def _apply_exercise(txn) -> Decimal:
     if und is None:
         return ZERO
     qty, strike_cash, fee = _q_qty(txn.quantity), _q_amount(txn.amount), _q_amount(txn.fee)
-    premium = _roll_out_option(txn, opt, qty)
+    premium = _roll_out_option(txn, store, opt, qty)
     if opt.option_right == OptionRight.CALL:
-        _make_lot(txn, und, qty, _q_amount(strike_cash + premium + fee), txn.date)
+        _make_lot(txn, store, und, qty, _q_amount(strike_cash + premium + fee), txn.date)
         return ZERO
-    return _dispose_underlying(txn, und, qty, _q_amount(strike_cash - premium - fee))
+    return _dispose_underlying(txn, store, und, qty, _q_amount(strike_cash - premium - fee))
 
 
-def _apply_assign(txn) -> Decimal:
+def _apply_assign(txn, store) -> Decimal:
     """Your WRITTEN option is assigned. Roll the option out at zero gain, then hit the underlying:
     a call SELLS at strike (premium received adds to proceeds, realizes gain); a put BUYS at strike
     (premium reduces the new lot's basis, posts nothing)."""
@@ -595,82 +681,87 @@ def _apply_assign(txn) -> Decimal:
     if und is None:
         return ZERO
     qty, strike_cash, fee = _q_qty(txn.quantity), _q_amount(txn.amount), _q_amount(txn.fee)
-    premium = _roll_out_option(txn, opt, qty)
+    premium = _roll_out_option(txn, store, opt, qty)
     if opt.option_right == OptionRight.CALL:
-        return _dispose_underlying(txn, und, qty, _q_amount(strike_cash + premium - fee))
-    _make_lot(txn, und, qty, _q_amount(strike_cash - premium + fee), txn.date)
+        return _dispose_underlying(txn, store, und, qty, _q_amount(strike_cash + premium - fee))
+    _make_lot(txn, store, und, qty, _q_amount(strike_cash - premium + fee), txn.date)
     return ZERO
 
 
-def _apply_option_expire(txn) -> Decimal:
+def _apply_option_expire(txn, store) -> Decimal:
     """The option expires worthless: dispose the whole position for nothing. A long option is a full
     loss (basis written off); a written option is a full gain (the premium is kept)."""
-    open_lots = _open_lots(txn.account, txn.security)
+    open_lots = store.open_lots(txn.security)
     net = _q_qty(sum((lot.remaining_quantity for lot in open_lots), ZERO))
     if net > ZERO:
-        return _consume_draws(txn, _all_open_draws(txn), ZERO)
+        return _consume_draws(txn, store, _all_open_draws(txn, store), ZERO)
     short_draws = [(lot, -lot.remaining_quantity) for lot in open_lots
                    if lot.remaining_quantity < ZERO]
-    return _consume_short(txn, short_draws, ZERO)
+    return _consume_short(txn, store, short_draws, ZERO)
 
 
-def _apply_lot_effect(txn) -> Decimal:
-    """Apply a transaction's lot effect during a replay; return its realized gain (0 if n/a)."""
+def _apply_lot_effect(txn, store) -> Decimal:
+    """Apply a transaction's lot effect during a replay; return its realized gain (0 if n/a).
+    Touches lots only through `store` (DbLotStore live, MemLotStore for as-of reconstruction)."""
     t = txn.txn_type
     if t == InvTxnType.BUY:
-        _create_lot(txn, _q_amount(txn.amount + txn.fee))  # commission capitalized into basis
+        _create_lot(txn, store, _q_amount(txn.amount + txn.fee))  # commission capitalized
         return ZERO
     if t == InvTxnType.DIVIDEND_REINVEST:
-        _create_lot(txn, _q_amount(txn.amount))
+        _create_lot(txn, store, _q_amount(txn.amount))
         return ZERO
     if t == InvTxnType.OPENING and txn.security_id:
-        _create_lot(txn, _q_amount(txn.amount))
+        _create_lot(txn, store, _q_amount(txn.amount))
         return ZERO
     if t == InvTxnType.SELL:
-        return _consume_lots(txn)
+        return _consume_lots(txn, store)
     if t == InvTxnType.SELL_SHORT:
         # Open a short: a negative-quantity lot whose credit basis is the proceeds received.
-        _make_lot(txn, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds), txn.date)
+        _make_lot(txn, store, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds),
+                  txn.date)
         return ZERO
     if t == InvTxnType.BUY_TO_COVER:
-        return _consume_short(txn, _plan_short_draws(txn), _q_amount(txn.amount + txn.fee))
+        return _consume_short(txn, store, _plan_short_draws(txn, store),
+                              _q_amount(txn.amount + txn.fee))
     if t == InvTxnType.SPLIT:
-        _apply_split(txn)
+        _apply_split(txn, store)
         return ZERO
     if t == InvTxnType.RETURN_OF_CAPITAL:
-        return _apply_return_of_capital(txn)
+        return _apply_return_of_capital(txn, store)
     if t == InvTxnType.IN_KIND_OUT:
-        return _apply_in_kind_out(txn)
+        return _apply_in_kind_out(txn, store)
     if t == InvTxnType.IN_KIND_IN:
-        _apply_in_kind_in(txn)
+        _apply_in_kind_in(txn, store)
         return ZERO
     if t == InvTxnType.WORTHLESS:
-        return _apply_worthless(txn)
+        return _apply_worthless(txn, store)
     if t == InvTxnType.CASH_MERGER:
-        return _apply_cash_merger(txn)
+        return _apply_cash_merger(txn, store)
     if t == InvTxnType.MERGER:
-        _apply_merger(txn)
+        _apply_merger(txn, store)
         return ZERO
     if t == InvTxnType.SPINOFF:
-        _apply_spinoff(txn)
+        _apply_spinoff(txn, store)
         return ZERO
     if t == InvTxnType.OPT_BUY_OPEN:
-        _make_lot(txn, txn.security, txn.quantity, _q_amount(txn.amount + txn.fee), txn.date)
+        _make_lot(txn, store, txn.security, txn.quantity, _q_amount(txn.amount + txn.fee), txn.date)
         return ZERO
     if t == InvTxnType.OPT_SELL_OPEN:
         # Write a short option: a negative-quantity lot with credit basis = premium received.
-        _make_lot(txn, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds), txn.date)
+        _make_lot(txn, store, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds),
+                  txn.date)
         return ZERO
     if t == InvTxnType.OPT_SELL_CLOSE:
-        return _consume_lots(txn)
+        return _consume_lots(txn, store)
     if t == InvTxnType.OPT_BUY_CLOSE:
-        return _consume_short(txn, _plan_short_draws(txn), _q_amount(txn.amount + txn.fee))
+        return _consume_short(txn, store, _plan_short_draws(txn, store),
+                              _q_amount(txn.amount + txn.fee))
     if t == InvTxnType.OPT_EXPIRE:
-        return _apply_option_expire(txn)
+        return _apply_option_expire(txn, store)
     if t == InvTxnType.OPT_EXERCISE:
-        return _apply_exercise(txn)
+        return _apply_exercise(txn, store)
     if t == InvTxnType.OPT_ASSIGN:
-        return _apply_assign(txn)
+        return _apply_assign(txn, store)
     return ZERO
 
 
@@ -699,10 +790,11 @@ def rebuild_account_lots(account) -> RebuildResult:
     LotConsumption.objects.filter(sale_txn__account=account).delete()
     Lot.objects.filter(account=account).delete()
 
+    store = DbLotStore(account)
     resell: list[int] = []
     resync: list[int] = []
     for txn in account.transactions.order_by("date", "id"):
-        rg = _q_amount(_apply_lot_effect(txn))
+        rg = _q_amount(_apply_lot_effect(txn, store))
         fields = []
         if txn.realized_gain != rg:
             txn.realized_gain = rg
