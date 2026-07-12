@@ -488,6 +488,7 @@ table.tbl { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
 .tbl tbody td { padding:12px 16px; border-bottom:1px solid var(--border); vertical-align:middle; }
 .tbl tbody tr:last-child td { border-bottom:none; }
 .tbl tbody tr:hover { background:var(--surface-2); }
+.tbl tfoot td { padding:12px 16px; border-top:2px solid var(--border); font-weight:600; vertical-align:middle; }
 .tbl .col-num { text-align:right; font-variant-numeric:tabular-nums; }
 .person-cell { display:flex; align-items:center; gap:11px; }
 .person-cell .pc-name { font-weight:600; color:var(--text-strong); }
