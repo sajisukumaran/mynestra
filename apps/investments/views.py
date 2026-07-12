@@ -54,11 +54,13 @@ from apps.investments.services import (
     donut_segments,
     ensure_gl_account,
     holdings,
+    income_summary,
     institution_row,
     institution_summary,
     line_chart_points,
     register,
     remove_transaction,
+    repool_security,
     sync_holder_p2o,
     unvested_at_risk_total,
     upcoming_vesting,
@@ -453,6 +455,7 @@ def account_detail(request, pk):
         investment_accounts=InvestmentAccount.objects.exclude(pk=account.pk).order_by("nickname"),
         contribution_rows=contribution_summary(account) if account.tracks_contribution_year else [],
         limit_status=contribution_limit_status(account),
+        income=income_summary(account),
     )
     return render(request, "investments/account_detail.html", ctx)
 
@@ -951,6 +954,7 @@ def security_edit(request, pk):
 
 
 def _security_form(request, security, mode):
+    was_tracking = security.track_lots  # DB value; the form mutates the instance on validate
     form = SecurityForm(request.POST or None, instance=security)
     if request.method == "POST":
         currency = (
@@ -963,6 +967,9 @@ def _security_form(request, security, mode):
             if security.kind == SecurityKind.OPTION:
                 security.multiplier = _decimal(request.POST.get("multiplier")) or Decimal("100")
             security.save()
+            # Toggling lot tracking re-pools (or un-pools) every account that holds it.
+            if mode == "edit" and was_tracking != security.track_lots:
+                repool_security(security, user=request.user)
             return redirect(tenant_url(request, f"investments/securities/{security.pk}/"))
     ctx = inv_context(
         request, "securities",

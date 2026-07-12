@@ -26,6 +26,7 @@
           <span class="row"><c-icon name="trending-up" size="sm" class="subtle" /><span class="strong"><c-money :amount="account.total_value" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> value</span>
           <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><c-money :amount="account.cash_balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> cash</span>
           <span class="row"><c-icon name="percent" size="sm" class="subtle" />{% if account.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="account.unrealized_gain" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> unrealized</span>
+          {% if income.has_income %}<span class="row"><c-icon name="coins" size="sm" class="subtle" /><c-money :amount="income.total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> income</span>{% endif %}
         </div>
       </div>
       <div class="row">
@@ -140,6 +141,23 @@
               <span class="chip chip-{{ account.group_tint }}">TY {{ c.year }} · <c-money :amount="c.total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>
               {% endfor %}
             </div>
+          </div>
+        </c-card>
+        {% endif %}
+
+        {% if income.has_income %}
+        <c-card>
+          <div class="stack-8">
+            <div class="between">
+              <span class="eyebrow">Income collected</span>
+              <span class="row"><c-icon name="coins" size="sm" class="subtle" /><span class="strong"><c-money :amount="income.total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></span>
+            </div>
+            <div class="row wrap">
+              {% for r in income.by_year %}
+              <span class="chip">{{ r.year }} · <c-money :amount="r.total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>
+              {% endfor %}
+            </div>
+            <span class="subtle">Dividends (incl. reinvested), interest &amp; capital-gain distributions.</span>
           </div>
         </c-card>
         {% endif %}

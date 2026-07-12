@@ -114,6 +114,12 @@ class Security(SoftDeleteModel):
     expiration = models.DateField(null=True, blank=True)
     multiplier = _qty(default=Decimal("100"))              # underlying shares per contract
 
+    # Cost-basis granularity. On (default) → every buy/reinvest is its own tax lot (FIFO/specific).
+    # Off → the holding is POOLED into one average-cost lot; right for a stable-$1 money-market
+    # fund, where per-lot basis is meaningless (cost always == value, no gain). The invariant holds
+    # either way — the pooled lot's cost is still the whole position's cost.
+    track_lots = models.BooleanField(default=True)
+
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 
@@ -546,6 +552,13 @@ SECURITY_TYPES = frozenset({
 # tracked bank account (the usual IRA-funding path). Purely module metadata — never posted.
 CONTRIBUTION_TAX_YEAR_TYPES = frozenset({
     InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN,
+})
+
+# Income received into an account: dividends (incl. reinvested), interest and capital-gain
+# distributions. Drives the account's "income collected" rollup.
+INCOME_TXN_TYPES = frozenset({
+    InvTxnType.DIVIDEND, InvTxnType.DIVIDEND_REINVEST,
+    InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST,
 })
 
 TXN_GLYPHS = {

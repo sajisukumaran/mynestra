@@ -31,6 +31,7 @@ from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Sum
+from django.db.models.functions import ExtractYear
 
 from apps.finance.models import ZERO, Account, AccountType, JournalEntry, Side
 from apps.finance.services import (
@@ -554,7 +555,32 @@ def _make_lot(txn, store, security, qty, cost: Decimal, acquired) -> None:
 
 
 def _create_lot(txn, store, cost: Decimal) -> None:
-    _make_lot(txn, store, txn.security, txn.quantity, cost, txn.date)
+    if txn.security_id and not txn.security.track_lots:
+        _pool_into_lot(txn, store, cost)
+    else:
+        _make_lot(txn, store, txn.security, txn.quantity, cost, txn.date)
+
+
+def _pool_into_lot(txn, store, cost: Decimal) -> None:
+    """Average-cost pooling for a non-lot-tracked security (e.g. a money-market fund): fold the
+    buy / reinvest into the single existing open long lot rather than minting a new one, so the
+    holding stays one blended-cost position instead of a lot per dividend. Falls back to a fresh lot
+    when none is open yet. The pooled lot keeps its earliest acquisition date (holding period is
+    irrelevant for a stable-value fund)."""
+    qty = _q_qty(txn.quantity)
+    cost = _q_amount(cost)
+    pool = next((lot for lot in store.open_lots(txn.security) if lot.remaining_quantity > ZERO),
+                None)
+    if pool is None:
+        _make_lot(txn, store, txn.security, qty, cost, txn.date)
+        return
+    pool.original_quantity = _q_qty(pool.original_quantity + qty)
+    pool.remaining_quantity = _q_qty(pool.remaining_quantity + qty)
+    pool.original_cost = _q_amount(pool.original_cost + cost)
+    pool.cost_basis = _q_amount(pool.cost_basis + cost)
+    pool.open = pool.remaining_quantity != ZERO
+    store.save(pool, ["original_quantity", "remaining_quantity", "original_cost", "cost_basis",
+                      "open"])
 
 
 def _apply_in_kind_out(txn, store) -> Decimal:
@@ -1026,6 +1052,21 @@ def remove_transaction(txn, *, user=None, seen=None):
         remove_transaction(pair, user=user, seen=seen)
 
 
+@transaction.atomic
+def repool_security(security, *, user=None):
+    """Re-run the lot engine for every account holding `security` after its `track_lots` setting was
+    flipped, so existing lots collapse into (pooling on) or split back out of (pooling off) a single
+    average-cost lot. Cash-neutral for a money-market fund (no gains to shift); reposts any
+    disposition whose realized gain moved for a security that does have sells."""
+    account_ids = list(
+        Lot.objects.filter(security=security).values_list("account_id", flat=True).distinct()
+    )
+    for acct in InvestmentAccount.objects.filter(pk__in=account_ids):
+        result = rebuild_account_lots(acct)
+        _repost_shifted(result.resell_ids, user=user)
+        _resync_out_legs(result.resync_out_ids, user=user)
+
+
 def sync_in_kind_pair(out, *, user=None, seen=None):
     """Maintain the managed mirror IN leg of an *internal* in-kind-out transfer: create it, keep its
     lot snapshot / security / date in sync, or remove it if the transfer became external. The OUT
@@ -1342,6 +1383,26 @@ def institution_row(org, accounts=None) -> dict:
         "cost": cost,
         "total_value": _q_amount(market + cash),
         "unrealized": _q_amount(market - cost),
+    }
+
+
+def income_summary(account) -> dict:
+    """Income collected in an account — dividends (incl. reinvested) + interest + capital-gain
+    distributions — grouped by the year received (transaction date), newest first, plus the lifetime
+    total. Read-only rollup; no GL involvement."""
+    from apps.investments.models import INCOME_TXN_TYPES
+
+    rows = (
+        account.transactions
+        .filter(txn_type__in=INCOME_TXN_TYPES)
+        .annotate(yr=ExtractYear("date"))
+        .values("yr").annotate(total=Sum("amount")).order_by("-yr")
+    )
+    by_year = [{"year": r["yr"], "total": _q_amount(r["total"] or ZERO)} for r in rows]
+    return {
+        "by_year": by_year,
+        "total": _q_amount(sum((r["total"] for r in by_year), ZERO)),
+        "has_income": bool(by_year),
     }
 
 

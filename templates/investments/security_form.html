@@ -37,6 +37,8 @@
         </c-field>
       </div>
       <label class="row">{{ form.is_active }} <span class="muted">Active</span></label>
+      <label class="row">{{ form.track_lots }} <span class="muted">Track individual tax lots</span></label>
+      <c-hint icon="info">Leave on for stocks, ETFs and funds. Turn <strong>off</strong> for a stable-value money-market fund to pool holdings into a single average-cost position instead of a lot per reinvested dividend.</c-hint>
     </c-card>
 
     <c-card title="Term deposit" icon="calendar-days" x-show="kind === 'cd'" x-cloak>

@@ -35,6 +35,7 @@
   </c-card>
 
   <c-card title="Open lots" icon="briefcase" flush>
+    {% if not security.track_lots %}<c-slot name="actions"><c-badge>Pooled · average cost</c-badge></c-slot>{% endif %}
     {% if lots %}
     <c-table>
       <thead><tr>
