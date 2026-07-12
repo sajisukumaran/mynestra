@@ -1,0 +1,58 @@
+{% comment %}Per-instrument performance table. Include with: rows, totals, acct (for holding
+links), sym (currency symbol), dp (decimal places). Shared by the account + institution
+Performance tabs. Wide by design — c-table scrolls horizontally.{% endcomment %}
+{% if rows %}
+<c-table>
+  <thead><tr>
+    <c-th>Instrument</c-th>
+    <th class="col-num">Bought</th>
+    <th class="col-num">Sold</th>
+    <th class="col-num">Qty</th>
+    <th class="col-num">Cost</th>
+    <th class="col-num">Fees</th>
+    <th class="col-num">Dividends</th>
+    <th class="col-num">Interest</th>
+    <th class="col-num">Amount sold</th>
+    <th class="col-num">Price</th>
+    <th class="col-num">Gain</th>
+    <th class="col-num">Total return</th>
+  </tr></thead>
+  <tbody>
+    {% for r in rows %}
+    <tr>
+      <td>
+        <a class="person-cell" href="{{ ui_tenant_url }}investments/accounts/{{ acct.pk }}/holdings/{{ r.security.id }}/">
+          <c-avatar tint="{{ r.security.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar>
+          <div><div class="pc-name">{{ r.security.display }}</div><div class="pc-sub">{{ r.security.asset_class_label }}</div></div>
+        </a>
+      </td>
+      <td class="col-num tnum">{% if r.qty_bought %}{{ r.qty_bought|floatformat:'-4' }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num tnum">{% if r.qty_sold %}{{ r.qty_sold|floatformat:'-4' }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num tnum">{{ r.current_qty|floatformat:'-4' }}</td>
+      <td class="col-num"><c-money :amount="r.cost_basis" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></td>
+      <td class="col-num">{% if r.fees %}<c-money :amount="r.fees" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num">{% if r.dividends %}<c-money :amount="r.dividends" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num">{% if r.interest %}<c-money :amount="r.interest" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num">{% if r.amount_sold %}<c-money :amount="r.amount_sold" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num">{% if r.price %}<c-money :amount="r.price" symbol="{{ sym }}" dp="2" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+      <td class="col-num">{% if r.gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="r.gain" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
+      <td class="col-num">{% if r.total_return >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="r.total_return" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+  <tfoot><tr>
+    <td class="strong">Total</td>
+    <td></td><td></td><td></td>
+    <td class="col-num strong"><c-money :amount="totals.cost_basis" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></td>
+    <td class="col-num">{% if totals.fees %}<c-money :amount="totals.fees" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% endif %}</td>
+    <td class="col-num">{% if totals.dividends %}<c-money :amount="totals.dividends" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% endif %}</td>
+    <td class="col-num">{% if totals.interest %}<c-money :amount="totals.interest" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% endif %}</td>
+    <td class="col-num">{% if totals.amount_sold %}<c-money :amount="totals.amount_sold" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" />{% endif %}</td>
+    <td></td>
+    <td class="col-num strong">{% if totals.gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="totals.gain" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
+    <td class="col-num strong">{% if totals.total_return >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="totals.total_return" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
+  </tr></tfoot>
+</c-table>
+{% else %}
+<c-empty-state icon="trending-up" title="No activity yet" text="Record buys, dividends and sells to see per-instrument performance." />
+{% endif %}

@@ -48,6 +48,7 @@
     <c-tabs>
       <button type="button" class="tab" :class="{ active: tab === 'holdings' }" @click="tab = 'holdings'"><c-icon name="briefcase" size="sm" /> Holdings {% if holdings %}<span class="tcount tnum">{{ holdings|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="coins" size="sm" /> Register {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'performance' }" @click="tab = 'performance'"><c-icon name="trending-up" size="sm" /> Performance {% if performance.rows %}<span class="tcount tnum">{{ performance.rows|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'holders' }" @click="tab = 'holders'"><c-icon name="users" size="sm" /> Holders {% if holders %}<span class="tcount tnum">{{ holders|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'vesting' }" @click="tab = 'vesting'"><c-icon name="shield-check" size="sm" /> Vesting {% if vesting_rows %}<span class="tcount tnum">{{ vesting_rows|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
@@ -87,6 +88,13 @@
         {% else %}
         <c-empty-state icon="briefcase" title="No holdings yet" text="Record a buy (or an opening / existing holding) in the register to build positions." />
         {% endif %}
+      </c-card>
+    </div>
+
+    {# PERFORMANCE #}
+    <div x-show="tab === 'performance'" x-cloak>
+      <c-card flush>
+        {% include "investments/partials/performance_table.html" with rows=performance.rows totals=performance.totals acct=account sym=account.currency.symbol dp=account.currency.decimal_places %}
       </c-card>
     </div>
 

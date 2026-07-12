@@ -61,6 +61,7 @@ from apps.investments.services import (
     register,
     remove_transaction,
     repool_security,
+    security_performance,
     sync_holder_p2o,
     unvested_at_risk_total,
     upcoming_vesting,
@@ -456,6 +457,7 @@ def account_detail(request, pk):
         contribution_rows=contribution_summary(account) if account.tracks_contribution_year else [],
         limit_status=contribution_limit_status(account),
         income=income_summary(account),
+        performance=security_performance(account),
     )
     return render(request, "investments/account_detail.html", ctx)
 
@@ -512,10 +514,15 @@ def institution_detail(request, org):
     accounts = list(organization.investment_accounts.select_related("currency", "branch"))
     summary = institution_row(organization, accounts)
     donut = donut_segments(allocation(accounts=accounts, by="asset_class"))
+    performance = [
+        {"account": a, "report": security_performance(a)}
+        for a in accounts if a.transactions.exists()
+    ]
     ctx = inv_context(
         request, "institutions",
         organization=organization, summary=summary, accounts=accounts, donut=donut,
-        branches=list(organization.branches.all()), base=base_currency(),
+        branches=list(organization.branches.all()), performance=performance,
+        base=base_currency(),
     )
     return render(request, "investments/institution_detail.html", ctx)
 

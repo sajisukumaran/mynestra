@@ -1386,6 +1386,115 @@ def institution_row(org, accounts=None) -> dict:
     }
 
 
+# --- Per-instrument performance report -------------------------------------------------------
+#
+# Which transaction types feed each performance metric. Acquisitions add to "bought"; sells /
+# in-kind-out add to "sold"; sells + cash-buyouts add to "amount sold"; dividends (incl. reinvested)
+# and cap-gain distributions are income, as is interest (kept separate). Fees + realized gain are
+# summed off every txn's own fields.
+_PERF_ACQUIRE = frozenset({
+    InvTxnType.BUY, InvTxnType.DIVIDEND_REINVEST, InvTxnType.OPENING, InvTxnType.IN_KIND_IN,
+})
+_PERF_DISPOSE_QTY = frozenset({InvTxnType.SELL, InvTxnType.IN_KIND_OUT})
+_PERF_SOLD_AMOUNT = frozenset({InvTxnType.SELL, InvTxnType.CASH_MERGER})
+_PERF_DIVIDEND = frozenset({
+    InvTxnType.DIVIDEND, InvTxnType.DIVIDEND_REINVEST, InvTxnType.CAP_GAIN_DIST,
+})
+
+
+@dataclass
+class PerfRow:
+    """One instrument's performance in an account: lifetime quantities/income/fees + the current
+    position's cost, price and gain. `gain` = realized + unrealized (capital only); `total_return`
+    also folds in income (dividends + interest)."""
+    security: object
+    qty_bought: Decimal
+    qty_sold: Decimal
+    current_qty: Decimal
+    cost_basis: Decimal
+    fees: Decimal
+    dividends: Decimal
+    interest: Decimal
+    amount_sold: Decimal
+    realized: Decimal
+    price: object
+    market_value: Decimal
+    unrealized: Decimal
+    gain: Decimal
+    income: Decimal
+    total_return: Decimal
+
+
+_PERF_MONEY_TOTALS = (
+    "cost_basis", "fees", "dividends", "interest", "amount_sold",
+    "realized", "market_value", "gain", "income", "total_return",
+)
+
+
+def security_performance(account) -> dict:
+    """Per-instrument performance rows for an account + a money-column totals footer. Includes
+    fully-sold instruments (realized gain / amount sold still show), not just current holdings.
+    Read-only — aggregates the register and the open lots; no GL involvement."""
+    agg: dict[int, dict] = {}
+
+    def bucket(security):
+        b = agg.get(security.id)
+        if b is None:
+            b = agg[security.id] = {
+                "security": security, "qty_bought": ZERO, "qty_sold": ZERO, "current_qty": ZERO,
+                "cost_basis": ZERO, "fees": ZERO, "dividends": ZERO, "interest": ZERO,
+                "amount_sold": ZERO, "realized": ZERO,
+            }
+        return b
+
+    for t in account.transactions.filter(security__isnull=False).select_related("security"):
+        b = bucket(t.security)
+        b["fees"] += t.fee
+        b["realized"] += t.realized_gain
+        tt = t.txn_type
+        if tt in _PERF_ACQUIRE:
+            b["qty_bought"] += t.quantity
+        if tt in _PERF_DISPOSE_QTY:
+            b["qty_sold"] += t.quantity
+        if tt in _PERF_SOLD_AMOUNT:
+            b["amount_sold"] += t.amount
+        if tt in _PERF_DIVIDEND:
+            b["dividends"] += t.amount
+        elif tt == InvTxnType.INTEREST:
+            b["interest"] += t.amount
+
+    for lot in account.lots.filter(open=True).select_related("security"):
+        b = bucket(lot.security)
+        b["current_qty"] += lot.remaining_quantity
+        b["cost_basis"] += lot.cost_basis
+
+    rows: list[PerfRow] = []
+    totals = dict.fromkeys(_PERF_MONEY_TOTALS, ZERO)
+    for b in agg.values():
+        sec = b["security"]
+        price = sec.latest_price
+        qty = _q_qty(b["current_qty"])
+        cost = _q_amount(b["cost_basis"])
+        mv = _q_amount(qty * price) if price is not None else cost
+        realized = _q_amount(b["realized"])
+        unrealized = _q_amount(mv - cost)
+        gain = _q_amount(realized + unrealized)
+        income = _q_amount(b["dividends"] + b["interest"])
+        row = PerfRow(
+            security=sec, qty_bought=_q_qty(b["qty_bought"]), qty_sold=_q_qty(b["qty_sold"]),
+            current_qty=qty, cost_basis=cost, fees=_q_amount(b["fees"]),
+            dividends=_q_amount(b["dividends"]), interest=_q_amount(b["interest"]),
+            amount_sold=_q_amount(b["amount_sold"]), realized=realized, price=price,
+            market_value=mv, unrealized=unrealized, gain=gain, income=income,
+            total_return=_q_amount(gain + income),
+        )
+        rows.append(row)
+        for k in _PERF_MONEY_TOTALS:
+            totals[k] += getattr(row, k)
+    rows.sort(key=lambda r: (r.market_value, r.total_return), reverse=True)
+    return {"rows": rows, "totals": {k: _q_amount(v) for k, v in totals.items()}}
+
+
 def income_summary(account) -> dict:
     """Income collected in an account — dividends (incl. reinvested) + interest + capital-gain
     distributions — grouped by the year received (transaction date), newest first, plus the lifetime

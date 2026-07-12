@@ -49,6 +49,13 @@
     </div>
   </c-card>
 
+  <div x-data="{ tab: 'overview' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="layout-grid" size="sm" /> Overview</button>
+      <button type="button" class="tab" :class="{ active: tab === 'performance' }" @click="tab = 'performance'"><c-icon name="trending-up" size="sm" /> Performance {% if performance %}<span class="tcount tnum">{{ performance|length }}</span>{% endif %}</button>
+    </c-tabs>
+
+    <div x-show="tab === 'overview'" class="stack-20">
   <div class="grid-2">
     {# Allocation over this institution's holdings #}
     <c-card icon="pie-chart" title="Allocation">
@@ -118,5 +125,23 @@
       {% endif %}
     </c-card>
   </div>
+    </div>{# /overview #}
+
+    <div x-show="tab === 'performance'" x-cloak class="stack-20">
+      {% for p in performance %}
+      <div class="stack stack-16">
+        <div class="between">
+          <a class="eyebrow" href="{{ ui_tenant_url }}investments/accounts/{{ p.account.pk }}/">{{ p.account.nickname }}</a>
+          <c-badge>{{ p.account.registration_label }}</c-badge>
+        </div>
+        <c-card flush>
+          {% include "investments/partials/performance_table.html" with rows=p.report.rows totals=p.report.totals acct=p.account sym=p.account.currency.symbol dp=p.account.currency.decimal_places %}
+        </c-card>
+      </div>
+      {% empty %}
+      <c-empty-state icon="trending-up" title="No activity yet" text="Add accounts and record buys, dividends and sells to see performance." />
+      {% endfor %}
+    </div>
+  </div>{# /tabs #}
 </div>
 {% endblock %}
