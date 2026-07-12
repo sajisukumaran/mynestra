@@ -128,11 +128,12 @@ docker compose -f compose.prod.yaml exec web python manage.py migrate_schemas
 
 ## Daily end-of-day price fetch
 
-The `cron` sidecar in `compose.prod.yaml` (pinned [Ofelia](https://github.com/mcuadros/ofelia)) fires
-once a day and exec-s `python manage.py fetch_eod_prices` **inside the running web container**, so it
-runs with the exact prod env. The schedule lives in labels on the `web` service
-(`0 10 23 * * 1-5` = 23:10 UTC on weekdays — after the US close year-round; edit the hour for your
-market/timezone). Ofelia needs the Docker socket mounted **read-only** to exec.
+The `cron` sidecar in `compose.prod.yaml` is a small **self-contained Python scheduler** (`manage.py
+price_cron`) that reuses the built `mynestra-web:prod` image — same env + DB reach, no external
+image, no Docker socket, no host cron (chosen deliberately: the host runs SELinux). It sleeps until
+the target time, runs `fetch_eod_prices`, and repeats. The schedule is the sidecar's `command`
+(`--hour 23 --minute 10` = 23:10 UTC on weekdays, after the US close year-round; edit it for your
+market/timezone). Restart-safe — it recomputes the next run on restart, and the fetch is idempotent.
 
 The command upserts a `SecurityPrice` per auto-tracked security across every tenant. It is idempotent
 (the `(security, as_of)` unique constraint), so a double-fire / weekend / holiday just overwrites the

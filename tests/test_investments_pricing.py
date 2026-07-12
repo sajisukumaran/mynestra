@@ -11,6 +11,7 @@ from django_tenants.utils import schema_context
 
 from apps.finance.models import Currency
 from apps.investments import pricing
+from apps.investments.management.commands.price_cron import next_run
 from apps.investments.models import Security
 
 D = Decimal
@@ -64,6 +65,38 @@ def test_keyed_provider_without_key_raises(settings):
     settings.INVESTMENTS_PRICE_API_KEY = ""
     with pytest.raises(pricing.PriceError):
         pricing.alphavantage_fetch("AAPL")
+
+
+# --- Scheduler next-run logic (pure) ---------------------------------------------------------
+
+def _first_weekday(start):
+    d = start
+    while d.weekday() >= 5:
+        d += datetime.timedelta(days=1)
+    return d
+
+
+def test_next_run_same_day_when_time_is_ahead():
+    d = _first_weekday(datetime.datetime(2026, 7, 6, 9, 0))
+    nxt = next_run(d, 23, 10)
+    assert nxt.date() == d.date()  # later the same weekday
+    assert (nxt.hour, nxt.minute, nxt.second) == (23, 10, 0)
+
+
+def test_next_run_rolls_forward_when_time_passed():
+    d = _first_weekday(datetime.datetime(2026, 7, 6, 9, 0)).replace(hour=23, minute=30)
+    nxt = next_run(d, 23, 10)
+    assert nxt > d
+    assert nxt.weekday() < 5
+    assert nxt.date() > d.date()
+
+
+def test_next_run_skips_the_weekend():
+    saturday = datetime.datetime(2026, 7, 6, 12, 0)
+    while saturday.weekday() != 5:
+        saturday += datetime.timedelta(days=1)
+    nxt = next_run(saturday, 23, 10)
+    assert nxt.weekday() == 0  # Monday
 
 
 # --- The command (DB + mocked HTTP) ----------------------------------------------------------
