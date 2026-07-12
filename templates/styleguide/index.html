@@ -215,6 +215,10 @@
           <p class="muted stack-8">Breakdown bars (c-bar-list) — proportion of a total.</p>
           <c-bar-list :items="bar_items" :total="bar_total" symbol="$" dp="0" />
         </div>
+        <div>
+          <p class="muted stack-8">Value over time (c-line-chart) — market vs. invested, shaded gain band; server-rendered SVG, theme- + palette-aware, no JS.</p>
+          <c-line-chart :geo="line_geo" :market="line_market" :invested="line_invested" :gain="line_gain" symbol="$" dp="0" />
+        </div>
       </div>
     </c-card>
 

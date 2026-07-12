@@ -30,11 +30,13 @@ def styleguide(request):
     if not settings.DEBUG:
         raise Http404()
 
-    # Static demo data for the data-viz components (c-donut / c-bar-list). Uses the real
-    # donut_segments helper so the gallery exercises the same arc math the dashboard does.
+    # Static demo data for the data-viz components (c-donut / c-bar-list / c-line-chart). Uses the
+    # real donut_segments / line_chart_points helpers so the gallery exercises the same math the
+    # dashboard does.
+    import datetime
     from decimal import Decimal
 
-    from apps.investments.services import Slice, donut_segments
+    from apps.investments.services import Slice, donut_segments, line_chart_points
 
     demo_slices = [
         Slice("Equity", Decimal("62000"), "teal"),
@@ -48,10 +50,27 @@ def styleguide(request):
         {"label": "Vanguard", "value": Decimal("31000"), "tint": "violet"},
         {"label": "Schwab", "value": Decimal("15000"), "tint": "emerald"},
     ]
+    # (date, invested, market) samples — the same shape services.value_over_time returns.
+    line_series = [
+        (datetime.date(2026, 1, 1), Decimal("40000"), Decimal("40000")),
+        (datetime.date(2026, 2, 1), Decimal("42000"), Decimal("43500")),
+        (datetime.date(2026, 3, 1), Decimal("42000"), Decimal("41800")),
+        (datetime.date(2026, 4, 1), Decimal("47000"), Decimal("49200")),
+        (datetime.date(2026, 5, 1), Decimal("47000"), Decimal("52100")),
+        (datetime.date(2026, 6, 1), Decimal("50000"), Decimal("56400")),
+    ]
+    line_vals = [v for _, inv, mkt in line_series for v in (inv, mkt)]
     context = {
         "donut_segments": donut_segments(demo_slices),
         "donut_total": demo_total,
         "bar_items": bar_items,
         "bar_total": sum((b["value"] for b in bar_items), Decimal("0")),
+        "line_geo": line_chart_points(
+            line_series, min_v=min(line_vals), max_v=max(line_vals),
+            start=line_series[0][0], end=line_series[-1][0],
+        ),
+        "line_market": line_series[-1][2],
+        "line_invested": line_series[-1][1],
+        "line_gain": line_series[-1][2] - line_series[-1][1],
     }
     return render(request, "styleguide/index.html", context)

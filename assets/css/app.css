@@ -439,6 +439,25 @@ img { max-width:100%; display:block; }
 .bar-fill { height:100%; border-radius:999px; background:var(--c); max-width:100%;
   transition:width .3s ease; }
 
+/* Line chart (c-line-chart) — value over time. Two lines (market = accent, invested = subtle
+   dashed) with a shaded gain band; server-precomputed SVG, theme- + palette-aware, no JS. */
+.chart { display:flex; flex-direction:column; gap:10px; }
+.chart-legend { display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  font-size:var(--fs-sm); color:var(--text-muted); }
+.chart-key { display:inline-flex; align-items:center; gap:6px; }
+.chart-key b { color:var(--text); font-weight:600; font-variant-numeric:tabular-nums; }
+.chart-dot { width:10px; height:10px; border-radius:3px; flex:none; }
+.chart-dot-market { background:var(--accent); }
+.chart-dot-invested { background:var(--text-subtle); }
+.chart-svg { width:100%; height:200px; display:block; }
+.chart-grid { stroke:var(--border); stroke-width:1; }
+.chart-area { fill:var(--accent-soft); stroke:none; }
+.chart-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+.chart-market { stroke:var(--accent); }
+.chart-invested { stroke:var(--text-subtle); stroke-dasharray:4 3; }
+.chart-axis { display:flex; justify-content:space-between;
+  font-size:var(--fs-xs); color:var(--text-subtle); font-variant-numeric:tabular-nums; }
+
 /* Money — right-aligned tabular figures; negatives in danger + parentheses (accounting style). */
 .amount { font-variant-numeric:tabular-nums; white-space:nowrap; }
 .amount-neg { color:var(--danger); }
