@@ -20,6 +20,7 @@ from apps.investments.services import (
     ensure_gl_account,
     income_summary,
     repool_security,
+    transfer_totals,
 )
 from apps.organizations.models import Organization
 from apps.setup.models import Category
@@ -197,3 +198,45 @@ def test_account_detail_renders_income_collected(make_tenant, make_user, client)
     client.force_login(owner)
     body = client.get(_url(tenant, f"accounts/{acct.pk}/")).content.decode()
     assert "Income collected" in body
+
+
+# --- Transfer totals ------------------------------------------------------------------------
+
+def test_transfer_totals_sum_in_and_out(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct, sec = _setup()
+        InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.TRANSFER_IN, date=JAN, amount=D("1000"))
+        InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.TRANSFER_IN, date=FEB, amount=D("500"))
+        InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.TRANSFER_OUT, date=MAR, amount=D("300"))
+        # A contribution is money in but NOT a transfer — excluded.
+        InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.CONTRIBUTION, date=MAR, amount=D("9999"))
+
+        totals = transfer_totals(acct)
+        assert totals["transfer_in"] == D("1500")
+        assert totals["transfer_out"] == D("300")
+
+
+def test_transfer_totals_zero_when_none(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct, sec = _setup()
+        totals = transfer_totals(acct)
+        assert totals["transfer_in"] == D("0")
+        assert totals["transfer_out"] == D("0")
+
+
+def test_account_detail_renders_transfer_totals(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        acct, sec = _setup()
+        InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.TRANSFER_IN, date=JAN, amount=D("1000"))
+        InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.TRANSFER_OUT, date=MAR, amount=D("300"))
+    client.force_login(owner)
+    body = client.get(_url(tenant, f"accounts/{acct.pk}/")).content.decode()
+    assert "transferred in" in body
+    assert "transferred out" in body

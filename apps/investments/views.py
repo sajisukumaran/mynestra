@@ -63,6 +63,7 @@ from apps.investments.services import (
     repool_security,
     security_performance,
     sync_holder_p2o,
+    transfer_totals,
     unvested_at_risk_total,
     upcoming_vesting,
     value_over_time,
@@ -457,6 +458,7 @@ def account_detail(request, pk):
         contribution_rows=contribution_summary(account) if account.tracks_contribution_year else [],
         limit_status=contribution_limit_status(account),
         income=income_summary(account),
+        transfers=transfer_totals(account),
         performance=security_performance(account),
     )
     return render(request, "investments/account_detail.html", ctx)

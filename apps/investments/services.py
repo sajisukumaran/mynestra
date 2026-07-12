@@ -1515,6 +1515,21 @@ def income_summary(account) -> dict:
     }
 
 
+def transfer_totals(account) -> dict:
+    """Total cash moved into / out of the account via tracked-bank transfers (TRANSFER_IN /
+    TRANSFER_OUT). Read-only rollup; no GL involvement."""
+    agg = (
+        account.transactions
+        .filter(txn_type__in=[InvTxnType.TRANSFER_IN, InvTxnType.TRANSFER_OUT])
+        .values("txn_type").annotate(total=Sum("amount"))
+    )
+    by_type = {r["txn_type"]: _q_amount(r["total"] or ZERO) for r in agg}
+    return {
+        "transfer_in": by_type.get(InvTxnType.TRANSFER_IN, ZERO),
+        "transfer_out": by_type.get(InvTxnType.TRANSFER_OUT, ZERO),
+    }
+
+
 def contribution_limit_status(account, as_of=None):
     """Per-tax-year progress against the shared annual IRS limit for an IRA/HSA account. `used` is
     aggregated across the primary holder's accounts in the same category (a person's IRAs share ONE

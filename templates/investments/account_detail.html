@@ -27,6 +27,8 @@
           <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><c-money :amount="account.cash_balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> cash</span>
           <span class="row"><c-icon name="percent" size="sm" class="subtle" />{% if account.unrealized_gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="account.unrealized_gain" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> unrealized</span>
           {% if income.has_income %}<span class="row"><c-icon name="coins" size="sm" class="subtle" /><c-money :amount="income.total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> income</span>{% endif %}
+          {% if transfers.transfer_in %}<span class="row"><c-icon name="arrow-down" size="sm" class="subtle" /><c-money :amount="transfers.transfer_in" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> transferred in</span>{% endif %}
+          {% if transfers.transfer_out %}<span class="row"><c-icon name="arrow-up" size="sm" class="subtle" /><c-money :amount="transfers.transfer_out" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /> transferred out</span>{% endif %}
         </div>
       </div>
       <div class="row">
