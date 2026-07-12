@@ -33,6 +33,8 @@ from apps.investments.services import (
     value_over_time,
 )
 from apps.organizations.models import Organization
+from apps.setup.models import Category
+from apps.tenants.models import Membership, Role
 
 D = Decimal
 JAN = datetime.date(2026, 1, 2)
@@ -276,3 +278,58 @@ def test_geometry_is_well_formed(make_tenant):
         assert geo["gain_area_d"].startswith("M ") and geo["gain_area_d"].endswith("Z")
         assert geo["market_points"] and geo["invested_points"]
         assert len(geo["y_ticks"]) == 3 and len(geo["x_ticks"]) == 3
+
+
+# --- Dashboard card + htmx range fragment (the view uses the real clock) ----------------------
+
+def _owner(make_tenant, make_user, name="Bourse", email="owner@example.com"):
+    tenant = make_tenant(name=name)
+    owner = make_user(email)
+    Membership.objects.create(user=owner, tenant=tenant, role=Role.OWNER)
+    return tenant, owner
+
+
+def _brokerage(name="Fidelity"):
+    org = Organization.objects.create(name=name)
+    org.categories.add(Category.objects.get(kind="ORG", name="Brokerage"))
+    return org
+
+
+def _url(tenant, path=""):
+    return f"/t/{tenant.schema_name}/investments/{path}"
+
+
+def _seed_history(org):
+    """A small priced portfolio dated relative to today (view uses the real clock)."""
+    t = datetime.date.today()
+    acct = _account(org=org)
+    a = _sec("AAA")
+    _add(acct, InvTxnType.OPENING, t - datetime.timedelta(days=200), amount="10000")
+    _add(acct, InvTxnType.BUY, t - datetime.timedelta(days=150), security=a,
+         qty="10", price="50", amount="500")
+    _price(a, t - datetime.timedelta(days=100), "70")
+    return acct
+
+
+def test_dashboard_renders_value_chart(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _seed_history(_brokerage())
+    client.force_login(owner)
+    resp = client.get(_url(tenant, ""))
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'id="value-chart"' in body
+    assert "chart-svg" in body                         # chart rendered (>1 point in the 1Y window)
+    assert "value-over-time/?range=3M" in body         # range toggle wired
+
+
+def test_value_over_time_fragment_switches_range(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _seed_history(_brokerage())
+    client.force_login(owner)
+    for rng in ("3M", "1Y", "ALL"):
+        resp = client.get(_url(tenant, "value-over-time/") + f"?range={rng}")
+        assert resp.status_code == 200
+        assert 'id="value-chart"' in resp.content.decode()

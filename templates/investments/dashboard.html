@@ -37,6 +37,11 @@
     {% endif %}
   </div>
 
+  {# ---- Portfolio value over time ---- #}
+  <c-card icon="trending-up" title="Portfolio value">
+    {% include "investments/partials/value_chart.html" %}
+  </c-card>
+
   {# ---- Allocation + breakdown ---- #}
   <div class="grid-2">
     <c-card icon="pie-chart" title="Allocation">

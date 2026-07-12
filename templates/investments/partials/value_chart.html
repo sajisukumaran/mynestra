@@ -1,0 +1,15 @@
+{% comment %}Value-over-time chart + range toggle. Rendered on the dashboard and re-rendered (whole
+`#value-chart` swapped) by the htmx range chips. Needs: ranges, range, line_geo, line_market,
+line_invested, line_gain, base.{% endcomment %}
+<div id="value-chart" class="stack stack-12">
+  <div class="row" style="gap:8px;">
+    {% for key, label in ranges %}
+    <c-filter-chip :active="key == range"
+                   hx-get="{{ ui_tenant_url }}investments/value-over-time/?range={{ key }}"
+                   hx-target="#value-chart" hx-swap="outerHTML">{{ label }}</c-filter-chip>
+    {% endfor %}
+  </div>
+  <c-line-chart :geo="line_geo" :market="line_market" :invested="line_invested" :gain="line_gain"
+                symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}"
+                empty_text="Value over time appears once you have transactions and prices." />
+</div>

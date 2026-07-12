@@ -49,11 +49,13 @@ from apps.investments.services import (
     donut_segments,
     ensure_gl_account,
     holdings,
+    line_chart_points,
     register,
     remove_transaction,
     sync_holder_p2o,
     unvested_at_risk_total,
     upcoming_vesting,
+    value_over_time,
     vesting_summary,
 )
 from apps.organizations.models import Branch, Organization
@@ -147,6 +149,29 @@ def _decimal(raw):
 
 # --- Dashboard ------------------------------------------------------------------------------
 
+VALUE_RANGES = [("3M", "3M"), ("1Y", "1Y"), ("ALL", "All")]
+
+
+def _value_chart_ctx(request, range_key):
+    """Context for the value-over-time chart (shared by the dashboard + the htmx range fragment)."""
+    vot = value_over_time(range_key)
+    geo = line_chart_points(
+        vot["series"], min_v=vot["min"], max_v=vot["max"], start=vot["start"], end=vot["end"]
+    )
+    return {
+        "ranges": VALUE_RANGES, "range": vot["range"], "line_geo": geo,
+        "line_market": vot["last_market"], "line_invested": vot["last_invested"],
+        "line_gain": vot["gain"], "base": base_currency(),
+    }
+
+
+def value_over_time_fragment(request):
+    """htmx fragment: the value chart re-rendered for the chosen range (3M / 1Y / All)."""
+    range_key = request.GET.get("range", "1Y")
+    return render(request, "investments/partials/value_chart.html",
+                  _value_chart_ctx(request, range_key))
+
+
 def dashboard(request):
     stats = dashboard_stats()
     base = base_currency()
@@ -161,6 +186,7 @@ def dashboard(request):
         gain_dir="up" if stats["unrealized"] >= 0 else "down",
         unvested_at_risk=unvested_at_risk_total(), upcoming_vesting=upcoming_vesting(), **stats,
     )
+    ctx.update(_value_chart_ctx(request, "1Y"))  # initial paint (htmx swaps on range change)
     return render(request, "investments/dashboard.html", ctx)
 
 
