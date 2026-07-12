@@ -24,6 +24,7 @@ whose realized gain shifted as a result.
 
 from __future__ import annotations
 
+import bisect
 import datetime
 from dataclasses import dataclass
 from decimal import Decimal
@@ -49,6 +50,7 @@ from apps.investments.models import (
     LotConsumption,
     OptionRight,
     Security,
+    SecurityPrice,
     VestingGrant,
 )
 
@@ -254,7 +256,8 @@ class MemLotStore:
         pass
 
     def open_positions(self):
-        """Aggregate open lots into {security_id: (quantity, cost)} — for as-of-date holdings."""
+        """Aggregate open lots into {security_id: (quantity, cost)} — for as-of-date holdings.
+        Drops fully-flat (0, 0) positions, matching the live `holdings()` read model."""
         out: dict[int, list[Decimal]] = {}
         for lots in self._by_sec.values():
             for lot in lots:
@@ -263,7 +266,12 @@ class MemLotStore:
                 agg = out.setdefault(lot.security_id, [ZERO, ZERO])
                 agg[0] += lot.remaining_quantity
                 agg[1] += lot.cost_basis
-        return {sid: (_q_qty(q), _q_amount(c)) for sid, (q, c) in out.items()}
+        result: dict[int, tuple] = {}
+        for sid, (q, c) in out.items():
+            qq, cc = _q_qty(q), _q_amount(c)
+            if qq != ZERO or cc != ZERO:
+                result[sid] = (qq, cc)
+        return result
 
 
 def _plan_draws(txn, store, security=None, qty=None) -> list[tuple]:
@@ -1416,3 +1424,76 @@ def upcoming_vesting(within_days: int = 365, as_of=None) -> list[dict]:
             out.append({"grant": g, "next": nxt, "unvested_value": g.unvested_value(as_of)})
     out.sort(key=lambda r: r["next"].vest_date)
     return out
+
+
+# --- Value over time (module overlay — never touches the GL) --------------------------------
+#
+# A computed, retroactive time series of portfolio value. The INVESTED/cost line comes free & exact
+# from the GL (`account_balance(gl, as_of=T)`); the MARKET line needs per-security holdings as of a
+# past date, reconstructed by replaying the register against a non-mutating MemLotStore (the SAME
+# engine that produces the live lots — no parallel implementation to drift).
+
+def price_as_of(security, on_date) -> Decimal | None:
+    """The carry-forward mark: the latest manually-entered price on/before `on_date`, else None.
+    Mirrors finance.rate_to_base. For one-off use; batch series use `PriceCarry`."""
+    return (
+        SecurityPrice.objects
+        .filter(security_id=_sid(security), as_of__lte=on_date)
+        .values_list("price", flat=True)
+        .first()  # SecurityPrice Meta ordering is -as_of → latest on/before
+    )
+
+
+class PriceCarry:
+    """Batch carry-forward pricing loaded in a single query: `price_at(security_id, date)` returns
+    the latest price on/before `date` (else None) via bisect over each security's sorted history."""
+
+    def __init__(self, security_ids, *, up_to=None):
+        self._by_sec: dict[int, tuple[list, list]] = {}
+        qs = SecurityPrice.objects.filter(security_id__in=list(security_ids))
+        if up_to is not None:
+            qs = qs.filter(as_of__lte=up_to)
+        for sid, as_of, price in qs.order_by("security_id", "as_of").values_list(
+            "security_id", "as_of", "price"
+        ):
+            dates, prices = self._by_sec.setdefault(sid, ([], []))
+            dates.append(as_of)
+            prices.append(price)
+
+    def price_at(self, security_id, on_date) -> Decimal | None:
+        entry = self._by_sec.get(security_id)
+        if not entry:
+            return None
+        dates, prices = entry
+        i = bisect.bisect_right(dates, on_date)
+        return prices[i - 1] if i else None
+
+
+def position_snapshots(account, dates) -> dict:
+    """Reconstruct `{date: (cash, {security_id: (qty, cost)})}` for `account` at each date, via a
+    non-mutating MemLotStore replay of the register. `cash` = Σ signed_cash over txns with date ≤ d;
+    positions = the open-lot aggregate at d. One ascending pass covers every date. Never writes."""
+    dates = sorted(dates)
+    store = MemLotStore()
+    txns = list(
+        account.transactions.select_related(
+            "security", "security__underlying", "target_security"
+        ).order_by("date", "id")
+    )
+    out: dict = {}
+    cash = ZERO
+    ti = 0
+    n = len(txns)
+    for d in dates:
+        while ti < n and txns[ti].date <= d:
+            txn = txns[ti]
+            cash = _q_amount(cash + txn.signed_cash)
+            _apply_lot_effect(txn, store)
+            ti += 1
+        out[d] = (cash, store.open_positions())
+    return out
+
+
+def positions_as_of(account, on_date) -> tuple:
+    """(cash, {security_id: (qty, cost)}) for `account` as of `on_date` — a single-date snapshot."""
+    return position_snapshots(account, [on_date])[on_date]
