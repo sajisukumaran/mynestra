@@ -39,6 +39,8 @@
       <label class="row">{{ form.is_active }} <span class="muted">Active</span></label>
       <label class="row">{{ form.track_lots }} <span class="muted">Track individual tax lots</span></label>
       <c-hint icon="info">Leave on for stocks, ETFs and funds. Turn <strong>off</strong> for a stable-value money-market fund to pool holdings into a single average-cost position instead of a lot per reinvested dividend.</c-hint>
+      <label class="row">{{ form.track_price }} <span class="muted">Auto-fetch end-of-day price</span></label>
+      <c-hint icon="info">The daily price job pulls a close for this ticker. Turn <strong>off</strong> for money-market funds, CDs or bespoke holdings with no market quote — you can still enter prices by hand.</c-hint>
     </c-card>
 
     <c-card title="Term deposit" icon="calendar-days" x-show="kind === 'cd'" x-cloak>

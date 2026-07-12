@@ -120,6 +120,12 @@ class Security(SoftDeleteModel):
     # either way — the pooled lot's cost is still the whole position's cost.
     track_lots = models.BooleanField(default=True)
 
+    # Auto-fetch this security's end-of-day price (the `fetch_eod_prices` command). On (default) →
+    # the daily job pulls a close for its ticker. Off → skip it (also skipped when it has no symbol,
+    # is inactive, or is a CD / money-market fund — those have no meaningful market quote). Manual
+    # SecurityPrice entry always works regardless.
+    track_price = models.BooleanField(default=True)
+
     is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 

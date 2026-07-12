@@ -71,6 +71,9 @@ EMAIL_PORT=1025
 DEFAULT_FROM_EMAIL=MyNestra <no-reply@mynestra.dockerlab.test>
 ALLOW_HARD_DELETE=0
 TZ=America/New_York
+# EOD price auto-fetch: stooq (keyless, default) · alphavantage · finnhub (keyed) · yfinance.
+PRICE_PROVIDER=stooq
+PRICE_API_KEY=                                         # only for alphavantage / finnhub
 # Optional — flip to true only after the edge serves TLS (adds secure cookies + SSL redirect):
 # SECURE_SSL=false
 ```
@@ -121,6 +124,25 @@ If you ever need to run it by hand — e.g. to migrate before a container restar
 `migrate_schemas` covers every schema (public + all tenants):
 ```sh
 docker compose -f compose.prod.yaml exec web python manage.py migrate_schemas
+```
+
+## Daily end-of-day price fetch
+
+The `cron` sidecar in `compose.prod.yaml` (pinned [Ofelia](https://github.com/mcuadros/ofelia)) fires
+once a day and exec-s `python manage.py fetch_eod_prices` **inside the running web container**, so it
+runs with the exact prod env. The schedule lives in labels on the `web` service
+(`0 10 23 * * 1-5` = 23:10 UTC on weekdays — after the US close year-round; edit the hour for your
+market/timezone). Ofelia needs the Docker socket mounted **read-only** to exec.
+
+The command upserts a `SecurityPrice` per auto-tracked security across every tenant. It is idempotent
+(the `(security, as_of)` unique constraint), so a double-fire / weekend / holiday just overwrites the
+last close. A CD, a money-market fund, a security with no ticker, one that's inactive, or one with
+"Auto-fetch end-of-day price" turned off is skipped — those get manual prices via the UI.
+
+Provider is set by `PRICE_PROVIDER` (+ `PRICE_API_KEY` for the keyed ones). Run it by hand:
+```sh
+docker compose -f compose.prod.yaml exec web python manage.py fetch_eod_prices --dry-run
+docker compose -f compose.prod.yaml exec web python manage.py fetch_eod_prices --symbol AAPL
 ```
 
 ## Verifying / troubleshooting

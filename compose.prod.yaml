@@ -47,7 +47,26 @@ services:
       start_period: 40s
     # `mynestra` reaches db; `edge_network` = the edge proxies to `mynestra-web:8000` + reach `mailpit`.
     networks: [mynestra, edge_network]
+    # Daily EOD price fetch — the `cron` sidecar reads these labels and exec-s the command inside
+    # this running container (so it inherits prod env). 6-field cron (secs first); 23:10 UTC Mon–Fri
+    # is after the US close year-round. Adjust the hour for your market/timezone.
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-exec.eod-prices.schedule: "0 10 23 * * 1-5"
+      ofelia.job-exec.eod-prices.command: "python manage.py fetch_eod_prices"
     # ENTRYPOINT waits for db -> migrate_schemas --shared -> ensure_public_tenant, then runs gunicorn (CMD).
+
+  # Cron sidecar: fires scheduled jobs by exec-ing into labelled containers (here, the web container
+  # above). Pinned Ofelia; needs the Docker socket read-only to exec. No app code runs here.
+  cron:
+    image: mcuadros/ofelia:v0.3.16
+    container_name: mynestra-cron
+    restart: unless-stopped
+    depends_on: [web]
+    command: daemon --docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [mynestra]
 
 volumes:
   pgdata:

@@ -22,7 +22,7 @@ class SecurityForm(forms.ModelForm):
         model = Security
         fields = ["symbol", "name", "kind", "asset_class", "apr", "maturity_date",
                   "underlying", "option_right", "strike", "expiration",
-                  "track_lots", "is_active", "notes"]
+                  "track_lots", "track_price", "is_active", "notes"]
         widgets = {
             "symbol": forms.TextInput(attrs={"placeholder": "e.g. VTI"}),
             "name": forms.TextInput(attrs={"placeholder": "e.g. Vanguard Total Stock Market ETF"}),

@@ -157,3 +157,10 @@ EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
 EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=False)
 DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="MyNestra <no-reply@mynestra.local>")
+
+# --- Investments: end-of-day price auto-fetch ----------------------------
+# The `fetch_eod_prices` command pulls daily closes for auto-tracked securities. Provider is
+# swappable (stooq = keyless default; alphavantage / finnhub = keyed; yfinance = keyless library).
+# Keyed providers read PRICE_API_KEY. Manual price entry always works alongside this.
+INVESTMENTS_PRICE_PROVIDER = env("PRICE_PROVIDER", default="stooq")
+INVESTMENTS_PRICE_API_KEY = env("PRICE_API_KEY", default="")
