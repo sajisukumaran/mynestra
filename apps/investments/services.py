@@ -1497,3 +1497,141 @@ def position_snapshots(account, dates) -> dict:
 def positions_as_of(account, on_date) -> tuple:
     """(cash, {security_id: (qty, cost)}) for `account` as of `on_date` — a single-date snapshot."""
     return position_snapshots(account, [on_date])[on_date]
+
+
+_RANGE_DAYS = {"3M": 90, "1Y": 365}
+
+
+def value_over_time(range_key: str = "1Y", *, accounts=None, today=None) -> dict:
+    """Portfolio value time series over a range (3M / 1Y / ALL), summed across `accounts`. Returns
+    two lines evaluated at each event date (txn or price change): INVESTED = cash + Σ open-lot cost,
+    MARKET = cash + Σ (qty × carry-forward price, or cost when unpriced). Both share the same cash,
+    so their gap is unrealized gain. Base==native currency assumed (as elsewhere in the module).
+
+    Purely computed and read-only — reconstructs holdings via the MemLotStore replay; posts nothing.
+    """
+    today = today or datetime.date.today()
+    range_key = range_key if range_key in ("3M", "1Y", "ALL") else "1Y"
+    if accounts is None:
+        accounts = list(InvestmentAccount.objects.all())
+
+    # Held securities (for pricing) + earliest activity (for the ALL range), one pass per account.
+    held: set[int] = set()
+    earliest = None
+    for acct in accounts:
+        for d, sid in acct.transactions.values_list("date", "security_id"):
+            if sid:
+                held.add(sid)
+            earliest = d if earliest is None or d < earliest else earliest
+
+    if earliest is None:  # empty portfolio — a single flat point at today
+        return {
+            "range": range_key, "start": today, "end": today,
+            "series": [(today, ZERO, ZERO)], "min": ZERO, "max": ZERO,
+            "last_invested": ZERO, "last_market": ZERO, "gain": ZERO,
+        }
+
+    if range_key == "ALL":
+        start = earliest
+    else:
+        start = today - datetime.timedelta(days=_RANGE_DAYS[range_key])
+
+    # Event dates = txn dates + price-change dates within [start, today], + start anchor + today.
+    dates: set[datetime.date] = {start, today}
+    for acct in accounts:
+        for d in acct.transactions.filter(
+            date__gte=start, date__lte=today
+        ).values_list("date", flat=True):
+            dates.add(d)
+    if held:
+        for d in SecurityPrice.objects.filter(
+            security_id__in=held, as_of__gte=start, as_of__lte=today
+        ).values_list("as_of", flat=True):
+            dates.add(d)
+    event_dates = sorted(d for d in dates if start <= d <= today)
+
+    carry = PriceCarry(held, up_to=today)
+    per_account = [position_snapshots(acct, event_dates) for acct in accounts]
+
+    series: list[tuple] = []
+    for d in event_dates:
+        cash = ZERO
+        cost_total = ZERO
+        market_total = ZERO
+        for snaps in per_account:
+            c, positions = snaps[d]
+            cash = _q_amount(cash + c)
+            for sid, (qty, cost_s) in positions.items():
+                cost_total = _q_amount(cost_total + cost_s)
+                price = carry.price_at(sid, d)
+                mv = _q_amount(qty * price) if price is not None else cost_s
+                market_total = _q_amount(market_total + mv)
+        series.append((d, _q_amount(cash + cost_total), _q_amount(cash + market_total)))
+
+    vals = [v for _, inv, mkt in series for v in (inv, mkt)]
+    last = series[-1]
+    return {
+        "range": range_key, "start": start, "end": today, "series": series,
+        "min": min(vals), "max": max(vals),
+        "last_invested": last[1], "last_market": last[2],
+        "gain": _q_amount(last[2] - last[1]),
+    }
+
+
+# Chart geometry (fixed viewBox; templates can't do arithmetic — precompute here, like the donut).
+CHART_W = 640
+CHART_H = 200
+CHART_PAD_X = 8
+CHART_PAD_TOP = 12
+CHART_PAD_BOT = 22
+
+
+def line_chart_points(series, *, min_v, max_v, start, end,
+                      width: int = CHART_W, height: int = CHART_H) -> dict:
+    """Precompute SVG geometry for a two-line value chart: `invested_points`/`market_points` for
+    <polyline>, a `gain_area_d` <path> filling the band between the lines, per-point dots, and axis
+    ticks. Coordinates are pre-formatted (templates do no math). Guards flat/single-point series."""
+    plot_w = width - CHART_PAD_X * 2
+    plot_h = height - CHART_PAD_TOP - CHART_PAD_BOT
+    span = max_v - min_v
+    pad = max(Decimal("1"), _q_amount(span * Decimal("0.08")))
+    y_lo, y_hi = min_v - pad, max_v + pad
+    if y_hi <= y_lo:  # fully flat — give the axis a unit of breathing room
+        y_lo, y_hi = min_v - Decimal("1"), min_v + Decimal("1")
+    total_days = (end - start).days or 1
+    y_range = float(y_hi - y_lo)
+
+    def px(d) -> float:
+        return CHART_PAD_X + float((d - start).days) / total_days * plot_w
+
+    def py(v) -> float:
+        return CHART_PAD_TOP + (float(y_hi) - float(v)) / y_range * plot_h
+
+    inv_coords = [(px(d), py(inv)) for d, inv, _mkt in series]
+    mkt_coords = [(px(d), py(mkt)) for d, _inv, mkt in series]
+    invested_points = " ".join(f"{x:.2f},{y:.2f}" for x, y in inv_coords)
+    market_points = " ".join(f"{x:.2f},{y:.2f}" for x, y in mkt_coords)
+
+    # Gain band: along market forward, back along invested, closed.
+    band = mkt_coords + list(reversed(inv_coords))
+    if band:
+        gain_area_d = "M " + " L ".join(f"{x:.2f},{y:.2f}" for x, y in band) + " Z"
+    else:
+        gain_area_d = ""
+
+    points = [
+        {"date": d, "invested": inv, "market": mkt,
+         "x": round(px(d), 2), "y_inv": round(py(inv), 2), "y_mkt": round(py(mkt), 2)}
+        for d, inv, mkt in series
+    ]
+    mid = start + datetime.timedelta(days=total_days // 2)
+    y_mid = _q_amount((y_hi + y_lo) / 2)
+    return {
+        "invested_points": invested_points,
+        "market_points": market_points,
+        "gain_area_d": gain_area_d,
+        "points": points,
+        "y_ticks": [{"value": v, "y": round(py(v), 2)} for v in (y_hi, y_mid, y_lo)],
+        "x_ticks": [{"date": dt, "x": round(px(dt), 2)} for dt in (start, mid, end)],
+        "width": width, "height": height, "view_box": f"0 0 {width} {height}",
+    }
