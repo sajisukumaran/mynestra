@@ -17,7 +17,7 @@
   <div class="stack stack-20">
 
     <c-card title="Account" icon="briefcase">
-      <div x-data="{ newInst: {% if institutions %}false{% else %}true{% endif %} }">
+      <div x-data="{ newInst: {% if institutions %}false{% else %}true{% endif %}, reg: '{{ account.registration|default:'taxable_individual' }}' }">
         <div class="form-grid">
           <c-field label="Institution" required>
             <div x-show="!newInst" class="stack-8">
@@ -44,10 +44,17 @@
             <div x-show="newInst" x-cloak><div class="control"><input name="new_institution_city" placeholder="City (optional)"></div></div>
           </c-field>
           <c-field label="Registration" required help="Tax type — drives how it groups in your ledger.">
-            <c-select name="registration">
+            <c-select name="registration" @change="reg = $event.target.value">
               {% for val, label in registrations %}<option value="{{ val }}"{% if account.registration == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </c-select>
           </c-field>
+          <div x-show="reg === 'hsa'" x-cloak>
+            <c-field label="HSA coverage" help="Drives which annual contribution limit applies (family is roughly double self-only).">
+              <c-select name="hsa_coverage" :disabled="reg !== 'hsa'">
+                {% for val, label in hsa_coverages %}<option value="{{ val }}"{% if account.hsa_coverage == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              </c-select>
+            </c-field>
+          </div>
           <c-field label="Nickname" required error="{{ form.nickname.errors.0 }}"><div class="control">{{ form.nickname }}</div></c-field>
           <c-field label="Account number"><div class="control">{{ form.number }}</div></c-field>
           <c-field label="Currency" required>

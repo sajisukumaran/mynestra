@@ -28,6 +28,7 @@ from apps.investments.models import (
     SECURITY_TYPES,
     AccountGroup,
     AssetClass,
+    HsaCoverage,
     InvestmentAccount,
     InvestmentAccountHolder,
     InvestmentTransaction,
@@ -46,6 +47,7 @@ from apps.investments.services import (
     POSTING_ACTIVITIES,
     allocation,
     apply_transaction,
+    contribution_limit_status,
     contribution_summary,
     create_matching_leg,
     dashboard_stats,
@@ -347,6 +349,10 @@ def _account_form(request, account, mode):
             account.branch = branch
             account.registration = registration
             account.currency = currency
+            coverage = request.POST.get("hsa_coverage")
+            account.hsa_coverage = (
+                coverage if coverage in HsaCoverage.values else HsaCoverage.SELF_ONLY
+            )
             for field, value in parse_partial_dates(request.POST, "opened", "closed").items():
                 setattr(account, field, value)
             account.save()
@@ -391,6 +397,7 @@ def _account_form(request, account, mode):
         currencies=Currency.objects.filter(is_active=True),
         base=base_currency(),
         registrations=Registration.choices,
+        hsa_coverages=HsaCoverage.choices,
         people=people,
         selected_holders=selected_holders,
         holder_extras=holder_extras,
@@ -445,6 +452,7 @@ def account_detail(request, pk):
         bank_accounts=_bank_accounts(),
         investment_accounts=InvestmentAccount.objects.exclude(pk=account.pk).order_by("nickname"),
         contribution_rows=contribution_summary(account) if account.tracks_contribution_year else [],
+        limit_status=contribution_limit_status(account),
     )
     return render(request, "investments/account_detail.html", ctx)
 

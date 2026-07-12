@@ -165,18 +165,19 @@ def test_contribution_summary_groups_by_year(make_tenant):
 
 
 def test_account_detail_renders_tax_year_ui(make_tenant, make_user, client):
-    """The tax-year select renders for a tracked account, and a tagged contribution shows its
-    chip + the by-year rollup in the register."""
+    """The tax-year select renders for a tracked account, and a tagged contribution shows its chip
+    + the by-year rollup. A 529 has no simple annual limit, so it shows the plain chips (the
+    IRA/HSA limit-meter path is covered in test_investments_contribution_limits)."""
     tenant, owner = _owner(make_tenant, make_user)
     with schema_context(tenant.schema_name):
-        acct = _account("roth_ira")
+        acct = _account("529", "Edu 529")
         InvestmentTransaction.objects.create(
             account=acct, txn_type=InvTxnType.CONTRIBUTION, date="2026-02-01",
             amount=D("6500"), tax_year=2026)
     client.force_login(owner)
     body = client.get(_url(tenant, f"accounts/{acct.pk}/")).content.decode()
     assert "Contribution tax year" in body       # form field renders
-    assert "Contributions by tax year" in body   # rollup strip renders
+    assert "Contributions by tax year" in body   # plain by-year chips (no limit for 529)
     assert "TY 2026" in body                      # register chip
 
 

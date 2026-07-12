@@ -1345,6 +1345,83 @@ def institution_row(org, accounts=None) -> dict:
     }
 
 
+def contribution_limit_status(account, as_of=None):
+    """Per-tax-year progress against the shared annual IRS limit for an IRA/HSA account. `used` is
+    aggregated across the primary holder's accounts in the same category (a person's IRAs share ONE
+    cap; HSAs are per person), catch-up is applied from the holder's birth year (50+ IRA / 55+ HSA),
+    and the HSA limit follows this account's self/family coverage. Returns None for accounts with no
+    simple annual limit (SEP/SIMPLE/529/taxable) — the plain by-year rollup covers those. Pure read
+    — attribution metadata only, no GL."""
+    from apps.investments.models import (
+        CONTRIBUTION_LIMITS,
+        CONTRIBUTION_TAX_YEAR_TYPES,
+        HSA_CATCHUP_AGE,
+        IRA_CATCHUP_AGE,
+        IRA_LIMIT_REGISTRATIONS,
+        HsaCoverage,
+        Registration,
+    )
+
+    category = account.contribution_limit_category
+    if category is None:
+        return None
+    as_of = as_of or datetime.date.today()
+
+    # Whose limit is it, and which accounts share it? (An IRA/HSA is single-owner.)
+    holder = account.holders.filter(is_primary=True).first() or account.holders.first()
+    person = holder.person if holder else None
+    regs = IRA_LIMIT_REGISTRATIONS if category == "ira" else frozenset({Registration.HSA})
+    shared = InvestmentAccount.objects.filter(registration__in=regs)
+    shared = shared.filter(holders__person=person).distinct() if person else shared.filter(
+        pk=account.pk)
+    acct_ids = list(shared.values_list("pk", flat=True))
+
+    agg = (
+        InvestmentTransaction.objects
+        .filter(account_id__in=acct_ids, tax_year__isnull=False,
+                txn_type__in=CONTRIBUTION_TAX_YEAR_TYPES)
+        .values("tax_year").annotate(total=Sum("amount"))
+    )
+    used_by_year = {r["tax_year"]: _q_amount(r["total"] or ZERO) for r in agg}
+    this_by_year = {r["year"]: r["total"] for r in contribution_summary(account)}
+    catch_age = IRA_CATCHUP_AGE if category == "ira" else HSA_CATCHUP_AGE
+
+    rows = []
+    for year in sorted(set(used_by_year) | {as_of.year}, reverse=True):
+        used = used_by_year.get(year, ZERO)
+        limits = CONTRIBUTION_LIMITS.get(year)
+        if limits is None:  # unknown year — show the total with no bar
+            rows.append({"year": year, "used": used, "limit": None,
+                         "this_account": _q_amount(this_by_year.get(year, ZERO))})
+            continue
+        if category == "ira":
+            base, catchup = limits["ira"], limits["ira_catchup"]
+        else:
+            base = limits["hsa_family" if account.hsa_coverage == HsaCoverage.FAMILY
+                          else "hsa_self"]
+            catchup = limits["hsa_catchup"]
+        eligible = bool(person and person.dob_year and (year - person.dob_year) >= catch_age)
+        limit = base + (catchup if eligible else ZERO)
+        pct = int(min(used / limit * 100, 100)) if limit else 0
+        rows.append({
+            "year": year, "used": used, "limit": limit,
+            "catch_up": catchup if eligible else ZERO,
+            "remaining": _q_amount(limit - used) if used < limit else ZERO,
+            "over_by": _q_amount(used - limit) if used > limit else ZERO,
+            "pct": pct, "over": used > limit,
+            "this_account": _q_amount(this_by_year.get(year, ZERO)),
+        })
+
+    return {
+        "category": category,
+        "category_label": "IRA" if category == "ira" else "HSA",
+        "person": person,
+        "coverage_label": account.get_hsa_coverage_display() if category == "hsa" else "",
+        "account_count": len(acct_ids),
+        "rows": rows,
+    }
+
+
 def total_portfolio_value() -> Decimal:
     """Total market value (securities + cash) across every account — base/native assumed equal."""
     return _q_amount(sum((a.total_value for a in InvestmentAccount.objects.all()), ZERO))

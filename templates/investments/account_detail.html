@@ -106,7 +106,32 @@
           </c-modal>
         </div>
 
-        {% if contribution_rows %}
+        {% if limit_status %}
+        <c-card>
+          <div class="stack-16">
+            <div>
+              <span class="eyebrow">{% if limit_status.person %}{{ limit_status.person.display_name }} · {% endif %}{{ limit_status.category_label }} contribution limits</span>
+              {% if limit_status.coverage_label %}<span class="subtle"> · {{ limit_status.coverage_label }} coverage</span>{% endif %}
+            </div>
+            {% for r in limit_status.rows %}
+            <div class="meter">
+              <div class="meter-label">
+                <span class="strong">TY {{ r.year }}</span>
+                <span>{% if r.limit %}<c-money :amount="r.used" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> of <c-money :amount="r.limit" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}<c-money :amount="r.used" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> · no set limit{% endif %}</span>
+              </div>
+              {% if r.limit %}
+              <div class="meter-track"><div class="meter-fill{% if r.over %} meter-danger{% elif r.pct >= 100 %} meter-success{% endif %}" style="width:{{ r.pct }}%"></div></div>
+              <div class="meter-label">
+                <span class="subtle">{% if r.over %}Over by <c-money :amount="r.over_by" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% elif r.remaining %}<c-money :amount="r.remaining" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> left{% else %}Fully used{% endif %}{% if r.catch_up %} · incl. <c-money :amount="r.catch_up" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> catch-up{% endif %}</span>
+                {% if limit_status.account_count > 1 %}<span class="subtle">across {{ limit_status.account_count }} accounts · here <c-money :amount="r.this_account" symbol="{{ account.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span>{% endif %}
+              </div>
+              {% endif %}
+            </div>
+            {% endfor %}
+            <c-hint icon="info">Annual IRS limit{% if limit_status.category == 'ira' %}, shared across your Traditional, Roth &amp; Rollover IRAs{% endif %} — verify against current-year IRS figures.</c-hint>
+          </div>
+        </c-card>
+        {% elif contribution_rows %}
         <c-card>
           <div class="stack-8">
             <span class="eyebrow">Contributions by tax year</span>

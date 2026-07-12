@@ -268,6 +268,38 @@ CONTRIBUTION_YEAR_REGISTRATIONS = frozenset({
     Registration.ESA_529,
 })
 
+# Registrations that share the single annual IRA contribution limit — a person's Traditional + Roth
+# + Rollover IRAs draw against ONE aggregate cap. SEP/SIMPLE have their own compensation/deferral
+# limits and 529 has no federal annual limit, so those get no limit bar (just the by-year rollup).
+IRA_LIMIT_REGISTRATIONS = frozenset({
+    Registration.TRADITIONAL_IRA, Registration.ROTH_IRA, Registration.ROLLOVER_IRA,
+})
+
+# IRS annual contribution limits by tax year. VERIFY / UPDATE ANNUALLY — IRA: Pub 590-A; HSA:
+# Rev. Proc. (Pub 969). A year absent here renders contributions with no limit bar (graceful).
+# Catch-up applies from the holder's birth year: IRA at 50+, HSA at 55+.
+CONTRIBUTION_LIMITS = {
+    2023: {"ira": Decimal("6500"), "ira_catchup": Decimal("1000"),
+           "hsa_self": Decimal("3850"), "hsa_family": Decimal("7750"),
+           "hsa_catchup": Decimal("1000")},
+    2024: {"ira": Decimal("7000"), "ira_catchup": Decimal("1000"),
+           "hsa_self": Decimal("4150"), "hsa_family": Decimal("8300"),
+           "hsa_catchup": Decimal("1000")},
+    2025: {"ira": Decimal("7000"), "ira_catchup": Decimal("1000"),
+           "hsa_self": Decimal("4300"), "hsa_family": Decimal("8550"),
+           "hsa_catchup": Decimal("1000")},
+    2026: {"ira": Decimal("7500"), "ira_catchup": Decimal("1100"),
+           "hsa_self": Decimal("4400"), "hsa_family": Decimal("8750"),
+           "hsa_catchup": Decimal("1000")},
+}
+IRA_CATCHUP_AGE = 50
+HSA_CATCHUP_AGE = 55
+
+
+class HsaCoverage(models.TextChoices):
+    SELF_ONLY = "self_only", "Self-only"
+    FAMILY = "family", "Family"
+
 
 class InvestmentAccount(SoftDeleteModel):
     """A household investment account at an institution (Fidelity, Vanguard, …). Its balance lives
@@ -288,6 +320,11 @@ class InvestmentAccount(SoftDeleteModel):
     number = models.CharField(max_length=40, blank=True)  # displayed masked
     registration = models.CharField(
         max_length=20, choices=Registration.choices, default=Registration.TAXABLE_INDIVIDUAL
+    )
+    # HSA coverage tier (only meaningful when registration == HSA) — drives which annual HSA
+    # contribution limit applies (family is roughly double self-only).
+    hsa_coverage = models.CharField(
+        max_length=10, choices=HsaCoverage.choices, default=HsaCoverage.SELF_ONLY, blank=True
     )
     currency = models.ForeignKey("finance.Currency", on_delete=models.PROTECT, related_name="+")
 
@@ -350,6 +387,16 @@ class InvestmentAccount(SoftDeleteModel):
         """IRA / HSA / 529 accounts attribute contributions to a specific tax year (prior-year
         contributions allowed until the filing deadline)."""
         return self.registration in CONTRIBUTION_YEAR_REGISTRATIONS
+
+    @property
+    def contribution_limit_category(self) -> str | None:
+        """Which shared annual IRS limit this account draws against: 'ira' (Traditional / Roth /
+        Rollover share one cap), 'hsa', or None (SEP/SIMPLE/529/taxable get no limit bar)."""
+        if self.registration in IRA_LIMIT_REGISTRATIONS:
+            return "ira"
+        if self.registration == Registration.HSA:
+            return "hsa"
+        return None
 
     # -- GL delegators (base currency; the account at cost) --
 
