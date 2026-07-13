@@ -1,0 +1,199 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}{% if mode == 'create' %}New bill{% else %}Edit {{ bill.bill_number }}{% endif %}{% endblock %}
+
+{% block pay %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/bills/">Bills</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}payables/bills/{{ bill.pk }}/">{{ bill.bill_number }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New bill{% else %}Edit {{ bill.bill_number }}{% endif %}" subtitle="Posts on save — a vendor bill you owe (accrual)." />
+
+<form method="post" x-data="billForm()">{% csrf_token %}
+  <div class="stack stack-20">
+    {# ---- Vendor ---- #}
+    {% if mode == 'create' %}
+    <c-card title="Vendor" icon="building-2">
+      <div class="stack-8">
+        <label class="search"><c-icon name="search" size="sm" />
+          <input type="search" name="q" placeholder="Search people &amp; organizations…"
+                 @keydown.enter.prevent
+                 hx-get="{{ ui_tenant_url }}payables/vendor-search/"
+                 hx-trigger="input changed delay:200ms, focus" hx-target="#vendor-results"></label>
+        <div id="vendor-results"></div>
+        <div x-show="picked.id" x-cloak class="rel-preview">
+          <span>Vendor: <span class="strong" x-text="picked.name"></span></span>
+          <c-button type="button" size="sm" variant="ghost" @click="picked={kind:'',id:'',name:''}">Clear</c-button>
+        </div>
+      </div>
+      <label class="row"><input type="checkbox" x-model="newVendor"> <span class="muted">…or add a brand-new vendor organization</span></label>
+      <div x-show="newVendor" x-cloak>
+        <c-field label="New vendor name"><input class="control" x-model="newName" placeholder="e.g. Acme Supplies"></c-field>
+      </div>
+      <input type="hidden" name="party_kind" :value="newVendor ? '' : picked.kind">
+      <input type="hidden" name="party_id" :value="newVendor ? '' : picked.id">
+      <input type="hidden" name="new_vendor_name" :value="newVendor ? newName : ''">
+    </c-card>
+    {% else %}
+    <c-card title="Vendor" icon="building-2">
+      <div class="person-cell"><c-avatar tint="{{ bill.vendor_tint }}" size="sm" {% if bill.vendor_kind == 'organization' %}square{% endif %}>{{ bill.vendor_initials }}</c-avatar><div class="pc-name">{{ bill.vendor_name }}</div></div>
+    </c-card>
+    {% endif %}
+
+    {# ---- Bill details ---- #}
+    <c-card title="Bill details" icon="file-text">
+      <div class="form-grid">
+        <c-field label="Vendor reference" help="The vendor's own invoice number.">
+          <c-input name="vendor_ref" value="{{ bill.vendor_ref }}" maxlength="80" />
+        </c-field>
+        <c-field label="Bill date" required>
+          <input type="date" class="control" name="bill_date" value="{{ bill.bill_date|date:'Y-m-d' }}" required>
+        </c-field>
+        <c-field label="Payment term">
+          <c-select name="terms">
+            <option value="">— None —</option>
+            {% for t in terms %}<option value="{{ t.pk }}"{% if bill.terms_id == t.pk %} selected{% endif %}>{{ t.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Due date" help="Auto-computed from the term if left blank.">
+          <input type="date" class="control" name="due_date" value="{{ bill.due_date|date:'Y-m-d' }}">
+        </c-field>
+        <c-field label="Currency">
+          <c-select name="currency">
+            <option value="">— Household default —</option>
+            {% for c in currencies %}<option value="{{ c.code }}"{% if bill.currency_id == c.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+    </c-card>
+
+    {# ---- Line items ---- #}
+    <c-card title="Line items" icon="tag">
+      <div class="stack-8">
+        <label class="search"><c-icon name="search" size="sm" />
+          <input type="search" name="item_q" placeholder="Search an item by name, UPC or SKU to add it…"
+                 @keydown.enter.prevent
+                 hx-get="{{ ui_tenant_url }}payables/item-search/"
+                 hx-trigger="input changed delay:200ms, focus" hx-target="#item-results"></label>
+        <div id="item-results"></div>
+      </div>
+
+      <div class="bill-lines stack-8" style="margin-top:12px;">
+        <template x-for="(l, i) in lines" :key="i">
+          <div class="bill-line">
+            <div class="bill-line-grid">
+              <select name="line_type" x-model="l.type">
+                {% for val, label in line_types %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+              </select>
+              <input name="line_description" x-model="l.description" placeholder="Description">
+              <input name="line_quantity" x-model="l.qty" inputmode="decimal" title="Qty">
+              <input name="line_unit_price" x-model="l.price" inputmode="decimal" title="Unit price">
+              <select name="line_account" x-model="l.account">
+                <option value="">Auto</option>
+                {% for a in accounts %}<option value="{{ a.pk }}">{{ a.code }} · {{ a.name }}</option>{% endfor %}
+              </select>
+              <span class="bill-line-amt" x-text="money(amt(l))"></span>
+              <span class="bill-line-rm" @click="removeLine(i)" title="Remove"><c-icon name="trash-2" size="sm" /></span>
+            </div>
+            <div class="bill-line-sub">
+              <label>Discount <input name="line_discount" x-model="l.discount" inputmode="decimal" style="width:90px"></label>
+              <label>Tax <input name="line_tax" x-model="l.tax" inputmode="decimal" style="width:90px"></label>
+              <template x-if="['item','expense'].includes(l.type)">
+                <label><input type="checkbox" x-model="l.capitalize"> Track as asset</label>
+              </template>
+              <template x-if="l.capitalize && ['item','expense'].includes(l.type)">
+                <span class="row">
+                  <input x-model="l.serial" placeholder="Serial #" style="width:130px">
+                  <input type="date" x-model="l.warranty" title="Warranty end">
+                </span>
+              </template>
+            </div>
+            <input type="hidden" name="line_item" :value="l.item">
+            <input type="hidden" name="line_capitalize" :value="l.capitalize ? '1' : '0'">
+            <input type="hidden" name="line_asset_serial" :value="l.serial">
+            <input type="hidden" name="line_warranty_end" :value="l.warranty">
+          </div>
+        </template>
+        <p x-show="!lines.length" class="subtle">No lines yet — search an item above, or add a line.</p>
+      </div>
+
+      <div class="row wrap" style="margin-top:12px; gap:6px;">
+        <c-button type="button" size="sm" variant="default" @click="addLine('expense')"><c-icon name="plus" size="sm" /> Expense</c-button>
+        <c-button type="button" size="sm" variant="default" @click="addLine('service')"><c-icon name="plus" size="sm" /> Service</c-button>
+        <c-button type="button" size="sm" variant="default" @click="addLine('shipping')"><c-icon name="plus" size="sm" /> Shipping</c-button>
+        <c-button type="button" size="sm" variant="default" @click="addLine('tax')"><c-icon name="plus" size="sm" /> Tax</c-button>
+        <c-button type="button" size="sm" variant="default" @click="addLine('discount')"><c-icon name="plus" size="sm" /> Discount</c-button>
+      </div>
+
+      <div class="grid-halves" style="margin-top:16px;">
+        <div></div>
+        <div class="money-summary">
+          <div class="mt-row"><span class="mt-label">Subtotal</span><span class="amount" x-text="money(subtotal)"></span></div>
+          <div class="mt-row"><span class="mt-label">Shipping</span><span class="amount" x-text="money(shipping)"></span></div>
+          <div class="mt-row"><span class="mt-label">Tax</span><span class="amount" x-text="money(tax)"></span></div>
+          <div class="mt-row mt-muted" x-show="discount"><span class="mt-label">Discount</span><span class="amount" x-text="money(discount)"></span></div>
+          <div class="mt-row mt-strong"><span class="mt-label">Total</span><span class="amount" x-text="money(total)"></span></div>
+        </div>
+      </div>
+    </c-card>
+
+    {# ---- Order & shipment (optional) ---- #}
+    <c-card title="Order &amp; shipment" icon="package">
+      <div class="form-grid">
+        <c-field label="Store"><c-input name="store_name" value="{{ bill.store_name }}" maxlength="120" /></c-field>
+        <c-field label="Order #"><c-input name="order_number" value="{{ bill.order_number }}" maxlength="80" /></c-field>
+        <c-field label="Order date"><input type="date" class="control" name="order_date" value="{{ bill.order_date|date:'Y-m-d' }}"></c-field>
+        <c-field label="Carrier"><c-input name="carrier" value="{{ bill.carrier }}" maxlength="60" /></c-field>
+        <c-field label="Tracking #"><c-input name="tracking_number" value="{{ bill.tracking_number }}" maxlength="120" /></c-field>
+        <c-field label="Ship date"><input type="date" class="control" name="ship_date" value="{{ bill.ship_date|date:'Y-m-d' }}"></c-field>
+        <c-field label="Delivery date"><input type="date" class="control" name="delivery_date" value="{{ bill.delivery_date|date:'Y-m-d' }}"></c-field>
+      </div>
+    </c-card>
+
+    <c-card title="Notes" icon="file-text">
+      <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ bill.notes }}</textarea></c-field>
+    </c-card>
+  </div>
+
+  <c-save-bar note="Posts to Accounts Payable on save.">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}payables/bills/{{ bill.pk }}/{% else %}{{ ui_tenant_url }}payables/bills/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create bill{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+
+  {{ lines_data|json_script:"lines-data" }}
+</form>
+
+<script>
+function billForm() {
+  return {
+    picked: { kind: '', id: '', name: '' }, newVendor: false, newName: '',
+    pick(d) { this.picked = { kind: d.kind, id: d.id, name: d.name }; this.newVendor = false; },
+    lines: JSON.parse(document.getElementById('lines-data').textContent),
+    pickItem(d) {
+      this.lines.push({ type: 'item', item: d.id || '', description: d.name || '', qty: '1',
+        price: '0', discount: '0', tax: '0', account: d.account || '',
+        capitalize: d.capitalize === '1', serial: '', warranty: '' });
+    },
+    addLine(t) {
+      this.lines.push({ type: t, item: '', description: '', qty: '1', price: '0', discount: '0',
+        tax: '0', account: '', capitalize: false, serial: '', warranty: '' });
+    },
+    removeLine(i) { this.lines.splice(i, 1); },
+    amt(l) {
+      const b = (parseFloat(l.qty) || 0) * (parseFloat(l.price) || 0)
+        - (parseFloat(l.discount) || 0) + (parseFloat(l.tax) || 0);
+      return l.type === 'discount' ? -b : b;
+    },
+    money(n) { return (n < 0 ? '-' : '') + '{{ base.symbol }}' + Math.abs(n).toFixed(2); },
+    sum(types) { return this.lines.filter(l => types.includes(l.type)).reduce((s, l) => s + this.amt(l), 0); },
+    get subtotal() { return this.sum(['item', 'service', 'expense']); },
+    get shipping() { return this.sum(['shipping']); },
+    get tax() { return this.sum(['tax']); },
+    get discount() { return this.sum(['discount']); },
+    get total() { return this.lines.reduce((s, l) => s + this.amt(l), 0); },
+  };
+}
+</script>
+{% endblock %}

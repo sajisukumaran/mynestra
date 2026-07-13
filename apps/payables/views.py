@@ -9,17 +9,26 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_date
 
 from apps.contacts.models import Person
 from apps.finance.models import Account, AccountType, Currency
 from apps.finance.services import base_currency
 from apps.organizations.models import Organization
 from apps.payables.forms import ItemForm
-from apps.payables.models import Item, ItemSku, PaymentTerm, VendorProfile
-from apps.payables.services import ensure_vendor_profile
+from apps.payables.models import Bill, BillLine, Item, ItemSku, PaymentTerm, VendorProfile
+from apps.payables.services import (
+    ensure_vendor_profile,
+    post_bill,
+    repost_bill,
+    unpost_bill,
+)
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
+
+ZERO = Decimal("0")
 
 
 def tenant_url(request, path=""):
@@ -38,6 +47,7 @@ def pay_context(request, active, **extra):
         "active": active,
         "is_owner": _is_owner(request),
         "base": base_currency(),
+        "nav_bills": Bill.objects.count(),
         "nav_items": Item.objects.count(),
         "nav_vendors": VendorProfile.objects.count(),
     }
@@ -63,8 +73,8 @@ def _decimal(raw):
 # --- Home ------------------------------------------------------------------------------------
 
 def payables_home(request):
-    """The app landing. Until the dashboard lands, redirect to the item catalog."""
-    return redirect(tenant_url(request, "payables/items/"))
+    """The app landing. Until the dashboard lands, redirect to the bills list."""
+    return redirect(tenant_url(request, "payables/bills/"))
 
 
 # --- Items (catalog master) ------------------------------------------------------------------
@@ -277,6 +287,187 @@ def vendor_delete(request, pk):
     if request.method == "POST":
         profile.delete()  # soft-delete (the underlying Person/Org is untouched)
     return redirect(tenant_url(request, "payables/vendors/"))
+
+
+# --- Bills (accrual accounts-payable documents) ----------------------------------------------
+
+def _at(lst, i, default=""):
+    return lst[i] if i < len(lst) else default
+
+
+def _account_by_pk(pk):
+    return Account.objects.filter(pk=pk or 0, is_postable=True).first()
+
+
+def _bill_accounts():
+    """Postable expense + asset accounts offered per bill line."""
+    return Account.objects.filter(
+        type__in=[AccountType.EXPENSE, AccountType.ASSET], is_postable=True
+    ).order_by("code")
+
+
+def bill_list(request):
+    qs = Bill.objects.select_related("vendor_person", "vendor_organization", "terms")
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(vendor_organization__name__icontains=q)
+            | Q(vendor_person__first_name__icontains=q)
+            | Q(vendor_person__last_name__icontains=q)
+            | Q(vendor_ref__icontains=q)
+        )
+    status = request.GET.get("status", "")
+    if status in Bill.Status.values:
+        qs = qs.filter(status=status)
+    qs = qs.order_by("-bill_date", "-id")
+    page = Paginator(qs, 20).get_page(request.GET.get("page"))
+    counts = {s: Bill.objects.filter(status=s).count() for s, _ in Bill.Status.choices}
+    ctx = pay_context(
+        request, "bills",
+        page=page, bills=page.object_list, q=q, status=status,
+        statuses=Bill.Status.choices, status_counts=counts, total=Bill.objects.count(),
+    )
+    return render(request, "payables/bill_list.html", ctx)
+
+
+def _save_bill_lines(request, bill):
+    types = request.POST.getlist("line_type")
+    items = request.POST.getlist("line_item")
+    descs = request.POST.getlist("line_description")
+    qtys = request.POST.getlist("line_quantity")
+    prices = request.POST.getlist("line_unit_price")
+    discounts = request.POST.getlist("line_discount")
+    taxes = request.POST.getlist("line_tax")
+    accounts = request.POST.getlist("line_account")
+    caps = request.POST.getlist("line_capitalize")
+    serials = request.POST.getlist("line_asset_serial")
+    warranties = request.POST.getlist("line_warranty_end")
+    bill.lines.all().delete()  # replace-all: the bill is editable, its lines rewritten each save
+    for i, lt in enumerate(types):
+        if lt not in BillLine.LineType.values:
+            continue
+        desc = _at(descs, i).strip()
+        qty = _decimal(_at(qtys, i)) or Decimal("1")
+        price = _decimal(_at(prices, i)) or ZERO
+        if qty == ZERO and price == ZERO and not desc:
+            continue  # skip a blank row
+        BillLine.objects.create(
+            bill=bill, line_type=lt, order=i,
+            item=Item.objects.filter(pk=_at(items, i) or 0).first(),
+            description=desc, quantity=qty, unit_price=price,
+            line_discount=_decimal(_at(discounts, i)) or ZERO,
+            line_tax=_decimal(_at(taxes, i)) or ZERO,
+            account=_account_by_pk(_at(accounts, i)),
+            capitalize=_at(caps, i) == "1",
+            asset_serial=_at(serials, i).strip(),
+            warranty_end=parse_date(_at(warranties, i) or ""),
+        )
+
+
+def _apply_bill_post(request, bill):
+    """Populate a bill + its lines from POST. Returns False if no vendor was resolved (create)."""
+    if bill.pk is None:
+        person, org = _resolve_vendor(request)
+        if not (person or org):
+            return False
+        if org:
+            _ensure_vendor_category(org)
+            ensure_vendor_profile(organization=org)
+        else:
+            ensure_vendor_profile(person=person)
+        bill.vendor_person, bill.vendor_organization = person, org
+
+    bill.vendor_ref = request.POST.get("vendor_ref", "").strip()
+    bill.bill_date = parse_date(request.POST.get("bill_date") or "") or bill.bill_date
+    if bill.bill_date is None:
+        import datetime as _dt
+        bill.bill_date = _dt.date.today()
+    bill.terms = PaymentTerm.objects.filter(pk=request.POST.get("terms") or 0).first()
+    explicit_due = parse_date(request.POST.get("due_date") or "")
+    bill.due_date = explicit_due or (
+        bill.terms.due_date_for(bill.bill_date) if bill.terms else None
+    )
+    bill.currency = Currency.objects.filter(code=request.POST.get("currency") or "").first()
+    bill.notes = request.POST.get("notes", "").strip()
+    bill.store_name = request.POST.get("store_name", "").strip()
+    bill.order_number = request.POST.get("order_number", "").strip()
+    bill.order_date = parse_date(request.POST.get("order_date") or "")
+    bill.tracking_number = request.POST.get("tracking_number", "").strip()
+    bill.carrier = request.POST.get("carrier", "").strip()
+    bill.ship_date = parse_date(request.POST.get("ship_date") or "")
+    bill.delivery_date = parse_date(request.POST.get("delivery_date") or "")
+    bill.save()
+    _save_bill_lines(request, bill)
+    return True
+
+
+def bill_create(request):
+    bill = Bill()
+    if request.method == "POST" and _apply_bill_post(request, bill):
+        post_bill(bill, user=request.user)
+        return redirect(tenant_url(request, f"payables/bills/{bill.pk}/"))
+    return _render_bill_form(request, bill, "create")
+
+
+def bill_edit(request, pk):
+    bill = get_object_or_404(Bill, pk=pk)
+    if bill.is_locked:
+        return HttpResponseForbidden("This bill is managed by another module; read-only here.")
+    if request.method == "POST" and _apply_bill_post(request, bill):
+        repost_bill(bill, user=request.user)
+        return redirect(tenant_url(request, f"payables/bills/{bill.pk}/"))
+    return _render_bill_form(request, bill, "edit")
+
+
+def _render_bill_form(request, bill, mode):
+    lines_data = [
+        {
+            "type": li.line_type, "item": str(li.item_id or ""), "description": li.description,
+            "qty": str(li.quantity), "price": str(li.unit_price),
+            "discount": str(li.line_discount), "tax": str(li.line_tax),
+            "account": str(li.account_id or ""), "capitalize": li.capitalize,
+            "serial": li.asset_serial,
+            "warranty": li.warranty_end.isoformat() if li.warranty_end else "",
+        }
+        for li in bill.lines.all()
+    ] if bill.pk else []
+    ctx = pay_context(
+        request, "bills",
+        bill=bill, mode=mode, lines_data=lines_data,
+        terms=PaymentTerm.objects.filter(is_active=True),
+        currencies=Currency.objects.filter(is_active=True),
+        accounts=_bill_accounts(),
+        line_types=BillLine.LineType.choices,
+    )
+    return render(request, "payables/bill_form.html", ctx)
+
+
+def bill_detail(request, pk):
+    bill = get_object_or_404(
+        Bill.objects.select_related("vendor_person", "vendor_organization", "terms"), pk=pk
+    )
+    ctx = pay_context(
+        request, "bills",
+        bill=bill, lines=bill.lines.all(), history=bill.history.all()[:40],
+    )
+    return render(request, "payables/bill_detail.html", ctx)
+
+
+def bill_void(request, pk):
+    bill = get_object_or_404(Bill, pk=pk)
+    if request.method == "POST" and not bill.is_locked and bill.status != Bill.Status.VOID:
+        unpost_bill(bill, user=request.user)
+        bill.status = Bill.Status.VOID
+        bill.save(update_fields=["status", "updated_at"])
+    return redirect(tenant_url(request, f"payables/bills/{pk}/"))
+
+
+def bill_delete(request, pk):
+    bill = get_object_or_404(Bill, pk=pk)
+    if request.method == "POST" and not bill.is_locked:
+        unpost_bill(bill, user=request.user)
+        bill.delete()  # soft-delete
+    return redirect(tenant_url(request, "payables/bills/"))
 
 
 # --- htmx fragments --------------------------------------------------------------------------

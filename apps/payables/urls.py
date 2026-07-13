@@ -8,6 +8,13 @@ app_name = "payables"
 
 urlpatterns = [
     path("", views.payables_home, name="home"),
+    # Bills (accrual accounts-payable documents)
+    path("bills/", views.bill_list, name="bills"),
+    path("bills/new/", views.bill_create, name="bill-create"),
+    path("bills/<int:pk>/", views.bill_detail, name="bill-detail"),
+    path("bills/<int:pk>/edit/", views.bill_edit, name="bill-edit"),
+    path("bills/<int:pk>/void/", views.bill_void, name="bill-void"),
+    path("bills/<int:pk>/delete/", views.bill_delete, name="bill-delete"),
     # Items (catalog master)
     path("items/", views.item_list, name="items"),
     path("items/new/", views.item_create, name="item-create"),

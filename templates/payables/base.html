@@ -9,6 +9,7 @@
          home_url="{{ ui_tenant_url }}">
   <c-slot name="sidebar">
     <c-sidebar title="Payables" subtitle="{{ ui_tenant_name }}" glyph="file-text">
+      <c-sidebar-item label="Bills" icon="file-text" count="{{ nav_bills }}" href="{{ ui_tenant_url }}payables/bills/" {% if active == 'bills' %}active="true"{% endif %} />
       <c-sidebar-item label="Vendors" icon="building-2" count="{{ nav_vendors }}" href="{{ ui_tenant_url }}payables/vendors/" {% if active == 'vendors' %}active="true"{% endif %} />
       <c-sidebar-item label="Items" icon="tag" count="{{ nav_items }}" href="{{ ui_tenant_url }}payables/items/" {% if active == 'items' %}active="true"{% endif %} />
       <c-slot name="foot">

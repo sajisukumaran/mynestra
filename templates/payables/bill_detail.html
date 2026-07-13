@@ -1,0 +1,107 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}{{ bill.bill_number }}{% endblock %}
+
+{% block pay %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/bills/">Bills</a><c-icon name="chevron-right" />
+  <span class="strong">{{ bill.bill_number }}</span>
+</c-breadcrumb>
+
+<c-page-header title="{{ bill.bill_number }}" subtitle="{{ bill.vendor_name }}{% if bill.vendor_ref %} · ref {{ bill.vendor_ref }}{% endif %}">
+  <c-slot name="actions">
+    {% if bill.status == 'paid' %}<c-badge variant="success">Paid</c-badge>
+    {% elif bill.status == 'partially_paid' %}<c-badge variant="info">Partially paid</c-badge>
+    {% elif bill.status == 'void' %}<c-badge>Void</c-badge>
+    {% else %}<c-badge variant="warning">Open</c-badge>{% endif %}
+    {% if bill.is_overdue %}<c-badge variant="danger">Overdue</c-badge>{% endif %}
+    {% if bill.is_locked %}
+      <c-badge variant="lock"><c-icon name="key-round" /> Managed elsewhere</c-badge>
+    {% elif bill.status != 'void' %}
+      <c-button variant="default" href="{{ ui_tenant_url }}payables/bills/{{ bill.pk }}/edit/"><c-icon name="pencil" size="sm" /> Edit</c-button>
+      <c-confirm-dialog title="Void {{ bill.bill_number }}?" message="Voiding reverses its ledger impact. The bill is kept for the record.">
+        <c-slot name="trigger"><c-button variant="ghost">Void</c-button></c-slot>
+        <c-slot name="confirm"><form method="post" action="{{ ui_tenant_url }}payables/bills/{{ bill.pk }}/void/">{% csrf_token %}<c-button type="submit" variant="danger">Void bill</c-button></form></c-slot>
+      </c-confirm-dialog>
+    {% endif %}
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+<div class="grid-halves">
+  <div class="stack-20">
+    <c-card title="Bill" icon="file-text">
+      <c-key-value>
+        <c-kv-row key="Vendor">{{ bill.vendor_name }}</c-kv-row>
+        <c-kv-row key="Bill date">{{ bill.bill_date|date:"d M Y" }}</c-kv-row>
+        <c-kv-row key="Due date">{% if bill.due_date %}{{ bill.due_date|date:"d M Y" }}{% else %}<span class="subtle">—</span>{% endif %}</c-kv-row>
+        <c-kv-row key="Terms">{% if bill.terms %}{{ bill.terms.name }}{% else %}<span class="subtle">—</span>{% endif %}</c-kv-row>
+        <c-kv-row key="Currency">{{ bill.currency.code|default:base.code }}</c-kv-row>
+      </c-key-value>
+      {% if bill.notes %}<p class="muted">{{ bill.notes }}</p>{% endif %}
+    </c-card>
+
+    {% if bill.store_name or bill.order_number or bill.tracking_number %}
+    <c-card title="Order &amp; shipment" icon="package">
+      <c-key-value>
+        {% if bill.store_name %}<c-kv-row key="Store">{{ bill.store_name }}</c-kv-row>{% endif %}
+        {% if bill.order_number %}<c-kv-row key="Order #">{{ bill.order_number }}{% if bill.order_date %} · {{ bill.order_date|date:"d M Y" }}{% endif %}</c-kv-row>{% endif %}
+        {% if bill.tracking_number %}<c-kv-row key="Tracking">{{ bill.carrier }} {{ bill.tracking_number }}</c-kv-row>{% endif %}
+        {% if bill.ship_date %}<c-kv-row key="Shipped">{{ bill.ship_date|date:"d M Y" }}</c-kv-row>{% endif %}
+        {% if bill.delivery_date %}<c-kv-row key="Delivered">{{ bill.delivery_date|date:"d M Y" }}</c-kv-row>{% endif %}
+      </c-key-value>
+    </c-card>
+    {% endif %}
+  </div>
+
+  <c-money-total title="Totals">
+    <c-mt-row label="Subtotal" :amount="bill.subtotal" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+    <c-mt-row label="Shipping" :amount="bill.shipping_total" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+    <c-mt-row label="Tax" :amount="bill.tax_total" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+    {% if bill.discount_total %}<c-mt-row label="Discount" :amount="bill.discount_total" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" variant="muted" />{% endif %}
+    <c-mt-row label="Total" :amount="bill.total" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" variant="strong" />
+    <c-mt-row label="Paid" :amount="bill.amount_paid" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" variant="muted" />
+    <c-mt-row label="Balance due" :amount="bill.balance_due" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" variant="strong" />
+  </c-money-total>
+</div>
+
+<c-card title="Line items" icon="tag" flush>
+  <c-table>
+    <thead><tr>
+      <c-th>Type</c-th>
+      <c-th>Description</c-th>
+      <th class="col-num">Qty</th>
+      <th class="col-num">Unit price</th>
+      <th class="col-num">Amount</th>
+    </tr></thead>
+    <tbody>
+      {% for l in lines %}
+      <tr>
+        <td><c-badge>{{ l.get_line_type_display }}</c-badge></td>
+        <td>{% if l.item %}<a href="{{ ui_tenant_url }}payables/items/{{ l.item_id }}/">{{ l.description|default:l.item.name }}</a>{% else %}{{ l.description|default:"—" }}{% endif %}{% if l.capitalize %} <c-badge variant="info">Asset</c-badge>{% endif %}</td>
+        <td class="col-num tnum">{{ l.quantity|floatformat:"-2" }}</td>
+        <td class="col-num"><c-money :amount="l.unit_price" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+        <td class="col-num"><c-money :amount="l.amount" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5"><span class="subtle">No lines.</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+</c-card>
+
+<c-card title="History" icon="clock">
+  <c-timeline>
+    {% for h in history %}
+    <c-tl-item variant="{% if h.history_type == '+' %}success{% elif h.history_type == '-' %}danger{% else %}default{% endif %}"
+               icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+               title="{% if h.history_type == '+' %}Created{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+               meta="{{ h.history_date|date:'d M Y H:i' }}{% if h.history_user %} · {{ h.history_user }}{% endif %}" />
+    {% empty %}
+    <c-tl-item title="No history yet" meta="" />
+    {% endfor %}
+  </c-timeline>
+</c-card>
+</div>
+{% endblock %}

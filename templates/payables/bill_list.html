@@ -1,0 +1,77 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}Bills{% endblock %}
+
+{% block pay %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" /><span class="strong">Bills</span></c-breadcrumb>
+
+<c-page-header title="Bills" subtitle="{{ total }} {{ total|pluralize:'bill,bills' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}payables/bills/new/"><c-icon name="plus" /> New bill</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by vendor or reference…"></label>
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}payables/bills/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not status %} active{% endif %}" href="{% querystring status=None page=None %}">All</a>
+    {% for val, label in statuses %}
+    <a class="fchip{% if status == val %} active{% endif %}" href="{% querystring status=val page=None %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if bills %}
+    <c-table>
+      <thead><tr>
+        <c-th>Bill</c-th>
+        <c-th>Vendor</c-th>
+        <c-th>Bill date</c-th>
+        <c-th>Due</c-th>
+        <th class="col-num">Total</th>
+        <th class="col-num">Balance</th>
+        <c-th>Status</c-th>
+      </tr></thead>
+      <tbody>
+        {% for b in bills %}
+        <tr>
+          <td><a class="strong" href="{{ ui_tenant_url }}payables/bills/{{ b.pk }}/">{{ b.bill_number }}</a>{% if b.vendor_ref %}<div class="pc-sub">{{ b.vendor_ref }}</div>{% endif %}</td>
+          <td>{{ b.vendor_name }}</td>
+          <td class="muted tnum">{{ b.bill_date|date:"d M Y" }}</td>
+          <td class="muted tnum">{% if b.due_date %}{{ b.due_date|date:"d M Y" }}{% if b.is_overdue %} <c-badge variant="danger">Overdue</c-badge>{% endif %}{% else %}<span class="subtle">—</span>{% endif %}</td>
+          <td class="col-num"><c-money :amount="b.total" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num"><c-money :amount="b.balance_due" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+          <td>
+            {% if b.status == 'paid' %}<c-badge variant="success">Paid</c-badge>
+            {% elif b.status == 'partially_paid' %}<c-badge variant="info">Partially paid</c-badge>
+            {% elif b.status == 'void' %}<c-badge>Void</c-badge>
+            {% else %}<c-badge variant="warning">Open</c-badge>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="file-text"
+      title="{% if q or status %}No bills match{% else %}No bills yet{% endif %}"
+      text="{% if q or status %}Try a different search or filter.{% else %}Enter the bills you owe — with items, shipping, tax and any discount.{% endif %}">
+      {% if not q and not status %}<c-button variant="primary" href="{{ ui_tenant_url }}payables/bills/new/"><c-icon name="plus" /> New bill</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

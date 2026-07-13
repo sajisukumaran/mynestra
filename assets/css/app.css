@@ -675,6 +675,25 @@ textarea.control { min-height:70px; height:auto; align-items:stretch; padding:8p
 .inline-repeater.two-col .inline-head,
 .inline-repeater.two-col .inline-row { grid-template-columns:1fr 1fr 36px; }
 
+/* Payables bill line-item editor: one bordered card per line (Type / Description / Qty / Price /
+   Account / Amount / remove), with a sub-row for per-line discount, tax and asset capitalization. */
+.bill-line { border:1px solid var(--border); border-radius:var(--r); padding:10px 12px; }
+.bill-line + .bill-line { margin-top:8px; }
+.bill-line-grid { display:grid; gap:8px 10px; align-items:center;
+  grid-template-columns:130px 1fr 66px 110px 1fr 104px 32px; }
+.bill-line-sub { margin-top:8px; display:flex; gap:14px; align-items:center; flex-wrap:wrap;
+  color:var(--text-muted); font-size:var(--fs-sm); }
+.bill-line-grid input, .bill-line-grid select,
+.bill-line-sub input, .bill-line-sub select {
+  width:100%; height:32px; padding:4px 8px; border:1px solid var(--border);
+  border-radius:var(--r-sm); background:var(--surface); color:var(--text); font-size:var(--fs-sm); }
+.bill-line-sub input { width:auto; }
+.bill-line-amt { text-align:right; font-variant-numeric:tabular-nums; }
+.bill-line-rm { color:var(--text-subtle); display:grid; place-items:center; height:32px;
+  border-radius:var(--r-sm); cursor:pointer; }
+.bill-line-rm:hover { color:var(--danger); background:var(--danger-soft); }
+@media (max-width:900px){ .bill-line-grid { grid-template-columns:1fr 1fr; } }
+
 .form-foot { position:sticky; bottom:0; z-index:20; background:var(--surface); border-top:1px solid var(--border);
   display:flex; align-items:center; gap:10px; justify-content:flex-end; padding:13px 36px;
   margin:22px -36px -56px; box-shadow:0 -8px 20px -12px rgba(15,23,42,.18); }
