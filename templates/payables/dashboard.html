@@ -1,0 +1,69 @@
+{% extends "payables/base.html" %}
+{% load money %}
+{% block pay_heading %}Payables{% endblock %}
+
+{% block pay %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Payables</span></c-breadcrumb>
+<c-page-header title="Payables" subtitle="What you owe — due dates, aging and payments.">
+  <c-slot name="actions"><c-button variant="primary" href="{{ ui_tenant_url }}payables/bills/new/"><c-icon name="plus" /> New bill</c-button></c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="file-text" tint="teal" value="{{ base.symbol }}{{ stats.total_payable|moneyfmt:'2:thousands' }}" label="Total payable" />
+    <c-stat-tile icon="clock" tint="rose" value="{{ base.symbol }}{{ stats.overdue_total|moneyfmt:'2:thousands' }}" label="Overdue" />
+    <c-stat-tile icon="calendar-days" tint="amber" value="{{ base.symbol }}{{ stats.due_week|moneyfmt:'2:thousands' }}" label="Due this week" />
+    <c-stat-tile icon="banknote" tint="blue" value="{{ stats.open_count }}" label="Open bills" />
+  </div>
+
+  <div class="grid-halves">
+    <c-card title="Overdue &amp; due soon" icon="clock" flush>
+      {% if due %}
+      <c-table>
+        <thead><tr><c-th>Bill</c-th><c-th>Vendor</c-th><c-th>Due</c-th><th class="col-num">Balance</th></tr></thead>
+        <tbody>
+          {% for b in due %}
+          <tr>
+            <td><a class="strong" href="{{ ui_tenant_url }}payables/bills/{{ b.pk }}/">{{ b.bill_number }}</a></td>
+            <td>{{ b.vendor_name }}</td>
+            <td class="tnum">{{ b.due_date|date:"d M Y" }}{% if b.is_overdue %} <c-badge variant="danger">Overdue</c-badge>{% endif %}</td>
+            <td class="col-num"><c-money :amount="b.balance_due" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </c-table>
+      {% else %}<c-empty-state icon="clock" title="Nothing due soon" text="No open bills are due in the next two weeks." />{% endif %}
+    </c-card>
+
+    <c-card title="Aging" icon="coins">
+      <c-money-total>
+        <c-mt-row label="Current" :amount="aging.current" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+        <c-mt-row label="1–30 days" :amount="aging.d1_30" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+        <c-mt-row label="31–60 days" :amount="aging.d31_60" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+        <c-mt-row label="61–90 days" :amount="aging.d61_90" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" />
+        <c-mt-row label="90+ days" :amount="aging.d90_plus" symbol="{{ base.symbol }}" grouping="{{ ui_number_format }}" variant="strong" />
+      </c-money-total>
+    </c-card>
+  </div>
+
+  <div class="grid-halves">
+    <c-card title="Warranty expiring" icon="calendar-days" flush>
+      {% if warranty %}
+      <c-table>
+        <thead><tr><c-th>Asset</c-th><c-th>Warranty ends</c-th></tr></thead>
+        <tbody>{% for a in warranty %}<tr><td>{{ a.name }}</td><td class="tnum">{{ a.warranty_end|date:"d M Y" }}</td></tr>{% endfor %}</tbody>
+      </c-table>
+      {% else %}<c-empty-state icon="calendar-days" title="No warranties expiring" text="Tracked-asset warranties ending soon show here." />{% endif %}
+    </c-card>
+
+    <c-card title="Recent bills" icon="file-text" flush>
+      {% if recent_bills %}
+      <c-table>
+        <thead><tr><c-th>Bill</c-th><c-th>Vendor</c-th><th class="col-num">Total</th></tr></thead>
+        <tbody>{% for b in recent_bills %}<tr><td><a href="{{ ui_tenant_url }}payables/bills/{{ b.pk }}/">{{ b.bill_number }}</a></td><td>{{ b.vendor_name }}</td><td class="col-num"><c-money :amount="b.total" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td></tr>{% endfor %}</tbody>
+      </c-table>
+      {% else %}<c-empty-state icon="file-text" title="No bills yet" text="Enter your first bill to get started."><c-button variant="primary" href="{{ ui_tenant_url }}payables/bills/new/">New bill</c-button></c-empty-state>{% endif %}
+    </c-card>
+  </div>
+</div>
+{% endblock %}

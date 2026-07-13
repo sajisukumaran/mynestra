@@ -530,3 +530,117 @@ class BillLine(TimeStampedModel):
         """Signed contribution to the bill total (discount lines are negative)."""
         base = self.base_amount
         return -base if self.line_type == self.LineType.DISCOUNT else base
+
+
+class Payment(SoftDeleteModel):
+    """A payment that settles one or more bills of a single vendor. It draws from a funding source:
+    a bank account (creates a native bank withdrawal), a credit card (a native card charge), or cash
+    (posts DR Accounts Payable / CR cash directly). Allocations link it to the bills it clears."""
+
+    class Funding(models.TextChoices):
+        BANK = "bank", "Bank account"
+        CARD = "card", "Credit card"
+        CASH = "cash", "Cash / other"
+
+    vendor_person = models.ForeignKey(
+        "contacts.Person", on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
+    )
+    vendor_organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="payments",
+    )
+    number = models.PositiveIntegerField(null=True, blank=True)
+    date = models.DateField()
+    amount = models.DecimalField(max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS,
+                                 default=ZERO)
+    funding_kind = models.CharField(max_length=8, choices=Funding.choices, default=Funding.CASH)
+    bank_account = models.ForeignKey(
+        "banking.BankAccount", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    credit_card = models.ForeignKey(
+        "cards.CreditCard", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    cash_account = models.ForeignKey(
+        "finance.Account", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    reference = models.CharField(max_length=80, blank=True)
+    notes = models.TextField(blank=True)
+    # The native funding transaction this payment created (kept truthful in that module's register).
+    bank_txn = models.ForeignKey(
+        "banking.BankTransaction", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    card_txn = models.ForeignKey(
+        "cards.CreditCardTransaction", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    journal_entry = models.ForeignKey(
+        "finance.JournalEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    posting_version = models.PositiveIntegerField(default=1)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(vendor_person__isnull=False, vendor_organization__isnull=True)
+                    | models.Q(vendor_person__isnull=True, vendor_organization__isnull=False)
+                ),
+                name="payment_one_vendor",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.number is None:
+            top = Payment.all_objects.aggregate(m=models.Max("number"))["m"] or 0
+            self.number = top + 1
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return self.payment_number
+
+    @property
+    def payment_number(self) -> str:
+        return f"PMT-{self.number:05d}" if self.number else "PMT"
+
+    @property
+    def vendor(self):
+        return self.vendor_person or self.vendor_organization
+
+    @property
+    def vendor_name(self) -> str:
+        party = self.vendor
+        for attr in ("display_name", "full_name", "name"):
+            val = getattr(party, attr, "")
+            if val:
+                return val
+        return str(party)
+
+    @property
+    def funding_label(self) -> str:
+        if self.funding_kind == self.Funding.BANK and self.bank_account_id:
+            return self.bank_account.nickname
+        if self.funding_kind == self.Funding.CARD and self.credit_card_id:
+            return self.credit_card.nickname
+        return "Cash / other"
+
+
+class PaymentAllocation(TimeStampedModel):
+    """How much of a payment settles a given bill. Drives each bill's amount-paid / status."""
+
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name="allocations")
+    bill = models.ForeignKey(Bill, on_delete=models.CASCADE, related_name="allocations")
+    amount = models.DecimalField(max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS,
+                                 default=ZERO)
+
+    class Meta:
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(fields=["payment", "bill"], name="uniq_alloc_payment_bill"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.payment_id}->{self.bill_id}: {self.amount}"

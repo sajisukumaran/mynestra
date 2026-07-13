@@ -11,7 +11,7 @@
 </c-breadcrumb>
 <c-page-header title="{% if mode == 'create' %}New vendor{% else %}Edit vendor{% endif %}" subtitle="A person or organization you receive bills from." />
 
-{% if error %}<c-hint icon="alert-triangle">{{ error }}</c-hint>{% endif %}
+{% if error %}<c-hint icon="info">{{ error }}</c-hint>{% endif %}
 
 <form method="post" x-data="{ picked:{kind:'',id:'',name:''}, newVendor:false, newName:'', pick(d){ this.picked={kind:d.kind,id:d.id,name:d.name}; this.newVendor=false; } }">{% csrf_token %}
   <div class="stack stack-20">

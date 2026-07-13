@@ -1,0 +1,57 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}Payments{% endblock %}
+
+{% block pay %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" /><span class="strong">Payments</span></c-breadcrumb>
+<c-page-header title="Payments" subtitle="{{ total }} {{ total|pluralize:'payment,payments' }} to vendors" />
+
+<c-card flush>
+  {% if payments %}
+  <c-table>
+    <thead><tr>
+      <c-th>Payment</c-th>
+      <c-th>Date</c-th>
+      <c-th>Vendor</c-th>
+      <c-th>Funded from</c-th>
+      <th class="col-num">Amount</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      {% for p in payments %}
+      <tr>
+        <td class="strong">{{ p.payment_number }}</td>
+        <td class="muted tnum">{{ p.date|date:"d M Y" }}</td>
+        <td>{{ p.vendor_name }}</td>
+        <td class="muted">{{ p.funding_label }}</td>
+        <td class="col-num"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+        <td>
+          <div class="cell-actions">
+            <c-confirm-dialog title="Delete {{ p.payment_number }}?" message="This reverses the payment and re-opens the bills it settled.">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+              <c-slot name="confirm">
+                <form method="post" action="{{ ui_tenant_url }}payables/payments/{{ p.pk }}/delete/">{% csrf_token %}
+                  <c-button type="submit" variant="danger">Delete payment</c-button>
+                </form>
+              </c-slot>
+            </c-confirm-dialog>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+  <c-slot name="foot">
+    <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+    {% if page.paginator.num_pages > 1 %}
+    <c-pagination class="ml-auto">
+      {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+      {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+      {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+    </c-pagination>
+    {% endif %}
+  </c-slot>
+  {% else %}
+  <c-empty-state icon="banknote" title="No payments yet" text="Record a payment from a bill to settle what you owe." />
+  {% endif %}
+</c-card>
+{% endblock %}

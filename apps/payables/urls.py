@@ -7,7 +7,11 @@ from apps.payables import views
 app_name = "payables"
 
 urlpatterns = [
-    path("", views.payables_home, name="home"),
+    path("", views.dashboard, name="dashboard"),
+    # Payments (funding-integrated; allocate across a vendor's bills)
+    path("payments/", views.payment_list, name="payments"),
+    path("payments/new/", views.payment_create, name="payment-create"),
+    path("payments/<int:pk>/delete/", views.payment_delete, name="payment-delete"),
     # Bills (accrual accounts-payable documents)
     path("bills/", views.bill_list, name="bills"),
     path("bills/new/", views.bill_create, name="bill-create"),

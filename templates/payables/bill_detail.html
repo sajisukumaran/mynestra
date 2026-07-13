@@ -16,6 +16,9 @@
     {% elif bill.status == 'void' %}<c-badge>Void</c-badge>
     {% else %}<c-badge variant="warning">Open</c-badge>{% endif %}
     {% if bill.is_overdue %}<c-badge variant="danger">Overdue</c-badge>{% endif %}
+    {% if bill.status == 'open' or bill.status == 'partially_paid' %}
+      <c-button variant="primary" href="{{ ui_tenant_url }}payables/payments/new/?bill={{ bill.pk }}"><c-icon name="banknote" size="sm" /> Record payment</c-button>
+    {% endif %}
     {% if bill.is_locked %}
       <c-badge variant="lock"><c-icon name="key-round" /> Managed elsewhere</c-badge>
     {% elif bill.status != 'void' %}
@@ -43,7 +46,7 @@
     </c-card>
 
     {% if bill.store_name or bill.order_number or bill.tracking_number %}
-    <c-card title="Order &amp; shipment" icon="package">
+    <c-card title="Order &amp; shipment" icon="file-text">
       <c-key-value>
         {% if bill.store_name %}<c-kv-row key="Store">{{ bill.store_name }}</c-kv-row>{% endif %}
         {% if bill.order_number %}<c-kv-row key="Order #">{{ bill.order_number }}{% if bill.order_date %} · {{ bill.order_date|date:"d M Y" }}{% endif %}</c-kv-row>{% endif %}

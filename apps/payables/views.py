@@ -5,6 +5,7 @@ first slice is the item/SKU catalog master (mirrors the Investments securities s
 bills and payments land in later commits.
 """
 
+import datetime
 from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
@@ -13,17 +14,26 @@ from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
 
+from apps.banking.models import BankAccount
+from apps.cards.models import CreditCard
 from apps.contacts.models import Person
 from apps.finance.models import Account, AccountType, Currency
 from apps.finance.services import base_currency
 from apps.organizations.models import Organization
 from apps.payables.forms import ItemForm
-from apps.payables.models import Bill, BillLine, Item, ItemSku, PaymentTerm, VendorProfile
+from apps.payables.models import Bill, BillLine, Item, ItemSku, Payment, PaymentTerm, VendorProfile
 from apps.payables.services import (
+    aging,
+    apply_payment,
+    dashboard_stats,
+    due_soon,
     ensure_vendor_profile,
+    open_bills_for,
     post_bill,
     repost_bill,
+    unapply_payment,
     unpost_bill,
+    warranty_expiring,
 )
 from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
@@ -48,8 +58,9 @@ def pay_context(request, active, **extra):
         "is_owner": _is_owner(request),
         "base": base_currency(),
         "nav_bills": Bill.objects.count(),
-        "nav_items": Item.objects.count(),
         "nav_vendors": VendorProfile.objects.count(),
+        "nav_items": Item.objects.count(),
+        "nav_payments": Payment.objects.count(),
     }
     ctx.update(extra)
     return ctx
@@ -72,9 +83,21 @@ def _decimal(raw):
 
 # --- Home ------------------------------------------------------------------------------------
 
-def payables_home(request):
-    """The app landing. Until the dashboard lands, redirect to the bills list."""
-    return redirect(tenant_url(request, "payables/bills/"))
+def dashboard(request):
+    """Payables landing: payable/overdue/due-soon stats, an aging breakdown, and the overdue,
+    due-soon and warranty-expiry feeds."""
+    ctx = pay_context(
+        request, "dashboard",
+        stats=dashboard_stats(),
+        due=due_soon(within_days=14),
+        aging=aging(),
+        warranty=warranty_expiring(within_days=90),
+        recent_bills=Bill.objects.select_related(
+            "vendor_person", "vendor_organization"
+        ).order_by("-bill_date", "-id")[:6],
+        today=datetime.date.today(),
+    )
+    return render(request, "payables/dashboard.html", ctx)
 
 
 # --- Items (catalog master) ------------------------------------------------------------------
@@ -380,8 +403,7 @@ def _apply_bill_post(request, bill):
     bill.vendor_ref = request.POST.get("vendor_ref", "").strip()
     bill.bill_date = parse_date(request.POST.get("bill_date") or "") or bill.bill_date
     if bill.bill_date is None:
-        import datetime as _dt
-        bill.bill_date = _dt.date.today()
+        bill.bill_date = datetime.date.today()
     bill.terms = PaymentTerm.objects.filter(pk=request.POST.get("terms") or 0).first()
     explicit_due = parse_date(request.POST.get("due_date") or "")
     bill.due_date = explicit_due or (
@@ -468,6 +490,108 @@ def bill_delete(request, pk):
         unpost_bill(bill, user=request.user)
         bill.delete()  # soft-delete
     return redirect(tenant_url(request, "payables/bills/"))
+
+
+# --- Payments (funding-integrated; allocate across one vendor's bills) ------------------------
+
+def _payment_vendor(request, source):
+    """Resolve the payment's vendor party from a bill (?bill=) or explicit (?vendor_kind/id)."""
+    getter = request.GET if source == "get" else request.POST
+    if source == "get" and getter.get("bill"):
+        bill = Bill.objects.filter(pk=getter.get("bill")).first()
+        if bill:
+            return bill.vendor_person, bill.vendor_organization
+    kind = getter.get("vendor_kind")
+    vid = getter.get("vendor_id") or 0
+    if kind == "person":
+        return Person.objects.filter(pk=vid).first(), None
+    if kind == "organization":
+        return None, Organization.objects.filter(pk=vid).first()
+    return None, None
+
+
+def payment_create(request):
+    if request.method == "POST":
+        return _payment_save(request)
+    person, org = _payment_vendor(request, "get")
+    if not (person or org):
+        return redirect(tenant_url(request, "payables/bills/"))
+    party = person or org
+    bills = open_bills_for(person=person, organization=org)
+    ctx = pay_context(
+        request, "payments",
+        vendor_kind="person" if person else "organization",
+        vendor_id=party.pk,
+        vendor_name=getattr(party, "display_name", None) or getattr(party, "name", str(party)),
+        bills=bills, focus_bill=request.GET.get("bill", ""),
+        bank_accounts=BankAccount.objects.all(),
+        credit_cards=CreditCard.objects.all(),
+        cash_accounts=Account.objects.filter(
+            type=AccountType.ASSET, is_postable=True
+        ).order_by("code"),
+        today=datetime.date.today(),
+    )
+    return render(request, "payables/payment_form.html", ctx)
+
+
+def _payment_save(request):
+    person, org = _payment_vendor(request, "post")
+    if not (person or org):
+        return redirect(tenant_url(request, "payables/bills/"))
+    bills = open_bills_for(person=person, organization=org)
+    allocations = []
+    for bill in bills:
+        amt = _decimal(request.POST.get(f"alloc_{bill.pk}"))
+        if amt and amt > ZERO:
+            allocations.append((bill, min(amt, bill.balance_due)))
+    if not allocations:
+        kind = "person" if person else "organization"
+        return redirect(
+            tenant_url(request, "payables/payments/new/")
+            + f"?vendor_kind={kind}&vendor_id={(person or org).pk}"
+        )
+    total = sum((a for _, a in allocations), ZERO)
+    funding_kind = request.POST.get("funding_kind", Payment.Funding.CASH)
+    payment = Payment(
+        vendor_person=person, vendor_organization=org,
+        date=parse_date(request.POST.get("date") or "") or datetime.date.today(),
+        amount=total, funding_kind=funding_kind,
+        reference=request.POST.get("reference", "").strip(),
+        notes=request.POST.get("notes", "").strip(),
+    )
+    if funding_kind == Payment.Funding.BANK:
+        payment.bank_account = BankAccount.objects.filter(
+            pk=request.POST.get("bank_account") or 0
+        ).first()
+    elif funding_kind == Payment.Funding.CARD:
+        payment.credit_card = CreditCard.objects.filter(
+            pk=request.POST.get("credit_card") or 0
+        ).first()
+    else:
+        payment.cash_account = _account_by_pk(request.POST.get("cash_account"))
+    payment.save()
+    apply_payment(payment, allocations, user=request.user)
+    return redirect(tenant_url(request, "payables/payments/"))
+
+
+def payment_list(request):
+    payments = Payment.objects.select_related("vendor_person", "vendor_organization").order_by(
+        "-date", "-id"
+    )
+    page = Paginator(payments, 20).get_page(request.GET.get("page"))
+    ctx = pay_context(
+        request, "payments",
+        page=page, payments=page.object_list, total=Payment.objects.count(),
+    )
+    return render(request, "payables/payment_list.html", ctx)
+
+
+def payment_delete(request, pk):
+    payment = get_object_or_404(Payment, pk=pk)
+    if request.method == "POST":
+        unapply_payment(payment, user=request.user)
+        payment.delete()  # soft-delete
+    return redirect(tenant_url(request, "payables/payments/"))
 
 
 # --- htmx fragments --------------------------------------------------------------------------
