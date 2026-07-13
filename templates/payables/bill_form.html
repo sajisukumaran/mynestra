@@ -13,38 +13,43 @@
 
 <form method="post" x-data="billForm()">{% csrf_token %}
   <div class="stack stack-20">
-    {# ---- Vendor ---- #}
-    {% if mode == 'create' %}
-    <c-card title="Vendor" icon="building-2">
-      <div class="stack-8">
-        <label class="search"><c-icon name="search" size="sm" />
-          <input type="search" name="q" placeholder="Search people &amp; organizations…"
-                 @keydown.enter.prevent
-                 hx-get="{{ ui_tenant_url }}payables/vendor-search/"
-                 hx-trigger="input changed delay:200ms, focus" hx-target="#vendor-results"></label>
-        <div id="vendor-results"></div>
-        <div x-show="picked.id" x-cloak class="rel-preview">
-          <span>Vendor: <span class="strong" x-text="picked.name"></span></span>
-          <c-button type="button" size="sm" variant="ghost" @click="picked={kind:'',id:'',name:''}">Clear</c-button>
-        </div>
-      </div>
-      <label class="row"><input type="checkbox" x-model="newVendor"> <span class="muted">…or add a brand-new vendor organization</span></label>
-      <div x-show="newVendor" x-cloak>
-        <c-field label="New vendor name"><input class="control" x-model="newName" placeholder="e.g. Acme Supplies"></c-field>
-      </div>
-      <input type="hidden" name="party_kind" :value="newVendor ? '' : picked.kind">
-      <input type="hidden" name="party_id" :value="newVendor ? '' : picked.id">
-      <input type="hidden" name="new_vendor_name" :value="newVendor ? newName : ''">
-    </c-card>
-    {% else %}
-    <c-card title="Vendor" icon="building-2">
-      <div class="person-cell"><c-avatar tint="{{ bill.vendor_tint }}" size="sm" {% if bill.vendor_kind == 'organization' %}square{% endif %}>{{ bill.vendor_initials }}</c-avatar><div class="pc-name">{{ bill.vendor_name }}</div></div>
-    </c-card>
-    {% endif %}
-
-    {# ---- Bill details ---- #}
+    {# ---- Bill details (vendor folded in) ---- #}
     <c-card title="Bill details" icon="file-text">
-      <div class="form-grid">
+      <div class="stack stack-16">
+      {% if mode == 'create' %}
+        <c-field label="Vendor" required>
+          <div class="stack-8">
+            {# chosen vendor — compact token #}
+            <div x-show="picked.id && !newVendor" x-cloak class="pick-chip">
+              <span class="pc-name" x-text="picked.name"></span>
+              <span class="pc-kind" x-text="picked.kind === 'person' ? 'Person' : 'Organization'"></span>
+              <button type="button" class="pc-x" @click="picked={kind:'',id:'',name:''}" aria-label="Clear vendor"><c-icon name="x" size="sm" /></button>
+            </div>
+            {# search when nothing chosen #}
+            <div x-show="!picked.id && !newVendor" x-cloak class="stack-8">
+              <label class="search wide"><c-icon name="search" size="sm" />
+                <input type="search" name="q" placeholder="Search people &amp; organizations…"
+                       @keydown.enter.prevent
+                       hx-get="{{ ui_tenant_url }}payables/vendor-search/"
+                       hx-trigger="input changed delay:200ms, focus" hx-target="#vendor-results"></label>
+              <div id="vendor-results"></div>
+            </div>
+            {# brand-new vendor #}
+            <div x-show="newVendor" x-cloak>
+              <input class="control" x-model="newName" placeholder="New vendor organization — e.g. Acme Supplies">
+            </div>
+            <label class="row"><input type="checkbox" x-model="newVendor"> <span class="muted">Add a brand-new vendor organization</span></label>
+          </div>
+        </c-field>
+        <input type="hidden" name="party_kind" :value="newVendor ? '' : picked.kind">
+        <input type="hidden" name="party_id" :value="newVendor ? '' : picked.id">
+        <input type="hidden" name="new_vendor_name" :value="newVendor ? newName : ''">
+      {% else %}
+        <c-field label="Vendor">
+          <span class="pick-chip static"><c-avatar tint="{{ bill.vendor_tint }}" size="sm" {% if bill.vendor_kind == 'organization' %}square{% endif %}>{{ bill.vendor_initials }}</c-avatar><span class="pc-name">{{ bill.vendor_name }}</span></span>
+        </c-field>
+      {% endif %}
+        <div class="form-grid">
         <c-field label="Vendor reference" help="The vendor's own invoice number.">
           <c-input name="vendor_ref" value="{{ bill.vendor_ref }}" maxlength="80" />
         </c-field>
@@ -66,6 +71,7 @@
             {% for c in currencies %}<option value="{{ c.code }}"{% if bill.currency_id == c.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
           </c-select>
         </c-field>
+        </div>
       </div>
     </c-card>
 

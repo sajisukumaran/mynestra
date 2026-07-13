@@ -600,6 +600,18 @@ a.rel:hover, a.rel:hover .r-name { color:var(--accent-text); }
   padding:12px 14px; display:flex; flex-direction:column; gap:6px; }
 .rel-preview b { color:var(--accent-text); font-weight:600; }
 
+/* Selected-entity token — the chosen result in a search-then-pick field (vendor, payee, …). */
+.pick-chip { display:inline-flex; align-items:center; gap:9px; max-width:100%; height:38px;
+  padding:0 6px 0 13px; border-radius:var(--r); background:var(--surface-2); border:1px solid var(--border); }
+.pick-chip .pc-name { font-weight:600; color:var(--text-strong);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pick-chip .pc-kind { font-size:var(--fs-xs); color:var(--text-subtle); font-weight:500; flex:none; }
+.pick-chip .pc-x { display:grid; place-items:center; width:26px; height:26px; border-radius:7px;
+  color:var(--text-muted); flex:none; margin-left:2px; cursor:pointer; }
+.pick-chip .pc-x:hover { background:var(--surface-3); color:var(--text-strong); }
+.pick-chip.static { padding-right:13px; }
+.search.wide { width:100%; max-width:none; }
+
 .timeline { display:flex; flex-direction:column; }
 .tl-item { display:flex; gap:14px; padding-bottom:18px; position:relative; }
 .tl-item:not(:last-child)::before { content:""; position:absolute; left:15px; top:30px; bottom:-4px; width:2px; background:var(--border); }
