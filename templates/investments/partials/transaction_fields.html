@@ -38,7 +38,7 @@ prefill) + unique
 <div x-show="['buy','sell','dividend_reinvest','opening','in_kind_out','sell_short','buy_to_cover'].includes(type)" x-cloak>
   <div class="grid-halves">
     <c-field label="Quantity" help="Shares / units."><div class="control"><input name="quantity" inputmode="decimal" value="{% if txn and txn.quantity %}{{ txn.quantity|floatformat:'-6' }}{% endif %}" placeholder="0"></div></c-field>
-    <div x-show="type !== 'in_kind_out'"><c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field></div>
+    <div x-show="type !== 'in_kind_out'"><c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" :disabled="!['buy','sell','dividend_reinvest','opening','sell_short','buy_to_cover'].includes(type)" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field></div>
   </div>
 </div>
 
@@ -62,8 +62,8 @@ prefill) + unique
 {# Split ratio #}
 <div x-show="type === 'split'" x-cloak>
   <div class="grid-halves">
-    <c-field label="New shares" help="e.g. 2 for a 2-for-1 split."><div class="control"><input name="split_ratio_new" inputmode="decimal" value="{{ txn.split_ratio_new|default:'' }}" placeholder="2"></div></c-field>
-    <c-field label="Per old shares" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
+    <c-field label="New shares" help="e.g. 2 for a 2-for-1 split."><div class="control"><input name="split_ratio_new" inputmode="decimal" :disabled="type !== 'split'" value="{{ txn.split_ratio_new|default:'' }}" placeholder="2"></div></c-field>
+    <c-field label="Per old shares" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" :disabled="type !== 'split'" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
   </div>
 </div>
 
@@ -129,8 +129,8 @@ prefill) + unique
     </div>
   </c-field>
   <div class="grid-halves">
-    <c-field label="New shares (Y)" help="Y shares received per old X share, e.g. 1.5."><div class="control"><input name="split_ratio_new" inputmode="decimal" value="{{ txn.split_ratio_new|default:'' }}" placeholder="1"></div></c-field>
-    <c-field label="Per old shares (X)" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
+    <c-field label="New shares (Y)" help="Y shares received per old X share, e.g. 1.5."><div class="control"><input name="split_ratio_new" inputmode="decimal" :disabled="!['merger','spinoff'].includes(type)" value="{{ txn.split_ratio_new|default:'' }}" placeholder="1"></div></c-field>
+    <c-field label="Per old shares (X)" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" :disabled="!['merger','spinoff'].includes(type)" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
   </div>
   <div x-show="type === 'spinoff'" x-cloak>
     <c-field label="Basis allocated to Y (%)" help="Percent of the original cost basis assigned to the spun-off security; the parent keeps the rest."><div class="control"><input name="basis_pct" inputmode="decimal" value="{{ txn.basis_pct|default:'' }}" placeholder="e.g. 20"></div></c-field>
@@ -176,10 +176,10 @@ prefill) + unique
 <div x-show="['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" x-cloak>
   <div class="grid-halves">
     <c-field label="Contracts" help="Each controls the contract's multiplier (usually 100) shares.">
-      <div class="control"><input name="contracts" inputmode="decimal" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
+      <div class="control"><input name="contracts" inputmode="decimal" :disabled="!['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
     </c-field>
     <c-field label="Premium / share" help="Per underlying share; total = premium × multiplier × contracts.">
-      <div class="control"><input name="price" inputmode="decimal" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div>
+      <div class="control"><input name="price" inputmode="decimal" :disabled="!['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div>
     </c-field>
   </div>
   <c-hint icon="info">Buy/sell to open creates the position and posts nothing; closing realizes the gain to Realized Capital Gain/Loss.</c-hint>
@@ -188,7 +188,7 @@ prefill) + unique
 {# Option exercise / assignment — contracts; strike, right and underlying come from the contract #}
 <div x-show="type === 'opt_exercise' || type === 'opt_assign'" x-cloak>
   <c-field label="Contracts" help="Strike, right and underlying are taken from the selected option contract.">
-    <div class="control"><input name="contracts" inputmode="decimal" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
+    <div class="control"><input name="contracts" inputmode="decimal" :disabled="!['opt_exercise','opt_assign'].includes(type)" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
   </c-field>
   <c-hint icon="info">The option closes at zero gain; its premium rolls into the underlying — a call exercise / put assignment BUYS at strike, a put exercise / call assignment SELLS at strike.</c-hint>
 </div>

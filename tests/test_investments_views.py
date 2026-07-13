@@ -111,6 +111,39 @@ def test_add_buy_then_sell_via_views(make_tenant, make_user, client):
     assert client.get(_url(tenant, f"accounts/{aid}/holdings/{sid}/")).status_code == 200
 
 
+def test_duplicate_named_trade_inputs_are_disable_guarded(make_tenant, make_user, client):
+    """Regression: the transaction form includes every per-type block, so some input names appear
+    twice in one <form> (Price/unit + option Premium share both name="price"; split + merger both
+    name="split_ratio_new/old"; option open/close + exercise both name="contracts"). A browser
+    submits ALL of them, and Django's POST.get() takes the LAST — so a hidden, empty duplicate
+    silently clobbered the typed value (the 'price blank on reopen' bug). Each such input must carry
+    a :disabled guard so only the active txn-type's input is submitted."""
+    import re
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="VZ", name="Verizon",
+                                      currency=Currency.objects.get(code="USD"))
+        aid, sid = acct.pk, sec.pk
+    client.force_login(owner)
+    # A priced buy — the exact shape that lost its price before the fix.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2006-12-27", "security": sid,
+        "quantity": "21", "price": "37.4457", "amount": "786.36", "fee": "9.99"})
+
+    body = client.get(_url(tenant, f"accounts/{aid}/")).content.decode()
+    for field in ("price", "contracts", "split_ratio_new", "split_ratio_old"):
+        tags = re.findall(rf'<input name="{field}"[^>]*>', body)
+        assert len(tags) >= 2, f"{field}: expected duplicate inputs across type blocks"
+        assert all(":disabled=" in t for t in tags), f"{field}: an input lacks a :disabled guard"
+
+
 def test_security_create_and_price(make_tenant, make_user, client):
     from decimal import Decimal
 
