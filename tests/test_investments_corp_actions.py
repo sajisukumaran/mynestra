@@ -269,3 +269,47 @@ def test_spinoff_rejects_out_of_range_basis_pct(make_tenant, make_user, client):
     assert resp.status_code == 302
     with schema_context(tenant.schema_name):
         assert not InvestmentTransaction.objects.filter(txn_type="spinoff").exists()
+
+
+# --- Cash in lieu of a fractional share (spin-off tail) --------------------------------------
+
+def test_spinoff_then_cash_in_lieu_of_fractional(make_tenant):
+    """Real-world VZ -> FTR (2010): a spin-off yields a fractional entitlement, then cash-in-lieu
+    sells that fraction — whole shares held, the fraction sold for cash, invariant intact."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        vz, ftr = _sec("VZ", "Verizon"), _sec("FTR", "Frontier")
+        _add(acct, InvTxnType.OPENING, JAN, amount="3000")
+        _add(acct, InvTxnType.BUY, FEB, security=vz, qty="70", price="30", amount="2100")
+        # Spin-off: 16.80278 FTR on 70 VZ; 10% of the VZ basis allocated to FTR.
+        _add(acct, InvTxnType.SPINOFF, MAR, security=vz, target_security=ftr,
+             split_ratio_new=D("16.80278"), split_ratio_old=D("70"), basis_pct=D("10"))
+        assert _open(acct, ftr)[0].remaining_quantity == D("16.802780")
+        cash_before = cash_balance(acct)
+
+        # Cash in lieu of the 0.80278 fractional share; $5.74 received.
+        cil = _add(acct, InvTxnType.CASH_IN_LIEU, APR, security=ftr, qty="0.80278", amount="5.74")
+
+        ftr_hold = next(h for h in holdings(acct) if h.security.id == ftr.id)
+        acct.refresh_from_db()
+        assert ftr_hold.quantity == D("16")                    # whole shares remain
+        assert cash_balance(acct) == cash_before + D("5.74")   # cash-in-lieu proceeds arrived
+        assert cil.realized_gain != D("0")                     # gain/loss realized on the fraction
+        # A fractional disposition's gain has sub-cent precision; the GL posts money in whole cents
+        # (finance quantizes to the currency), so gl matches cash + cost to within a cent — the
+        # exact-equality invariant holds only for whole-cent (whole-share) dispositions.
+        drift = account_balance(acct.gl_account) - (cash_balance(acct) + cost_basis(acct))
+        assert abs(drift) <= D("0.01")
+
+
+def test_cash_in_lieu_behaves_like_a_sell(make_tenant):
+    """A cash-in-lieu is accounting-identical to a sell: consumes lots, realizes gain, cash in."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        s = _sec("ACME")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=s, qty="10", price="50", amount="500")
+        cil = _add(acct, InvTxnType.CASH_IN_LIEU, MAR, security=s, qty="2", amount="140")
+        assert cil.realized_gain == D("40")            # proceeds 140 - cost 100 (2 @ 50)
+        assert next(h for h in holdings(acct) if h.security.id == s.id).quantity == D("8")
+        assert _inv(acct)

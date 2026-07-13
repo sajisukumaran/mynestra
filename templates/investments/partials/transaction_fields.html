@@ -22,11 +22,11 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 </div>
 
 {# Security — for holdings-related types (for options, the contract; underlying is on it) #}
-<div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff','sell_short','buy_to_cover','div_paid_short','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
+<div x-show="['buy','sell','cash_in_lieu','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff','sell_short','buy_to_cover','div_paid_short','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
   <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest). For a merger/spin-off this is the original security (X).">
     {# Two pickers share name="security", :disabled-guarded so only the active submits: acquisitions (buy/opening/in-kind-in/short-open/option-open) list every instrument; everything else only this account's transacted securities. #}
     <div x-show="!['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)" x-cloak class="control is-select">
-      <select name="security" x-model="security" :disabled="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
+      <select name="security" x-model="security" @change="if (type === 'cash_in_lieu' && window.__invHeldQty) { const h = window.__invHeldQty[$event.target.value] || 0; quantity = String(+(h - Math.floor(h)).toFixed(6)) }" :disabled="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
         <option value="">— none / cash —</option>
         {% for s in account_securities %}<option value="{{ s.pk }}"{% if txn.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
       </select>
@@ -42,11 +42,11 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
   </c-field>
 </div>
 
-{# Quantity + price — buy / sell / reinvest / opening-holding / in-kind-out (qty only) / short / cover #}
-<div x-show="['buy','sell','dividend_reinvest','opening','in_kind_out','sell_short','buy_to_cover'].includes(type)" x-cloak>
+{# Quantity + price — buy / sell / cash-in-lieu / reinvest / opening-holding / in-kind-out (qty only) / short / cover #}
+<div x-show="['buy','sell','cash_in_lieu','dividend_reinvest','opening','in_kind_out','sell_short','buy_to_cover'].includes(type)" x-cloak>
   <div class="grid-halves">
     <c-field label="Quantity" help="Shares / units."><div class="control"><input name="quantity" inputmode="decimal" x-model="quantity" value="{% if txn and txn.quantity %}{{ txn.quantity|floatformat:'-6' }}{% endif %}" placeholder="0"></div></c-field>
-    <div x-show="type !== 'in_kind_out'"><c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" :disabled="!['buy','sell','dividend_reinvest','opening','sell_short','buy_to_cover'].includes(type)" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field></div>
+    <div x-show="type !== 'in_kind_out'"><c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" :disabled="!['buy','sell','cash_in_lieu','dividend_reinvest','opening','sell_short','buy_to_cover'].includes(type)" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field></div>
   </div>
 </div>
 
@@ -88,6 +88,9 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 
 {# Sell — cost basis note #}
 <div x-show="type === 'sell'" x-cloak><c-hint icon="info">Lots are sold first-in, first-out; the realized gain posts to Realized Capital Gain/Loss.</c-hint></div>
+
+{# Cash in lieu — a fractional-share sale (e.g. from a spin-off / merger) #}
+<div x-show="type === 'cash_in_lieu'" x-cloak><c-hint icon="info">Cash received for a fractional share (e.g. after a spin-off). It's a small sale — enter the fractional quantity and the cash amount; the gain/loss against that fraction's cost basis posts to Realized Capital Gain/Loss. Picking the security fills in the fractional part of your holding.</c-hint></div>
 
 {# Split ratio #}
 <div x-show="type === 'split'" x-cloak>

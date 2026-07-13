@@ -747,8 +747,8 @@ def _apply_lot_effect(txn, store) -> Decimal:
     if t == InvTxnType.OPENING and txn.security_id:
         _create_lot(txn, store, _q_amount(txn.amount))
         return ZERO
-    if t == InvTxnType.SELL:
-        return _consume_lots(txn, store)
+    if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU):
+        return _consume_lots(txn, store)  # cash-in-lieu = a fractional sell
     if t == InvTxnType.SELL_SHORT:
         # Open a short: a negative-quantity lot whose credit basis is the proceeds received.
         _make_lot(txn, store, txn.security, -_q_qty(txn.quantity), -_q_amount(txn.net_proceeds),
@@ -808,7 +808,7 @@ class RebuildResult:
 
 # Types whose realized gain, if it shifts on replay, requires re-posting their GL entry.
 _GAIN_TYPES = frozenset({
-    InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
+    InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
     InvTxnType.BUY_TO_COVER,
     InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
@@ -926,7 +926,7 @@ def _lines_for(txn) -> list[LineInput]:
         if t == InvTxnType.IN_KIND_IN:
             return [line(gl, debit=cost), line(contra, credit=cost)]
         return [line(contra, debit=cost), line(gl, credit=cost)]
-    if t in (InvTxnType.SELL, InvTxnType.RETURN_OF_CAPITAL,
+    if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
              InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.BUY_TO_COVER,
              InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
              InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
@@ -1415,8 +1415,8 @@ def institution_row(org, accounts=None) -> dict:
 _PERF_ACQUIRE = frozenset({
     InvTxnType.BUY, InvTxnType.DIVIDEND_REINVEST, InvTxnType.OPENING, InvTxnType.IN_KIND_IN,
 })
-_PERF_DISPOSE_QTY = frozenset({InvTxnType.SELL, InvTxnType.IN_KIND_OUT})
-_PERF_SOLD_AMOUNT = frozenset({InvTxnType.SELL, InvTxnType.CASH_MERGER})
+_PERF_DISPOSE_QTY = frozenset({InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.IN_KIND_OUT})
+_PERF_SOLD_AMOUNT = frozenset({InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.CASH_MERGER})
 _PERF_DIVIDEND = frozenset({
     InvTxnType.DIVIDEND, InvTxnType.DIVIDEND_REINVEST, InvTxnType.CAP_GAIN_DIST,
 })

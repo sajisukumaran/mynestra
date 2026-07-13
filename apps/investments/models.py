@@ -510,6 +510,7 @@ class InvTxnType(models.TextChoices):
     TRANSFER_OUT = "transfer_out", "Transfer out"    # cash out to a tracked bank account
     BUY = "buy", "Buy"
     SELL = "sell", "Sell"
+    CASH_IN_LIEU = "cash_in_lieu", "Cash in lieu"    # fractional-share sale for cash (corp action)
     DIVIDEND = "dividend", "Dividend"
     DIVIDEND_REINVEST = "dividend_reinvest", "Dividend (reinvested)"
     INTEREST = "interest", "Interest"
@@ -542,7 +543,7 @@ class InvTxnType(models.TextChoices):
 
 # Types that require a security (the rest are cash-only / account-level).
 SECURITY_TYPES = frozenset({
-    InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST,
+    InvTxnType.BUY, InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.DIVIDEND_REINVEST,
     InvTxnType.RETURN_OF_CAPITAL, InvTxnType.SPLIT,
     InvTxnType.IN_KIND_IN, InvTxnType.IN_KIND_OUT,
     InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
@@ -575,6 +576,7 @@ TXN_GLYPHS = {
     InvTxnType.TRANSFER_OUT: "arrow-up",
     InvTxnType.BUY: "arrow-up",
     InvTxnType.SELL: "arrow-down",
+    InvTxnType.CASH_IN_LIEU: "banknote",
     InvTxnType.DIVIDEND: "coins",
     InvTxnType.DIVIDEND_REINVEST: "coins",
     InvTxnType.INTEREST: "coins",
@@ -780,9 +782,9 @@ class InvestmentTransaction(SoftDeleteModel):
         if t in (InvTxnType.BUY, InvTxnType.BUY_TO_COVER,
                  InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_BUY_CLOSE):
             return -(self.amount + self.fee)  # cash paid to buy / cover / open-long / close-written
-        if t in (InvTxnType.SELL, InvTxnType.SELL_SHORT,
+        if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.SELL_SHORT,
                  InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE):
-            return self.net_proceeds  # short-sale / option-write proceeds come in as cash
+            return self.net_proceeds  # sale / cash-in-lieu / short / option-write proceeds come in
         if t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
             # Cash = strike × shares (self.amount). Exercising a long PUT or being assigned on a
             # written CALL SELLS the underlying (cash in); the mirror cases BUY it (cash out).

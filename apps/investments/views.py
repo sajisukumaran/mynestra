@@ -5,6 +5,7 @@ master, and popup (c-modal) forms. Every money movement posts to the ledger thro
 apps.investments.services; this layer only reads POST, calls the service, and redirects."""
 
 import datetime
+import json
 from decimal import Decimal, InvalidOperation
 
 from django.contrib import messages
@@ -91,6 +92,7 @@ GROUP_REGISTRATIONS = {
 PICKER_TYPES = [
     (InvTxnType.BUY, "Buy"),
     (InvTxnType.SELL, "Sell"),
+    (InvTxnType.CASH_IN_LIEU, "Cash in lieu (fractional)"),
     (InvTxnType.DIVIDEND, "Dividend"),
     (InvTxnType.DIVIDEND_REINVEST, "Dividend (reinvested)"),
     (InvTxnType.INTEREST, "Interest"),
@@ -460,6 +462,8 @@ def account_detail(request, pk):
         picker_types=PICKER_TYPES,
         securities=Security.objects.filter(is_active=True).order_by("symbol", "name"),
         account_securities=Security.objects.filter(pk__in=sec_ids).order_by("symbol", "name"),
+        # Held quantity per security → the cash-in-lieu picker defaults to the fractional remainder.
+        held_qty_json=json.dumps({str(h.security.id): float(h.quantity) for h in hold}),
         income_accounts=_income_accounts(),
         expense_accounts=_expense_accounts(),
         bank_accounts=_bank_accounts(),
@@ -646,8 +650,8 @@ def _apply_txn_post(request, txn):
     lot_rows = _parse_lot_carry(request) if t == InvTxnType.IN_KIND_IN else []
 
     # Per-type required-field guards.
-    if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.DIVIDEND_REINVEST,
-             InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER):
+    if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.CASH_IN_LIEU,
+             InvTxnType.DIVIDEND_REINVEST, InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER):
         if security is None or quantity <= 0 or amount <= 0:
             return None
     elif t == InvTxnType.DIV_PAID_SHORT:
