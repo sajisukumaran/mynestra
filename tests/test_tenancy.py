@@ -204,3 +204,39 @@ def test_investments_accounts_securities_lots_and_ledger_are_isolated(make_tenan
         assert VestingTranche.objects.count() == 0
         assert not InvestmentAccount.objects.filter(nickname="Alpha Taxable").exists()
         assert JournalEntry.objects.count() == 0
+
+
+def test_payables_bills_payments_and_catalog_are_isolated(make_tenant):
+    """Module 6 (VendorProfile/Item/Bill/BillLine/Payment) and the AP entries they post must not
+    leak across tenant schemas."""
+    from apps.payables.models import Bill, BillLine, Item, Payment, VendorProfile
+    from apps.payables.services import apply_payment, post_bill
+
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        org = Organization.objects.create(name="Alpha-Only Vendor")
+        VendorProfile.objects.create(organization=org)
+        Item.objects.create(name="Alpha Widget", kind="good", upc="ALPHA1")
+        bill = Bill.objects.create(vendor_organization=org, bill_date=datetime.date(2026, 1, 5))
+        BillLine.objects.create(bill=bill, line_type="expense", description="Widgets",
+                                quantity=Decimal("1"), unit_price=Decimal("100"))
+        post_bill(bill)
+        payment = Payment.objects.create(
+            vendor_organization=org, date=datetime.date(2026, 1, 6),
+            amount=Decimal("100"), funding_kind="cash",
+        )
+        apply_payment(payment, [(bill, Decimal("100"))])
+        bill.refresh_from_db()
+        assert Bill.objects.count() == 1 and Payment.objects.count() == 1
+        assert VendorProfile.objects.count() == 1 and Item.objects.count() == 1
+        assert bill.status == Bill.Status.PAID
+
+    with schema_context(b.schema_name):
+        assert Bill.objects.count() == 0
+        assert Payment.objects.count() == 0
+        assert VendorProfile.objects.count() == 0
+        assert Item.objects.count() == 0
+        assert not Organization.objects.filter(name="Alpha-Only Vendor").exists()
+        assert JournalEntry.objects.count() == 0
