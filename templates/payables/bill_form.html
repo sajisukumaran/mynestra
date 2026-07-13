@@ -73,10 +73,14 @@
     <c-card title="Line items" icon="tag">
       <div class="stack-8">
         <label class="search"><c-icon name="search" size="sm" />
-          <input type="search" name="item_q" placeholder="Search an item by name, UPC or SKU to add it…"
+          <input type="search" name="item_q" x-ref="itemSearch" placeholder="Search an item by name, UPC or SKU…"
                  @keydown.enter.prevent
                  hx-get="{{ ui_tenant_url }}payables/item-search/"
                  hx-trigger="input changed delay:200ms, focus" hx-target="#item-results"></label>
+        <p x-show="itemTarget !== null" x-cloak class="hint">
+          Choosing an item for line <span x-text="itemTarget + 1"></span> — pick a result, or
+          <a href="#" @click.prevent="cancelPick()">cancel</a>.
+        </p>
         <div id="item-results"></div>
       </div>
 
@@ -98,6 +102,12 @@
               <span class="bill-line-rm" @click="removeLine(i)" title="Remove"><c-icon name="trash-2" size="sm" /></span>
             </div>
             <div class="bill-line-sub">
+              <span class="row" style="gap:6px" x-show="l.item">
+                <c-badge variant="info">Item</c-badge>
+                <span class="strong" x-text="l.item_name || 'Item'"></span>
+                <c-button type="button" size="sm" variant="ghost" @click="pickFor(i)">Change</c-button>
+              </span>
+              <c-button type="button" size="sm" variant="ghost" x-show="!l.item" @click="pickFor(i)"><c-icon name="tag" size="sm" /> Pick item</c-button>
               <label>Discount <input name="line_discount" x-model="l.discount" inputmode="decimal" style="width:90px"></label>
               <label>Tax <input name="line_tax" x-model="l.tax" inputmode="decimal" style="width:90px"></label>
               <template x-if="['item','expense'].includes(l.type)">
@@ -171,14 +181,27 @@ function billForm() {
     picked: { kind: '', id: '', name: '' }, newVendor: false, newName: '',
     pick(d) { this.picked = { kind: d.kind, id: d.id, name: d.name }; this.newVendor = false; },
     lines: JSON.parse(document.getElementById('lines-data').textContent),
+    itemTarget: null,
     pickItem(d) {
-      this.lines.push({ type: 'item', item: d.id || '', description: d.name || '', qty: '1',
-        price: '0', discount: '0', tax: '0', account: d.account || '',
-        capitalize: d.capitalize === '1', serial: '', warranty: '' });
+      if (this.itemTarget === null) {
+        this.lines.push({ type: 'item', item: d.id || '', item_name: d.name || '',
+          description: d.name || '', qty: '1', price: '0', discount: '0', tax: '0',
+          account: d.account || '', capitalize: d.capitalize === '1', serial: '', warranty: '' });
+      } else {
+        const l = this.lines[this.itemTarget];
+        l.item = d.id || '';
+        l.item_name = d.name || '';
+        l.account = d.account || '';
+        l.capitalize = d.capitalize === '1';
+        if (!l.description) l.description = d.name || '';
+        this.itemTarget = null;
+      }
     },
+    pickFor(i) { this.itemTarget = i; if (this.$refs.itemSearch) this.$refs.itemSearch.focus(); },
+    cancelPick() { this.itemTarget = null; },
     addLine(t) {
-      this.lines.push({ type: t, item: '', description: '', qty: '1', price: '0', discount: '0',
-        tax: '0', account: '', capitalize: false, serial: '', warranty: '' });
+      this.lines.push({ type: t, item: '', item_name: '', description: '', qty: '1', price: '0',
+        discount: '0', tax: '0', account: '', capitalize: false, serial: '', warranty: '' });
     },
     removeLine(i) { this.lines.splice(i, 1); },
     amt(l) {

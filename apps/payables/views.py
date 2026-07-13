@@ -446,14 +446,15 @@ def bill_edit(request, pk):
 def _render_bill_form(request, bill, mode):
     lines_data = [
         {
-            "type": li.line_type, "item": str(li.item_id or ""), "description": li.description,
+            "type": li.line_type, "item": str(li.item_id or ""),
+            "item_name": li.item.name if li.item_id else "", "description": li.description,
             "qty": str(li.quantity), "price": str(li.unit_price),
             "discount": str(li.line_discount), "tax": str(li.line_tax),
             "account": str(li.account_id or ""), "capitalize": li.capitalize,
             "serial": li.asset_serial,
             "warranty": li.warranty_end.isoformat() if li.warranty_end else "",
         }
-        for li in bill.lines.all()
+        for li in bill.lines.select_related("item")
     ] if bill.pk else []
     ctx = pay_context(
         request, "bills",
