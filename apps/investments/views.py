@@ -704,6 +704,11 @@ def _apply_txn_post(request, txn):
         if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER)
         else None
     )
+    # Dividend lifecycle dates — informational, dividend / reinvested-dividend only; cleared for any
+    # other type so switching type never leaves a stale date.
+    is_div = t in (InvTxnType.DIVIDEND, InvTxnType.DIVIDEND_REINVEST)
+    for f in ("declaration_date", "ex_dividend_date", "record_date"):
+        setattr(txn, f, parse_date(request.POST.get(f) or "") if is_div else None)
     txn.amount = amount
     txn.fee = fee if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.FEE,
                            InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER) else Decimal("0")

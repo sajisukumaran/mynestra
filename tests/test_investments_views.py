@@ -184,6 +184,49 @@ def test_invalid_transaction_save_is_rejected_and_messaged(make_tenant, make_use
         assert InvestmentTransaction.objects.filter(account_id=aid, txn_type="buy").count() == 1
 
 
+def test_dividend_dates_are_captured_and_metadata_only(make_tenant, make_user, client):
+    """A dividend records its declaration / ex-dividend / record dates (the main date stays the
+    payment date). Pure metadata — no GL or cash effect — and only for dividend types."""
+    from decimal import Decimal
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="T", name="AT&T",
+                                      currency=Currency.objects.get(code="USD"))
+        aid, sid = acct.pk, sec.pk
+    client.force_login(owner)
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "opening", "date": "2007-01-01", "amount": "1000"})
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "dividend", "date": "2007-02-01", "security": sid, "amount": "7.81",
+        "declaration_date": "2007-01-10", "ex_dividend_date": "2007-01-20",
+        "record_date": "2007-01-22"})
+
+    import datetime
+    with schema_context(tenant.schema_name):
+        from apps.investments.services import cash_balance
+        div = InvestmentTransaction.objects.get(account_id=aid, txn_type="dividend")
+        assert div.date == datetime.date(2007, 2, 1)               # payment date unchanged
+        assert div.declaration_date == datetime.date(2007, 1, 10)
+        assert div.ex_dividend_date == datetime.date(2007, 1, 20)
+        assert div.record_date == datetime.date(2007, 1, 22)
+        assert cash_balance(acct) == Decimal("1007.81")            # dates don't touch the money
+
+    # A non-dividend type never picks up dividend dates, even if the params are posted.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "interest", "date": "2007-03-01", "amount": "2.00",
+        "ex_dividend_date": "2007-02-25"})
+    with schema_context(tenant.schema_name):
+        interest = InvestmentTransaction.objects.get(account_id=aid, txn_type="interest")
+        assert interest.ex_dividend_date is None
+
+
 def test_net_amount_and_reactive_bindings_render(make_tenant, make_user, client):
     """The net-amount readout is computed client-side from amount + commission, so amount/fee must
     be x-model bound and the net expression present (added on a buy, deducted on a sell)."""

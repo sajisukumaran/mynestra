@@ -62,6 +62,22 @@ prefill) + unique
   </c-field>
 </div>
 
+{# Dividend dates — declaration / ex-dividend / record; informational (the Date above is the payment date) #}
+<div x-show="['dividend','dividend_reinvest'].includes(type)" x-cloak>
+  <div class="grid-halves">
+    <c-field label="Declaration date" help="When the dividend was announced.">
+      <div class="control"><input type="date" name="declaration_date" value="{% if txn and txn.declaration_date %}{{ txn.declaration_date|date:'Y-m-d' }}{% endif %}"></div>
+    </c-field>
+    <c-field label="Ex-dividend date" help="Own the shares before this date to be eligible; sets the qualified-dividend holding period.">
+      <div class="control"><input type="date" name="ex_dividend_date" value="{% if txn and txn.ex_dividend_date %}{{ txn.ex_dividend_date|date:'Y-m-d' }}{% endif %}"></div>
+    </c-field>
+  </div>
+  <c-field label="Record date" help="The company's shareholder-of-record cutoff.">
+    <div class="control"><input type="date" name="record_date" value="{% if txn and txn.record_date %}{{ txn.record_date|date:'Y-m-d' }}{% endif %}"></div>
+  </c-field>
+  <c-hint icon="info">The Date above is the payment date — when the cash was received.</c-hint>
+</div>
+
 {# Sell — cost basis note #}
 <div x-show="type === 'sell'" x-cloak><c-hint icon="info">Lots are sold first-in, first-out; the realized gain posts to Realized Capital Gain/Loss.</c-hint></div>
 

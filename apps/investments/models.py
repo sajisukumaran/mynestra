@@ -623,6 +623,13 @@ class InvestmentTransaction(SoftDeleteModel):
     # (buy/sell/short/cover); null elsewhere.
     settlement_date = models.DateField(null=True, blank=True)
 
+    # Dividend lifecycle dates (dividend / reinvested-dividend only): when it was declared, the
+    # ex-dividend cutoff (drives the qualified-dividend holding period) and the shareholder-of-
+    # record date. The main `date` above is the payment date. Informational — no GL or lot effect.
+    declaration_date = models.DateField(null=True, blank=True)
+    ex_dividend_date = models.DateField(null=True, blank=True)
+    record_date = models.DateField(null=True, blank=True)
+
     security = models.ForeignKey(
         Security, on_delete=models.PROTECT, null=True, blank=True, related_name="transactions"
     )
