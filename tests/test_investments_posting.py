@@ -166,6 +166,34 @@ def test_transfer_clearing_nets_to_zero_with_matching_bank_leg(make_tenant):
         assert bank.balance == D("-2000")           # money left the bank
 
 
+def test_transfer_clearing_nets_to_zero_between_two_investment_accounts(make_tenant):
+    from apps.investments.services import create_matching_leg
+
+    with schema_context(make_tenant().schema_name):
+        org = Organization.objects.create(name="Broker")
+        cur = Currency.objects.get(code="USD")
+        src = InvestmentAccount.objects.create(
+            institution=org, nickname="Taxable", registration="taxable_individual", currency=cur)
+        dst = InvestmentAccount.objects.create(
+            institution=org, nickname="Roth", registration="roth_ira", currency=cur)
+        ensure_gl_account(src)
+        ensure_gl_account(dst)
+        _add(src, InvTxnType.OPENING, JAN, amount="5000")
+
+        # Move cash out of the taxable account into the Roth; matching leg mirrors it in the Roth.
+        out = _add(src, InvTxnType.TRANSFER_OUT, datetime.date(2026, 2, 1), amount="1500",
+                   counter_investment_account=dst)
+        create_matching_leg(out)
+
+        clearing = resolve_account("transfer_clearing")
+        assert account_balance(clearing) == D("0")   # both legs net through 1150
+        assert cash_balance(src) == D("3500")         # 5000 − 1500 left
+        assert cash_balance(dst) == D("1500")         # arrived in the Roth
+        mirror = dst.transactions.get(txn_type=InvTxnType.TRANSFER_IN)
+        assert mirror.counter_investment_account_id == src.pk
+        assert not mirror.is_managed_in_leg           # editable/deletable, unlike an in-kind mirror
+
+
 def test_posting_is_idempotent(make_tenant):
     from apps.investments.services import post_transaction
 

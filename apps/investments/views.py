@@ -755,20 +755,24 @@ def _apply_txn_post(request, txn):
             pk=request.POST.get("category_account") or 0, is_postable=True
         ).first()
 
+    # Counterparty for a cash transfer: a tracked bank account (`bank:<pk>`) or another of the
+    # household's investment accounts (`inv:<pk>`) from the unified picker; else external/untracked.
     txn.counter_account = None
+    txn.counter_investment_account = None
     txn.counter_external = ""
     if t in (InvTxnType.TRANSFER_IN, InvTxnType.TRANSFER_OUT):
         from apps.banking.models import BankAccount
 
-        txn.counter_account = BankAccount.objects.filter(
-            pk=request.POST.get("counter_account") or 0
-        ).first()
+        kind, _, cid = (request.POST.get("counter") or "").strip().partition(":")
+        if kind == "bank" and cid:
+            txn.counter_account = BankAccount.objects.filter(pk=cid).first()
+        elif kind == "inv" and cid and cid != str(txn.account_id):
+            txn.counter_investment_account = InvestmentAccount.objects.filter(pk=cid).first()
         txn.counter_external = request.POST.get("counter_external", "").strip()
 
     # In-kind transfers / worthless / cash-merger. `lot_carry` is user-entered only for an external
     # in-kind IN; the OUT leg's snapshot is materialized by the engine on replay (never here). The
     # mirror IN leg of an internal transfer is managed by the service, not this form.
-    txn.counter_investment_account = None
     if t == InvTxnType.IN_KIND_OUT:
         txn.amount = Decimal("0")
         txn.lot_carry = None
@@ -816,7 +820,7 @@ def txn_create(request, pk):
             apply_transaction(txn, user=request.user, is_new=True)
             if (
                 txn.txn_type in (InvTxnType.TRANSFER_IN, InvTxnType.TRANSFER_OUT)
-                and txn.counter_account_id
+                and (txn.counter_account_id or txn.counter_investment_account_id)
                 and request.POST.get("auto_match")
             ):
                 create_matching_leg(txn, user=request.user)

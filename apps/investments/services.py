@@ -1130,12 +1130,32 @@ def _unlink_pair(out) -> None:
 
 
 def create_matching_leg(txn, *, user=None):
-    """For a cash transfer against a tracked bank account, post the opposite banking leg so the 1150
-    clearing account nets to zero across the two modules."""
-    if txn.counter_account_id is None or txn.txn_type not in (
-        InvTxnType.TRANSFER_IN,
-        InvTxnType.TRANSFER_OUT,
-    ):
+    """For a cash transfer against a tracked counterparty, post the opposite leg so the 1150
+    clearing account nets to zero across the two accounts — a banking leg when the other side is a
+    bank account, or a mirror investment transfer when it is another of the household's investment
+    accounts. Fire-and-forget (like a bank match): editing/deleting `txn` later won't re-sync it."""
+    if txn.txn_type not in (InvTxnType.TRANSFER_IN, InvTxnType.TRANSFER_OUT):
+        return None
+    inv_type = (
+        InvTxnType.TRANSFER_OUT
+        if txn.txn_type == InvTxnType.TRANSFER_IN
+        else InvTxnType.TRANSFER_IN
+    )
+    if txn.counter_investment_account_id is not None:
+        # The other side is a tracked investment account: post the mirror transfer there so both
+        # legs move cash↔1150 and the clearing account nets out.
+        leg = InvestmentTransaction.objects.create(
+            account=txn.counter_investment_account,
+            txn_type=inv_type,
+            date=txn.date,
+            amount=txn.amount,
+            counter_investment_account=txn.account,
+            memo=txn.memo,
+            reference=txn.reference,
+        )
+        apply_transaction(leg, user=user, is_new=True)
+        return leg
+    if txn.counter_account_id is None:
         return None
     from apps.banking.models import BankTransaction
     from apps.banking.models import TxnType as BankTxnType
@@ -1516,8 +1536,8 @@ def income_summary(account) -> dict:
 
 
 def transfer_totals(account) -> dict:
-    """Total cash moved into / out of the account via tracked-bank transfers (TRANSFER_IN /
-    TRANSFER_OUT). Read-only rollup; no GL involvement."""
+    """Total cash moved into / out of the account via transfers (TRANSFER_IN / TRANSFER_OUT),
+    whether the other side is a bank or another investment account. Read-only rollup; no GL."""
     agg = (
         account.transactions
         .filter(txn_type__in=[InvTxnType.TRANSFER_IN, InvTxnType.TRANSFER_OUT])

@@ -1,7 +1,8 @@
 {% comment %}Investment transaction add/edit fields. Included inside a <form> whose Alpine x-data
 provides `type` (selected txn type) + the payee picker state (payeeKind/payeeId/payeeName/payeeTint/
 payeeInit + pickPayee/clearPayee). Fields reveal per type via x-show. Needs: account, picker_types,
-securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit prefill) + unique
+securities, income_accounts, expense_accounts, bank_accounts, investment_accounts. Pass `txn` (edit
+prefill) + unique
 `suffix`. Sells draw lots first-in, first-out.{% endcomment %}
 <div class="form-grid">
   <c-field label="Type" required>
@@ -216,18 +217,19 @@ securities, income_accounts, expense_accounts, bank_accounts. Pass `txn` (edit p
   </c-field>
 </div>
 
-{# Transfer — the tracked bank account on the other side #}
+{# Transfer — the tracked account on the other side: a bank account or another investment account #}
 <div x-show="type === 'transfer_in' || type === 'transfer_out'" x-cloak>
   <div class="grid-halves">
-    <c-field label="Bank account">
-      <c-select name="counter_account">
+    <c-field label="Other account" help="A tracked bank or investment account on the other side.">
+      <c-select name="counter">
         <option value="">— external / untracked —</option>
-        {% for ba in bank_accounts %}<option value="{{ ba.pk }}"{% if txn.counter_account_id == ba.pk %} selected{% endif %}>{{ ba.nickname }} · {{ ba.bank.display }}</option>{% endfor %}
+        {% if bank_accounts %}<optgroup label="Bank accounts">{% for ba in bank_accounts %}<option value="bank:{{ ba.pk }}"{% if txn.counter_account_id == ba.pk %} selected{% endif %}>{{ ba.nickname }} · {{ ba.bank.display }}</option>{% endfor %}</optgroup>{% endif %}
+        {% if investment_accounts %}<optgroup label="Investment accounts">{% for ia in investment_accounts %}<option value="inv:{{ ia.pk }}"{% if txn.counter_investment_account_id == ia.pk %} selected{% endif %}>{{ ia.nickname }} · {{ ia.institution.display }}</option>{% endfor %}</optgroup>{% endif %}
       </c-select>
     </c-field>
     <c-field label="External name" help="If the other side isn't tracked here."><c-input name="counter_external" value="{{ txn.counter_external|default:'' }}" placeholder="e.g. External bank" /></c-field>
   </div>
-  {% if not txn %}<label class="row"><input type="checkbox" name="auto_match" checked> <span class="muted">Also record the matching leg in the bank account</span></label>{% endif %}
+  {% if not txn %}<label class="row"><input type="checkbox" name="auto_match" checked> <span class="muted">Also record the matching leg in the other account</span></label>{% endif %}
 </div>
 
 {# Contribution tax year — IRA/HSA/529 only; prior-year contributions allowed until the deadline. Options track the entered date's year and the year before, reactive to the parent `date`. #}
