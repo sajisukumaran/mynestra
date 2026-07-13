@@ -12,8 +12,10 @@ import datetime
 from decimal import Decimal
 
 from django.db import models
+from simple_history.models import HistoricalRecords
 
-from apps.core.models import TimeStampedModel
+from apps.core.models import SoftDeleteModel, TimeStampedModel
+from apps.finance.models import AMOUNT_DECIMALS, AMOUNT_MAX_DIGITS
 
 
 class PaymentTerm(TimeStampedModel):
@@ -98,3 +100,95 @@ class PaymentTerm(TimeStampedModel):
         if not self.has_discount:
             return None
         return bill_date + datetime.timedelta(days=self.discount_days)
+
+
+class Item(SoftDeleteModel):
+    """A catalogued purchasable item (a good or a service). Bill lines reference it, giving search
+    by UPC/SKU, spend-by-item, and price history. Mirrors the Investments Security master. Carries
+    the default GL homes a purchase posts to (an expense account, or an asset account when the item
+    is a durable good you capitalize for warranty tracking)."""
+
+    class Kind(models.TextChoices):
+        GOOD = "good", "Good"
+        SERVICE = "service", "Service"
+
+    name = models.CharField(max_length=160)
+    description = models.CharField(max_length=255, blank=True)
+    upc = models.CharField(max_length=40, blank=True)  # universal barcode; per-store SKUs below
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.GOOD)
+    unit = models.CharField(max_length=24, blank=True)  # each / box / kg / hour…
+    # Default posting homes for a purchase of this item.
+    default_account = models.ForeignKey(
+        "finance.Account", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    # When true, a bill line for this item defaults to capitalizing to `asset_account`.
+    capitalize_default = models.BooleanField(default=False)
+    asset_account = models.ForeignKey(
+        "finance.Account", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [models.Index(fields=["upc"], name="payables_item_upc_idx")]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def kind_label(self) -> str:
+        return self.get_kind_display()
+
+    @property
+    def is_service(self) -> bool:
+        return self.kind == self.Kind.SERVICE
+
+    @property
+    def tint(self) -> str:
+        return "violet" if self.is_service else "teal"
+
+    @property
+    def latest_price(self):
+        """The last recorded price from this item's most recently updated store SKU (or None)."""
+        sku = self.skus.exclude(last_price__isnull=True).order_by("-updated_at").first()
+        return sku.last_price if sku else None
+
+
+class ItemSku(TimeStampedModel):
+    """A store-specific stock-keeping unit for an item. SKUs are per store; the UPC (on `Item`) is
+    universal. `store` links an Organization when known, else `store_name` is free text."""
+
+    item = models.ForeignKey(Item, on_delete=models.CASCADE, related_name="skus")
+    store = models.ForeignKey(
+        "organizations.Organization",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+    store_name = models.CharField(max_length=120, blank=True)
+    sku = models.CharField(max_length=60)
+    last_price = models.DecimalField(
+        max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS, null=True, blank=True
+    )
+    note = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        ordering = ["store_name", "sku"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["item", "store", "sku"], name="uniq_itemsku_item_store_sku"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.sku} @ {self.store_display}"
+
+    @property
+    def store_display(self) -> str:
+        if self.store_id:
+            return self.store.name
+        return self.store_name or "—"

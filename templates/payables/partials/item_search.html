@@ -1,0 +1,18 @@
+{% comment %}htmx item picker results (used by the bill line-item editor). Each button carries the
+item's posting defaults as data-attrs; the bill form's Alpine `pickItem` reads them.{% endcomment %}
+{% if items %}
+<div class="rel-preview stack-8">
+  {% for it in items %}
+  <button type="button" class="rel-pick"
+          data-id="{{ it.pk }}" data-name="{{ it.name }}" data-kind="{{ it.kind }}"
+          data-account="{{ it.default_account_id|default:'' }}"
+          data-capitalize="{{ it.capitalize_default|yesno:'1,' }}"
+          @click="pickItem && pickItem($el.dataset)">
+    <c-avatar tint="{{ it.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar>
+    <span><span class="strong">{{ it.name }}</span>{% if it.upc %} <span class="subtle">· UPC {{ it.upc }}</span>{% endif %}</span>
+  </button>
+  {% endfor %}
+</div>
+{% elif q %}
+<p class="subtle">No items match “{{ q }}”.</p>
+{% endif %}

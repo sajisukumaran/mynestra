@@ -1,0 +1,73 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}Items{% endblock %}
+
+{% block pay %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" /><span class="strong">Items</span></c-breadcrumb>
+
+<c-page-header title="Items" subtitle="{{ total }} catalogued {{ total|pluralize:'item,items' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}payables/items/new/"><c-icon name="plus" /> New item</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by name, UPC or SKU…"></label>
+    {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}payables/items/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not kind %} active{% endif %}" href="{% querystring kind=None page=None %}">All</a>
+    {% for val, label in kinds %}
+    <a class="fchip{% if kind == val %} active{% endif %}" href="{% querystring kind=val page=None %}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if items %}
+    <c-table>
+      <thead><tr>
+        <c-th>Item</c-th>
+        <c-th>Type</c-th>
+        <c-th>Unit</c-th>
+        <c-th>SKUs</c-th>
+        <th class="col-num">Last price</th>
+      </tr></thead>
+      <tbody>
+        {% for it in items %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}payables/items/{{ it.pk }}/">
+              <c-avatar tint="{{ it.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar>
+              <div><div class="pc-name">{{ it.name }}{% if not it.is_active %} <c-badge variant="warning">Inactive</c-badge>{% endif %}</div>{% if it.upc %}<div class="pc-sub">UPC {{ it.upc }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td><c-badge>{{ it.kind_label }}</c-badge></td>
+          <td class="muted">{{ it.unit|default:"—" }}</td>
+          <td class="muted tnum">{{ it.skus.count }}</td>
+          <td class="col-num">{% if it.latest_price %}<c-money :amount="it.latest_price" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="tag"
+      title="{% if q or kind %}No items match{% else %}No items yet{% endif %}"
+      text="{% if q or kind %}Try a different search or filter.{% else %}Add the goods and services you buy, with their UPC and per-store SKUs.{% endif %}">
+      {% if not q and not kind %}<c-button variant="primary" href="{{ ui_tenant_url }}payables/items/new/"><c-icon name="plus" /> New item</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

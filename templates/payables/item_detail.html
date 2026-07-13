@@ -1,0 +1,96 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}{{ item.name }}{% endblock %}
+
+{% block pay %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/items/">Items</a><c-icon name="chevron-right" />
+  <span class="strong">{{ item.name }}</span>
+</c-breadcrumb>
+
+<c-page-header title="{{ item.name }}" subtitle="{{ item.kind_label }}{% if item.unit %} · per {{ item.unit }}{% endif %}">
+  <c-slot name="actions">
+    <c-button variant="default" href="{{ ui_tenant_url }}payables/items/{{ item.pk }}/edit/"><c-icon name="pencil" size="sm" /> Edit</c-button>
+    <c-confirm-dialog title="Delete &ldquo;{{ item.name }}&rdquo;?" message="This removes the item from the catalog.">
+      <c-slot name="trigger"><c-button variant="ghost"><c-icon name="trash-2" size="sm" /> Delete</c-button></c-slot>
+      <c-slot name="confirm">
+        <form method="post" action="{{ ui_tenant_url }}payables/items/{{ item.pk }}/delete/">{% csrf_token %}
+          <c-button type="submit" variant="danger">Delete</c-button>
+        </form>
+      </c-slot>
+    </c-confirm-dialog>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <c-card title="Details" icon="tag">
+    <c-key-value>
+      <c-kv-row key="Type">{{ item.kind_label }}</c-kv-row>
+      <c-kv-row key="Unit">{{ item.unit|default:"—" }}</c-kv-row>
+      <c-kv-row key="UPC">{{ item.upc|default:"—" }}</c-kv-row>
+      <c-kv-row key="Default expense">{% if item.default_account %}{{ item.default_account.display }}{% else %}<span class="subtle">Chosen at bill time</span>{% endif %}</c-kv-row>
+      {% if item.capitalize_default %}<c-kv-row key="Capitalize">Yes — {% if item.asset_account %}{{ item.asset_account.display }}{% else %}Household Goods &amp; Equipment{% endif %}</c-kv-row>{% endif %}
+    </c-key-value>
+    {% if item.description %}<p class="muted">{{ item.description }}</p>{% endif %}
+    {% if item.notes %}<p class="muted">{{ item.notes }}</p>{% endif %}
+  </c-card>
+
+  <c-card title="Store SKUs" icon="tag" flush>
+    <c-slot name="actions">
+      <c-modal title="Add SKU">
+        <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="plus" size="sm" /> Add SKU</c-button></c-slot>
+        <form method="post" action="{{ ui_tenant_url }}payables/items/{{ item.pk }}/skus/new/">{% csrf_token %}
+          <div class="stack-16">
+            <div class="form-grid">
+              <c-field label="Store"><c-input name="store_name" placeholder="e.g. Amazon" /></c-field>
+              <c-field label="SKU" required><c-input name="sku" required /></c-field>
+              <c-field label="Last price"><c-input name="last_price" inputmode="decimal" /></c-field>
+              <c-field label="Note"><c-input name="note" /></c-field>
+            </div>
+            <div class="row"><c-button type="submit" variant="primary">Add SKU</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+          </div>
+        </form>
+      </c-modal>
+    </c-slot>
+    {% if skus %}
+    <c-table>
+      <thead><tr><c-th>Store</c-th><c-th>SKU</c-th><th class="col-num">Last price</th><c-th>Note</c-th><th></th></tr></thead>
+      <tbody>
+        {% for s in skus %}
+        <tr>
+          <td>{{ s.store_display }}</td>
+          <td class="strong">{{ s.sku }}</td>
+          <td class="col-num">{% if s.last_price %}<c-money :amount="s.last_price" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
+          <td class="muted">{{ s.note|default:"—" }}</td>
+          <td>
+            <div class="cell-actions">
+              <c-modal title="Edit SKU">
+                <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                <form method="post" action="{{ ui_tenant_url }}payables/items/{{ item.pk }}/skus/{{ s.pk }}/edit/">{% csrf_token %}
+                  <div class="stack-16">
+                    <div class="form-grid">
+                      <c-field label="Store"><c-input name="store_name" value="{{ s.store_name }}" /></c-field>
+                      <c-field label="SKU" required><c-input name="sku" value="{{ s.sku }}" required /></c-field>
+                      <c-field label="Last price"><c-input name="last_price" inputmode="decimal" value="{{ s.last_price|default:'' }}" /></c-field>
+                      <c-field label="Note"><c-input name="note" value="{{ s.note }}" /></c-field>
+                    </div>
+                    <div class="between">
+                      <c-button type="submit" variant="primary">Save</c-button>
+                      <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}payables/items/{{ item.pk }}/skus/{{ s.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                    </div>
+                  </div>
+                </form>
+              </c-modal>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    {% else %}
+    <c-empty-state icon="tag" title="No SKUs yet" text="Add a per-store SKU so you can find this item by its store code." />
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

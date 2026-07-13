@@ -3,7 +3,19 @@ bound to these fields' values (the app's idiom)."""
 
 from django import forms
 
-from apps.payables.models import PaymentTerm
+from apps.payables.models import Item, PaymentTerm
+
+
+class ItemForm(forms.ModelForm):
+    """Create/edit a catalog item. Posting defaults (default_account, capitalize_default,
+    asset_account) are parsed from POST in the view (account selects), the app's idiom."""
+
+    class Meta:
+        model = Item
+        fields = ["name", "description", "upc", "kind", "unit", "notes", "is_active"]
+
+    def clean_name(self):
+        return self.cleaned_data["name"].strip()
 
 
 class PaymentTermForm(forms.ModelForm):
