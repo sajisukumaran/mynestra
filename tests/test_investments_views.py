@@ -227,6 +227,27 @@ def test_dividend_dates_are_captured_and_metadata_only(make_tenant, make_user, c
         assert interest.ex_dividend_date is None
 
 
+def test_transaction_form_blocks_invalid_submit_client_side(make_tenant, make_user, client):
+    """The add/edit forms carry an Alpine guard — a formError getter, x-model on quantity/security,
+    and a Save @click that prevents submitting an invalid form — so a mistake keeps the modal open
+    with the entered values intact instead of bouncing to a lost-data redirect."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        aid = acct.pk
+    client.force_login(owner)
+    body = client.get(_url(tenant, f"accounts/{aid}/")).content.decode()
+    assert "get formError()" in body
+    assert 'x-model="quantity"' in body and 'x-model="security"' in body
+    assert "attempted = true" in body   # Save click prevents an invalid submit
+    assert "{#" not in body             # no leaked template comment
+
+
 def test_security_picker_scopes_to_account_transacted_securities(make_tenant, make_user, client):
     """The register's Security picker for income/holding ops lists only securities THIS account has
     transacted (account_securities); acquisitions still offer the full master (securities)."""

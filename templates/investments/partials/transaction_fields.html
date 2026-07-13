@@ -26,14 +26,14 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
   <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest). For a merger/spin-off this is the original security (X).">
     {# Two pickers share name="security", :disabled-guarded so only the active submits: acquisitions (buy/opening/in-kind-in/short-open/option-open) list every instrument; everything else only this account's transacted securities. #}
     <div x-show="!['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)" x-cloak class="control is-select">
-      <select name="security" :disabled="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
+      <select name="security" x-model="security" :disabled="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
         <option value="">— none / cash —</option>
         {% for s in account_securities %}<option value="{{ s.pk }}"{% if txn.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
       </select>
       <c-icon name="chevron-down" size="sm" class="subtle" />
     </div>
     <div x-show="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)" x-cloak class="control is-select">
-      <select name="security" :disabled="!['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
+      <select name="security" x-model="security" :disabled="!['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
         <option value="">— none / cash —</option>
         {% for s in securities %}<option value="{{ s.pk }}"{% if txn.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
       </select>
@@ -45,7 +45,7 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 {# Quantity + price — buy / sell / reinvest / opening-holding / in-kind-out (qty only) / short / cover #}
 <div x-show="['buy','sell','dividend_reinvest','opening','in_kind_out','sell_short','buy_to_cover'].includes(type)" x-cloak>
   <div class="grid-halves">
-    <c-field label="Quantity" help="Shares / units."><div class="control"><input name="quantity" inputmode="decimal" value="{% if txn and txn.quantity %}{{ txn.quantity|floatformat:'-6' }}{% endif %}" placeholder="0"></div></c-field>
+    <c-field label="Quantity" help="Shares / units."><div class="control"><input name="quantity" inputmode="decimal" x-model="quantity" value="{% if txn and txn.quantity %}{{ txn.quantity|floatformat:'-6' }}{% endif %}" placeholder="0"></div></c-field>
     <div x-show="type !== 'in_kind_out'"><c-field label="Price / unit"><div class="control"><input name="price" inputmode="decimal" :disabled="!['buy','sell','dividend_reinvest','opening','sell_short','buy_to_cover'].includes(type)" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div></c-field></div>
   </div>
 </div>
