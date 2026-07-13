@@ -6,6 +6,7 @@ from django.test import override_settings
 from django_tenants.utils import schema_context
 
 from apps.organizations.models import Branch, Organization
+from apps.payables.models import PaymentTerm
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.models import Category
 from apps.tenants.models import Invitation, Membership, Role
@@ -23,7 +24,7 @@ def _u(tenant, path=""):
 
 
 SETUP_PAGES = [
-    "", "categories/", "relationship-types/", "members/",
+    "", "categories/", "relationship-types/", "payment-terms/", "members/",
     "appearance/", "localization/", "profile/", "recently-deleted/",
 ]
 
@@ -83,6 +84,35 @@ def test_custom_category_lifecycle(make_tenant, make_user, client):
     assert client.post(_u(tenant, f"categories/{cat.pk}/delete/")).status_code == 302
     with schema_context(tenant.schema_name):
         assert not Category.objects.filter(pk=cat.pk).exists()
+
+
+def test_system_payment_term_locked(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    with schema_context(tenant.schema_name):
+        sys_term = PaymentTerm.objects.filter(is_system=True).first()
+    assert client.post(_u(tenant, f"payment-terms/{sys_term.pk}/edit/"),
+                       {"name": "HACKED", "kind": "net_days", "net_days": 1}).status_code == 403
+    assert client.post(_u(tenant, f"payment-terms/{sys_term.pk}/delete/")).status_code == 403
+    with schema_context(tenant.schema_name):
+        assert PaymentTerm.objects.filter(pk=sys_term.pk).exists()
+
+
+def test_custom_payment_term_lifecycle(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    assert client.post(_u(tenant, "payment-terms/new/"),
+                       {"name": "Net 45", "kind": "net_days", "net_days": 45,
+                        "discount_percent": "0", "discount_days": "0"}).status_code == 302
+    with schema_context(tenant.schema_name):
+        term = PaymentTerm.objects.get(name="Net 45")
+        assert term.is_system is False and term.net_days == 45
+    assert client.post(_u(tenant, f"payment-terms/{term.pk}/edit/"),
+                       {"name": "Net 45", "kind": "net_days", "net_days": 50,
+                        "discount_percent": "0", "discount_days": "0"}).status_code == 302
+    assert client.post(_u(tenant, f"payment-terms/{term.pk}/delete/")).status_code == 302
+    with schema_context(tenant.schema_name):
+        assert not PaymentTerm.objects.filter(pk=term.pk).exists()
 
 
 def test_system_relationship_types_are_locked(make_tenant, make_user, client):

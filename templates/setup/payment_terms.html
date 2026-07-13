@@ -1,0 +1,55 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Payment terms{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Payment terms</span></c-breadcrumb>
+<c-page-header title="Payment terms" subtitle="How vendor bills compute their due date. System terms are locked.">
+  <c-slot name="actions">
+    <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}setup/payment-terms/new/"><c-icon name="plus" size="sm" /> New term</c-button>
+  </c-slot>
+</c-page-header>
+
+<c-card flush>
+  <c-table>
+    <thead><tr>
+      <c-th>Term</c-th>
+      <c-th>Rule</c-th>
+      <c-th>Early-payment discount</c-th>
+      <c-th>Status</c-th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      {% for t in terms %}
+      <tr>
+        <td class="strong">{{ t.name }}{% if not t.is_active %} <c-badge variant="warning">Inactive</c-badge>{% endif %}</td>
+        <td>{{ t.rule_display }}</td>
+        <td>{% if t.has_discount %}{{ t.discount_display }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+        <td>
+          {% if t.is_system %}<c-badge variant="lock"><c-icon name="key-round" /> System</c-badge>
+          {% else %}<span class="subtle">Custom</span>{% endif %}
+        </td>
+        <td>
+          <div class="cell-actions">
+          {% if t.is_system %}
+            <span class="subtle" title="Locked — system term"><c-icon name="key-round" size="sm" /></span>
+          {% else %}
+            <c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}setup/payment-terms/{{ t.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button>
+            <c-confirm-dialog title="Delete &ldquo;{{ t.name }}&rdquo;?" message="This removes the payment term.">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+              <c-slot name="confirm">
+                <form method="post" action="{{ ui_tenant_url }}setup/payment-terms/{{ t.pk }}/delete/">{% csrf_token %}
+                  <c-button type="submit" variant="danger">Delete</c-button>
+                </form>
+              </c-slot>
+            </c-confirm-dialog>
+          {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="5"><span class="subtle">No payment terms yet.</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+</c-card>
+{% endblock %}

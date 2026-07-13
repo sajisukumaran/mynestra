@@ -1,0 +1,52 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}{% if mode == 'create' %}New payment term{% else %}Edit payment term{% endif %}{% endblock %}
+
+{% block setup %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}setup/payment-terms/">Payment terms</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'create' %}New{% else %}{{ term.name }}{% endif %}</span>
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New payment term{% else %}Edit payment term{% endif %}" subtitle="How a bill's due date is computed from its bill date." />
+
+<c-card>
+  <form method="post" x-data="{ kind: '{{ form.kind.value|default:'net_days' }}' }">{% csrf_token %}
+    <div class="form-grid">
+      <c-field label="Name" required error="{{ form.name.errors.0 }}">
+        <c-input name="name" value="{{ form.name.value|default:'' }}" maxlength="60" required />
+      </c-field>
+      <c-field label="Rule" error="{{ form.kind.errors.0 }}">
+        <c-select name="kind" x-model="kind">
+          {% for value, label in form.fields.kind.choices %}
+          <option value="{{ value }}" {% if form.kind.value == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </c-select>
+      </c-field>
+      <div x-show="kind === 'net_days'" x-cloak>
+        <c-field label="Net days" help="Due = bill date + this many days." error="{{ form.net_days.errors.0 }}">
+          <c-input type="number" name="net_days" min="0" value="{{ form.net_days.value|default:'0' }}" />
+        </c-field>
+      </div>
+      <div x-show="kind === 'day_of_month'" x-cloak>
+        <c-field label="Day of month" help="Due on this day (1–31), next occurrence." error="{{ form.day_of_month.errors.0 }}">
+          <c-input type="number" name="day_of_month" min="1" max="31" value="{{ form.day_of_month.value|default:'' }}" />
+        </c-field>
+      </div>
+    </div>
+
+    <div class="form-grid">
+      <c-field label="Early-payment discount %" help="Optional — e.g. 2 for a 2% discount." error="{{ form.discount_percent.errors.0 }}">
+        <c-input type="number" step="0.01" min="0" name="discount_percent" value="{{ form.discount_percent.value|default:'0' }}" />
+      </c-field>
+      <c-field label="…if paid within (days)" error="{{ form.discount_days.errors.0 }}">
+        <c-input type="number" name="discount_days" min="0" value="{{ form.discount_days.value|default:'0' }}" />
+      </c-field>
+    </div>
+
+    <c-save-bar note="Payment term">
+      <c-button variant="ghost" href="{{ ui_tenant_url }}setup/payment-terms/">Cancel</c-button>
+      <c-button type="submit" variant="primary">{% if mode == 'create' %}Create term{% else %}Save changes{% endif %}</c-button>
+    </c-save-bar>
+  </form>
+</c-card>
+{% endblock %}

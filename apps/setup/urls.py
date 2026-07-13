@@ -26,6 +26,11 @@ urlpatterns = [
         views.rel_type_delete,
         name="rel-type-delete",
     ),
+    # Payment terms (Payables catalog)
+    path("payment-terms/", views.payment_terms, name="payment-terms"),
+    path("payment-terms/new/", views.payment_term_create, name="payment-term-create"),
+    path("payment-terms/<int:pk>/edit/", views.payment_term_edit, name="payment-term-edit"),
+    path("payment-terms/<int:pk>/delete/", views.payment_term_delete, name="payment-term-delete"),
     # Household members (which People belong to this household)
     path("household-members/", views.household_members, name="household-members"),
     path(

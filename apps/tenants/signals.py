@@ -19,6 +19,7 @@ def seed_new_tenant(sender, tenant, **kwargs):
 
     # Imported lazily so app loading doesn't depend on import order.
     from apps.finance.seed import seed_finance
+    from apps.payables.seed import seed_payment_terms
     from apps.relationships.seed import seed_relationship_types
     from apps.setup.seed import seed_categories
 
@@ -26,3 +27,4 @@ def seed_new_tenant(sender, tenant, **kwargs):
         seed_categories()
         seed_relationship_types()
         seed_finance()
+        seed_payment_terms()

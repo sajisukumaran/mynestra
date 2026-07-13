@@ -19,6 +19,8 @@ from apps.contacts.models import Person
 from apps.families.models import Family
 from apps.finance.models import Currency
 from apps.organizations.models import Branch, Organization
+from apps.payables.forms import PaymentTermForm
+from apps.payables.models import PaymentTerm
 from apps.relationships.models import PersonOrgRelationshipType, RelationshipType
 from apps.setup.forms import (
     CategoryForm,
@@ -49,6 +51,7 @@ def setup_context(request, active, **extra):
         "active": active,
         "nav_categories": Category.objects.count(),
         "nav_rel_types": nav_rel_types,
+        "nav_payment_terms": PaymentTerm.objects.count(),
         "nav_members": Membership.objects.filter(tenant=request.tenant).count(),
         "nav_household_members": Person.objects.filter(is_household_member=True).count(),
         "nav_invites": Invitation.objects.filter(
@@ -198,6 +201,50 @@ def rel_type_delete(request, kind, pk):
     if request.method == "POST":
         obj.delete()  # hard delete: no dependents in P3 (relationship edges land in P5)
     return redirect(setup_url(request, "relationship-types/"))
+
+
+# --- Payment terms (Payables catalog) -------------------------------------------------------
+# System rows (seeded §6) are locked like categories: edit/delete refused server-side.
+
+
+@owner_required
+def payment_terms(request):
+    """List payment terms; system rows show a lock, custom rows can be edited/deleted."""
+    ctx = setup_context(request, "payment-terms", terms=PaymentTerm.objects.all())
+    return render(request, "setup/payment_terms.html", ctx)
+
+
+@owner_required
+def payment_term_create(request):
+    form = PaymentTermForm(request.POST or None, instance=PaymentTerm())
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(setup_url(request, "payment-terms/"))
+    ctx = setup_context(request, "payment-terms", form=form, mode="create")
+    return render(request, "setup/payment_term_form.html", ctx)
+
+
+@owner_required
+def payment_term_edit(request, pk):
+    term = get_object_or_404(PaymentTerm, pk=pk)
+    if term.is_system:
+        return HttpResponseForbidden("System payment terms are locked and cannot be edited.")
+    form = PaymentTermForm(request.POST or None, instance=term)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(setup_url(request, "payment-terms/"))
+    ctx = setup_context(request, "payment-terms", form=form, term=term, mode="edit")
+    return render(request, "setup/payment_term_form.html", ctx)
+
+
+@owner_required
+def payment_term_delete(request, pk):
+    term = get_object_or_404(PaymentTerm, pk=pk)
+    if term.is_system:
+        return HttpResponseForbidden("System payment terms are locked and cannot be deleted.")
+    if request.method == "POST":
+        term.delete()  # hard delete: bills that reference a term PROTECT it (guarded in module 6)
+    return redirect(setup_url(request, "payment-terms/"))
 
 
 # --- Members & invitations ------------------------------------------------------------------
