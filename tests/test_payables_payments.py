@@ -144,6 +144,41 @@ def test_delete_payment_reopens_bill(make_tenant, make_user, client):
         assert not Payment.all_objects.filter(pk=payment.pk).exists()
 
 
+def test_edit_payment_reallocates(make_tenant, make_user, client):
+    """Editing a payment re-posts it in place: old funding torn down, new allocations applied,
+    bills recomputed, and it stays one payment (not a duplicate)."""
+    tenant, user = _member(make_tenant, make_user)
+    client.force_login(user)
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.create(name="Acme")
+        b1 = _bill(org, "100")
+        b2 = _bill(org, "50")
+    client.post(_u(tenant, "payments/new/"), {
+        "vendor_kind": "organization", "vendor_id": str(org.pk),
+        "date": "2026-02-05", "funding_kind": "cash", "cash_account": "",
+        f"alloc_{b1.pk}": "100",
+    })
+    with schema_context(tenant.schema_name):
+        payment = Payment.objects.get()
+    assert client.get(_u(tenant, f"payments/{payment.pk}/edit/")).status_code == 200
+    resp = client.post(_u(tenant, f"payments/{payment.pk}/edit/"), {
+        "vendor_kind": "organization", "vendor_id": str(org.pk),
+        "date": "2026-02-06", "funding_kind": "cash", "cash_account": "",
+        f"alloc_{b1.pk}": "40", f"alloc_{b2.pk}": "50",
+    })
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        assert Payment.all_objects.count() == 1        # edited in place, not duplicated
+        payment.refresh_from_db()
+        assert payment.amount == D("90")
+        assert payment.date == datetime.date(2026, 2, 6)
+        b1.refresh_from_db()
+        b2.refresh_from_db()
+        assert b1.status == Bill.Status.PARTIALLY_PAID and b1.balance_due == D("60")
+        assert b2.status == Bill.Status.PAID
+        assert account_balance("accounts_payable") == D("60")
+
+
 def test_dashboard_and_launcher_tile(make_tenant, make_user, client):
     tenant, user = _member(make_tenant, make_user)
     client.force_login(user)

@@ -1,31 +1,31 @@
 {% extends "payables/base.html" %}
-{% block pay_heading %}Record payment{% endblock %}
+{% block pay_heading %}{% if mode == 'edit' %}Edit {{ payment.payment_number }}{% else %}Record payment{% endif %}{% endblock %}
 
 {% block pay %}
 <c-breadcrumb>
   <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
   <a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" />
   <a href="{{ ui_tenant_url }}payables/payments/">Payments</a><c-icon name="chevron-right" />
-  <span class="strong">New</span>
+  {% if mode == 'edit' %}<span class="strong">Edit {{ payment.payment_number }}</span>{% else %}<span class="strong">New</span>{% endif %}
 </c-breadcrumb>
-<c-page-header title="Record payment" subtitle="Paying {{ vendor_name }}" />
+<c-page-header title="{% if mode == 'edit' %}Edit {{ payment.payment_number }}{% else %}Record payment{% endif %}" subtitle="Paying {{ vendor_name }}" />
 
-<form method="post" x-data="{ funding: 'cash' }">{% csrf_token %}
+<form method="post" x-data="{ funding: '{{ funding_init }}' }">{% csrf_token %}
   <input type="hidden" name="vendor_kind" value="{{ vendor_kind }}">
   <input type="hidden" name="vendor_id" value="{{ vendor_id }}">
 
   <div class="stack stack-20">
     <c-card title="Bills to settle" icon="file-text" flush>
-      {% if bills %}
+      {% if bill_rows %}
       <c-table>
         <thead><tr><c-th>Bill</c-th><c-th>Due</c-th><th class="col-num">Balance</th><th class="col-num">Pay now</th></tr></thead>
         <tbody>
-          {% for b in bills %}
+          {% for row in bill_rows %}
           <tr>
-            <td><a class="strong" href="{{ ui_tenant_url }}payables/bills/{{ b.pk }}/">{{ b.bill_number }}</a>{% if b.vendor_ref %} <span class="subtle">{{ b.vendor_ref }}</span>{% endif %}</td>
-            <td class="muted tnum">{% if b.due_date %}{{ b.due_date|date:"d M Y" }}{% if b.is_overdue %} <c-badge variant="danger">Overdue</c-badge>{% endif %}{% else %}—{% endif %}</td>
-            <td class="col-num"><c-money :amount="b.balance_due" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
-            <td class="col-num"><input class="control" style="max-width:120px;text-align:right" inputmode="decimal" name="alloc_{{ b.pk }}" value="{% if not focus_bill or b.pk|stringformat:'s' == focus_bill %}{{ b.balance_due|floatformat:2 }}{% endif %}"></td>
+            <td><a class="strong" href="{{ ui_tenant_url }}payables/bills/{{ row.bill.pk }}/">{{ row.bill.bill_number }}</a>{% if row.bill.vendor_ref %} <span class="subtle">{{ row.bill.vendor_ref }}</span>{% endif %}</td>
+            <td class="muted tnum">{% if row.bill.due_date %}{{ row.bill.due_date|date:"d M Y" }}{% if row.bill.is_overdue %} <c-badge variant="danger">Overdue</c-badge>{% endif %}{% else %}—{% endif %}</td>
+            <td class="col-num"><c-money :amount="row.room" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
+            <td class="col-num"><input class="control" style="max-width:120px;text-align:right" inputmode="decimal" name="alloc_{{ row.bill.pk }}" value="{% if row.prefill %}{{ row.prefill|floatformat:2 }}{% endif %}"></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -38,7 +38,7 @@
     <c-card title="Payment" icon="banknote">
       <div class="form-grid">
         <c-field label="Date" required>
-          <input type="date" class="control" name="date" value="{{ today|date:'Y-m-d' }}" required>
+          <input type="date" class="control" name="date" value="{% if payment %}{{ payment.date|date:'Y-m-d' }}{% else %}{{ today|date:'Y-m-d' }}{% endif %}" required>
         </c-field>
         <c-field label="Pay from" required>
           <c-select name="funding_kind" x-model="funding">
@@ -50,33 +50,33 @@
         <div x-show="funding === 'bank'" x-cloak>
           <c-field label="Bank account">
             <c-select name="bank_account">
-              {% for a in bank_accounts %}<option value="{{ a.pk }}">{{ a.nickname }}</option>{% endfor %}
+              {% for a in bank_accounts %}<option value="{{ a.pk }}"{% if payment and payment.bank_account_id == a.pk %} selected{% endif %}>{{ a.nickname }}</option>{% endfor %}
             </c-select>
           </c-field>
         </div>
         <div x-show="funding === 'card'" x-cloak>
           <c-field label="Credit card">
             <c-select name="credit_card">
-              {% for c in credit_cards %}<option value="{{ c.pk }}">{{ c.nickname }}</option>{% endfor %}
+              {% for c in credit_cards %}<option value="{{ c.pk }}"{% if payment and payment.credit_card_id == c.pk %} selected{% endif %}>{{ c.nickname }}</option>{% endfor %}
             </c-select>
           </c-field>
         </div>
         <div x-show="funding === 'cash'" x-cloak>
           <c-field label="Cash / GL account">
             <c-select name="cash_account">
-              {% for a in cash_accounts %}<option value="{{ a.pk }}"{% if a.system_key == 'cash_on_hand' or a.code == '1110' %} selected{% endif %}>{{ a.code }} · {{ a.name }}</option>{% endfor %}
+              {% for a in cash_accounts %}<option value="{{ a.pk }}"{% if payment %}{% if payment.cash_account_id == a.pk %} selected{% endif %}{% elif a.system_key == 'cash_on_hand' or a.code == '1110' %} selected{% endif %}>{{ a.code }} · {{ a.name }}</option>{% endfor %}
             </c-select>
           </c-field>
         </div>
-        <c-field label="Reference"><c-input name="reference" maxlength="80" /></c-field>
+        <c-field label="Reference"><c-input name="reference" value="{{ payment.reference }}" maxlength="80" /></c-field>
       </div>
-      <c-field label="Notes"><textarea name="notes" class="control" rows="2"></textarea></c-field>
+      <c-field label="Notes"><textarea name="notes" class="control" rows="2">{{ payment.notes }}</textarea></c-field>
     </c-card>
   </div>
 
   <c-save-bar note="Reduces Accounts Payable and the funding source.">
-    <c-button variant="ghost" href="{{ ui_tenant_url }}payables/bills/">Cancel</c-button>
-    <c-button type="submit" variant="primary"><c-icon name="check" /> Record payment</c-button>
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}payables/payments/{% else %}{{ ui_tenant_url }}payables/bills/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'edit' %}Save changes{% else %}Record payment{% endif %}</c-button>
   </c-save-bar>
 </form>
 {% endblock %}

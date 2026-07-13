@@ -274,6 +274,35 @@ def delete_payment(payment, *, user=None):
         recompute_bill_status(bill)
 
 
+def repost_payment(payment, allocations, *, user=None):
+    """Edit a recorded payment in place: hard-tear-down the old funding + allocations, then re-fund
+    and re-allocate from the new values. The caller has already set the payment's funding fields,
+    amount, date, reference and notes; `allocations` is the new [(bill, amount)] list. Bills that
+    were settled before but drop out of the new set reopen."""
+    from apps.banking.services import delete_transaction as bank_delete
+    from apps.cards.services import delete_transaction as card_delete
+
+    old_bills = [a.bill for a in payment.allocations.all()]
+    payment.allocations.all().delete()
+    if payment.bank_txn_id:
+        bank_delete(payment.bank_txn)
+        payment.bank_txn = None
+    elif payment.card_txn_id:
+        card_delete(payment.card_txn)
+        payment.card_txn = None
+    elif payment.journal_entry_id:
+        payment.journal_entry.hard_delete()
+        payment.journal_entry = None
+    payment.posting_version += 1
+    payment.save()
+    apply_payment(payment, allocations, user=user)
+    new_ids = {b.pk for b, amt in allocations if amt and amt > ZERO}
+    for bill in old_bills:
+        if bill.pk not in new_ids:
+            recompute_bill_status(bill)
+    return payment
+
+
 # --- Read models: aging, feeds, dashboard -----------------------------------------------------
 
 def aging(as_of=None) -> dict:

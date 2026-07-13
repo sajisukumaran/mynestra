@@ -33,6 +33,7 @@ from apps.payables.services import (
     open_bills_for,
     post_bill,
     repost_bill,
+    repost_payment,
     unpost_bill,
     warranty_expiring,
 )
@@ -519,20 +520,43 @@ def _payment_vendor(request, source):
     return None, None
 
 
-def payment_create(request):
-    if request.method == "POST":
-        return _payment_save(request)
-    person, org = _payment_vendor(request, "get")
-    if not (person or org):
-        return redirect(tenant_url(request, "payables/bills/"))
+def _payment_bills(person, org, payment=None):
+    """The vendor's open bills, plus (on edit) any bill this payment currently allocates to (which
+    may now be fully paid). Returns `(bills, existing)` where `existing` maps bill pk → the amount
+    this payment already put on it — the room freed if the payment is re-posted."""
+    existing = {}
+    if payment is not None:
+        existing = {a.bill_id: a.amount for a in payment.allocations.all()}
+    bills = list(open_bills_for(person=person, organization=org))
+    open_ids = {b.pk for b in bills}
+    extra_ids = [bid for bid in existing if bid not in open_ids]
+    if extra_ids:
+        bills += list(Bill.objects.filter(pk__in=extra_ids))
+    return bills, existing
+
+
+def _render_payment_form(request, payment, person, org):
     party = person or org
-    bills = open_bills_for(person=person, organization=org)
+    bills, existing = _payment_bills(person, org, payment)
+    is_edit = payment is not None
+    focus = request.GET.get("bill", "")
+    bill_rows = []
+    for b in bills:
+        room = b.balance_due + existing.get(b.pk, ZERO)
+        if is_edit:
+            prefill = existing.get(b.pk, ZERO)
+        else:
+            prefill = room if (not focus or str(b.pk) == focus) else ZERO
+        bill_rows.append({"bill": b, "room": room, "prefill": prefill})
     ctx = pay_context(
         request, "payments",
+        mode="edit" if is_edit else "create",
+        payment=payment,
+        funding_init=payment.funding_kind if is_edit else Payment.Funding.CASH,
         vendor_kind="person" if person else "organization",
         vendor_id=party.pk,
         vendor_name=getattr(party, "display_name", None) or getattr(party, "name", str(party)),
-        bills=bills, focus_bill=request.GET.get("bill", ""),
+        bill_rows=bill_rows,
         bank_accounts=BankAccount.objects.all(),
         credit_cards=CreditCard.objects.all(),
         cash_accounts=Account.objects.filter(
@@ -543,17 +567,41 @@ def payment_create(request):
     return render(request, "payables/payment_form.html", ctx)
 
 
-def _payment_save(request):
-    person, org = _payment_vendor(request, "post")
+def payment_create(request):
+    if request.method == "POST":
+        return _save_payment(request)
+    person, org = _payment_vendor(request, "get")
     if not (person or org):
         return redirect(tenant_url(request, "payables/bills/"))
-    bills = open_bills_for(person=person, organization=org)
+    return _render_payment_form(request, None, person, org)
+
+
+def payment_edit(request, pk):
+    payment = get_object_or_404(Payment, pk=pk)
+    if request.method == "POST":
+        return _save_payment(request, payment)
+    person, org = payment.vendor_person, payment.vendor_organization
+    return _render_payment_form(request, payment, person, org)
+
+
+def _save_payment(request, payment=None):
+    is_edit = payment is not None
+    if is_edit:
+        person, org = payment.vendor_person, payment.vendor_organization
+    else:
+        person, org = _payment_vendor(request, "post")
+        if not (person or org):
+            return redirect(tenant_url(request, "payables/bills/"))
+    bills, existing = _payment_bills(person, org, payment)
     allocations = []
     for bill in bills:
         amt = _decimal(request.POST.get(f"alloc_{bill.pk}"))
         if amt and amt > ZERO:
-            allocations.append((bill, min(amt, bill.balance_due)))
+            room = bill.balance_due + existing.get(bill.pk, ZERO)
+            allocations.append((bill, min(amt, room)))
     if not allocations:
+        if is_edit:
+            return redirect(tenant_url(request, f"payables/payments/{payment.pk}/edit/"))
         kind = "person" if person else "organization"
         return redirect(
             tenant_url(request, "payables/payments/new/")
@@ -561,13 +609,14 @@ def _payment_save(request):
         )
     total = sum((a for _, a in allocations), ZERO)
     funding_kind = request.POST.get("funding_kind", Payment.Funding.CASH)
-    payment = Payment(
-        vendor_person=person, vendor_organization=org,
-        date=parse_date(request.POST.get("date") or "") or datetime.date.today(),
-        amount=total, funding_kind=funding_kind,
-        reference=request.POST.get("reference", "").strip(),
-        notes=request.POST.get("notes", "").strip(),
-    )
+    if not is_edit:
+        payment = Payment(vendor_person=person, vendor_organization=org)
+    payment.date = parse_date(request.POST.get("date") or "") or datetime.date.today()
+    payment.amount = total
+    payment.funding_kind = funding_kind
+    payment.reference = request.POST.get("reference", "").strip()
+    payment.notes = request.POST.get("notes", "").strip()
+    payment.bank_account = payment.credit_card = payment.cash_account = None
     if funding_kind == Payment.Funding.BANK:
         payment.bank_account = BankAccount.objects.filter(
             pk=request.POST.get("bank_account") or 0
@@ -578,8 +627,11 @@ def _payment_save(request):
         ).first()
     else:
         payment.cash_account = _account_by_pk(request.POST.get("cash_account"))
-    payment.save()
-    apply_payment(payment, allocations, user=request.user)
+    if is_edit:
+        repost_payment(payment, allocations, user=request.user)
+    else:
+        payment.save()
+        apply_payment(payment, allocations, user=request.user)
     return redirect(tenant_url(request, "payables/payments/"))
 
 
