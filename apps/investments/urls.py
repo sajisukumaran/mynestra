@@ -39,6 +39,7 @@ urlpatterns = [
     ),
     # Securities (instrument master)
     path("securities/", views.security_list, name="securities"),
+    path("securities/mass-prices/", views.security_mass_price, name="security-mass-price"),
     path("securities/new/", views.security_create, name="security-create"),
     path("securities/<int:pk>/", views.security_detail, name="security-detail"),
     path("securities/<int:pk>/edit/", views.security_edit, name="security-edit"),

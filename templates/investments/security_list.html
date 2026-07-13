@@ -6,11 +6,17 @@
 
 <c-page-header title="Securities" subtitle="{{ total }} {{ total|pluralize:'instrument,instruments' }}">
   <c-slot name="actions">
+    <c-button href="{{ ui_tenant_url }}investments/securities/mass-prices/"><c-icon name="coins" /> Mass update prices</c-button>
     <c-button variant="primary" href="{{ ui_tenant_url }}investments/securities/new/"><c-icon name="plus" /> New security</c-button>
   </c-slot>
 </c-page-header>
 
 <div class="stack-16">
+  {% if messages %}{% for m in messages %}
+  <div x-data="{ show: true }" x-show="show" @click="show = false">
+    <c-toast variant="{% if m.level_tag == 'error' %}danger{% else %}{{ m.level_tag }}{% endif %}" icon="{% if m.level_tag == 'error' %}triangle-alert{% elif m.level_tag == 'success' %}circle-check{% else %}info{% endif %}" message="{{ m }}" />
+  </div>
+  {% endfor %}{% endif %}
   <form method="get" class="row wrap">
     <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by symbol or name…"></label>
     {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}

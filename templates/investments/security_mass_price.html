@@ -1,0 +1,68 @@
+{% extends "investments/base.html" %}
+{% block inv_heading %}Mass update prices{% endblock %}
+
+{% block inv %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/securities/">Securities</a><c-icon name="chevron-right" />
+  <span class="strong">Mass update prices</span>
+</c-breadcrumb>
+
+<c-page-header title="Mass update prices" subtitle="{{ total }} quotable instrument{{ total|pluralize }}" />
+
+<form method="post" action="{{ ui_tenant_url }}investments/securities/mass-prices/">{% csrf_token %}
+  <div class="stack-16">
+    {# Date + source apply to every price recorded below #}
+    <c-card>
+      <div class="form-grid">
+        <c-field label="As-of date" required>
+          <div class="control"><input type="date" name="as_of" value="{{ as_of|date:'Y-m-d' }}" required></div>
+        </c-field>
+        <c-field label="Source" help="Recorded on every price you enter (e.g. Yahoo Finance, broker statement).">
+          <c-input name="source" value="{{ source }}" placeholder="e.g. Yahoo Finance" />
+        </c-field>
+      </div>
+      <c-hint icon="info">Leave a row blank to skip it. A value creates the price for the chosen date, overwriting any existing mark on that date.</c-hint>
+    </c-card>
+
+    <c-card flush>
+      {% if rows %}
+      <c-table>
+        <thead><tr>
+          <c-th>Security</c-th>
+          <c-th>Type</c-th>
+          <th class="col-num">Last price</th>
+          <th class="col-num">New price</th>
+        </tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>
+              <span class="row">
+                <c-avatar tint="{{ r.security.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar>
+                <div>
+                  <div class="pc-name">{% if r.security.symbol %}{{ r.security.symbol }}{% else %}{{ r.security.name }}{% endif %}</div>
+                  {% if r.security.symbol %}<div class="pc-sub">{{ r.security.name }}</div>{% endif %}
+                </div>
+              </span>
+            </td>
+            <td><c-badge>{{ r.security.kind_label }}</c-badge></td>
+            <td class="col-num">{% if r.last %}<c-money :amount="r.last.price" symbol="{{ r.security.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" /> <span class="subtle">· {{ r.last.as_of|date:"d M Y" }}</span>{% else %}<span class="subtle">—</span>{% endif %}</td>
+            <td class="col-num"><div class="control"><input name="price_{{ r.security.pk }}" inputmode="decimal" value="" placeholder="{{ r.security.currency.symbol }}0.00"></div></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </c-table>
+      {% else %}
+      <c-empty-state icon="tag" title="No quotable instruments" text="Add stocks, ETFs, funds or bonds to mass-update their prices (CDs and money-market funds aren't marked to market)." />
+      {% endif %}
+    </c-card>
+
+    <div class="between">
+      <c-button type="submit" variant="primary"><c-icon name="circle-check" /> Save prices</c-button>
+      <c-button href="{{ ui_tenant_url }}investments/securities/">Cancel</c-button>
+    </div>
+  </div>
+</form>
+{% endblock %}
