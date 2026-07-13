@@ -121,6 +121,39 @@ def test_bill_detail_renders(make_tenant, make_user, client):
     assert r.status_code == 200 and bill.bill_number.encode() in r.content
 
 
+def test_bill_line_creates_new_item_inline(make_tenant, make_user, client):
+    """A line carrying line_new_item (no existing line_item) creates a minimal catalog Item on save
+    and attaches it; a same-named line reuses that item rather than duplicating it."""
+    from apps.payables.models import Item
+    tenant, user = _member(make_tenant, make_user)
+    client.force_login(user)
+    data = _create_data()
+    data.update({
+        "line_type": ["item"], "line_item": [""], "line_new_item": ["Ergo Chair"],
+        "line_description": ["Ergo Chair"], "line_quantity": ["1"], "line_unit_price": ["120"],
+        "line_discount": ["0"], "line_tax": ["0"], "line_account": [""],
+        "line_capitalize": ["0"], "line_asset_serial": [""], "line_warranty_end": [""],
+    })
+    assert client.post(_u(tenant, "bills/new/"), data).status_code == 302
+    with schema_context(tenant.schema_name):
+        item = Item.objects.get(name="Ergo Chair")
+        assert item.kind == Item.Kind.GOOD
+        line = Bill.objects.get().lines.get()
+        assert line.item_id == item.pk
+
+    # a second bill naming the same item reuses it (case-insensitive) — no duplicate
+    data2 = _create_data(unit_price="9")
+    data2.update({
+        "line_type": ["item"], "line_item": [""], "line_new_item": ["ergo chair"],
+        "line_description": ["ergo chair"], "line_quantity": ["1"], "line_unit_price": ["9"],
+        "line_discount": ["0"], "line_tax": ["0"], "line_account": [""],
+        "line_capitalize": ["0"], "line_asset_serial": [""], "line_warranty_end": [""],
+    })
+    assert client.post(_u(tenant, "bills/new/"), data2).status_code == 302
+    with schema_context(tenant.schema_name):
+        assert Item.objects.filter(name__iexact="ergo chair").count() == 1
+
+
 def test_bill_delete_erases_entry_and_record(make_tenant, make_user, client):
     """Delete (mistake fix) hard-removes the GL entry AND the record — no reversal, unlike Void."""
     tenant, user = _member(make_tenant, make_user)

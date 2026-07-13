@@ -78,11 +78,23 @@
     {# ---- Line items ---- #}
     <c-card title="Line items" icon="tag">
       <div class="stack-8">
-        <label class="search"><c-icon name="search" size="sm" />
-          <input type="search" name="item_q" x-ref="itemSearch" placeholder="Search an item by name, UPC or SKU…"
-                 @keydown.enter.prevent
-                 hx-get="{{ ui_tenant_url }}payables/item-search/"
-                 hx-trigger="input changed delay:200ms, focus" hx-target="#item-results"></label>
+        <div class="row">
+          <label class="search"><c-icon name="search" size="sm" />
+            <input type="search" name="item_q" x-ref="itemSearch" placeholder="Search an item by name, UPC or SKU…"
+                   @keydown.enter.prevent
+                   hx-get="{{ ui_tenant_url }}payables/item-search/"
+                   hx-trigger="input changed delay:200ms, focus" hx-target="#item-results"></label>
+          <c-button type="button" variant="default" @click="newItem = !newItem; if (newItem) $nextTick(() => $refs.newItemName.focus())"><c-icon name="plus" size="sm" /> New item</c-button>
+        </div>
+        <div x-show="newItem" x-cloak class="row" style="gap:8px;">
+          <input class="control" x-ref="newItemName" x-model="newItemName" placeholder="New item name — e.g. Office chair" style="flex:1;" @keydown.enter.prevent="addNewItem()">
+          <select class="control" x-model="newItemKind" style="flex:none; width:130px;">
+            <option value="good">Good</option>
+            <option value="service">Service</option>
+          </select>
+          <c-button type="button" variant="primary" @click="addNewItem()"><c-icon name="check" size="sm" /> Add item</c-button>
+          <c-button type="button" variant="ghost" @click="newItem = false; newItemName = ''">Cancel</c-button>
+        </div>
         <p x-show="itemTarget !== null" x-cloak class="hint">
           Choosing an item for line <span x-text="itemTarget + 1"></span> — pick a result, or
           <a href="#" @click.prevent="cancelPick()">cancel</a>.
@@ -108,12 +120,13 @@
               <span class="bill-line-rm" @click="removeLine(i)" title="Remove"><c-icon name="trash-2" size="sm" /></span>
             </div>
             <div class="bill-line-sub">
-              <span class="row" style="gap:6px" x-show="l.item">
-                <c-badge variant="info">Item</c-badge>
+              <span class="row" style="gap:6px" x-show="l.item || l.new_item">
+                <c-badge variant="success" x-show="l.new_item && !l.item">New item</c-badge>
+                <c-badge variant="info" x-show="l.item">Item</c-badge>
                 <span class="strong" x-text="l.item_name || 'Item'"></span>
                 <c-button type="button" size="sm" variant="ghost" @click="pickFor(i)">Change</c-button>
               </span>
-              <c-button type="button" size="sm" variant="ghost" x-show="!l.item" @click="pickFor(i)"><c-icon name="tag" size="sm" /> Pick item</c-button>
+              <c-button type="button" size="sm" variant="ghost" x-show="!l.item && !l.new_item" @click="pickFor(i)"><c-icon name="tag" size="sm" /> Pick item</c-button>
               <label>Discount <input name="line_discount" x-model="l.discount" inputmode="decimal" style="width:90px"></label>
               <label>Tax <input name="line_tax" x-model="l.tax" inputmode="decimal" style="width:90px"></label>
               <template x-if="['item','expense'].includes(l.type)">
@@ -127,6 +140,7 @@
               </template>
             </div>
             <input type="hidden" name="line_item" :value="l.item">
+            <input type="hidden" name="line_new_item" :value="l.new_item || ''">
             <input type="hidden" name="line_capitalize" :value="l.capitalize ? '1' : '0'">
             <input type="hidden" name="line_asset_serial" :value="l.serial">
             <input type="hidden" name="line_warranty_end" :value="l.warranty">
@@ -188,15 +202,17 @@ function billForm() {
     pick(d) { this.picked = { kind: d.kind, id: d.id, name: d.name }; this.newVendor = false; },
     lines: JSON.parse(document.getElementById('lines-data').textContent),
     itemTarget: null,
+    newItem: false, newItemName: '', newItemKind: 'good',
     pickItem(d) {
       if (this.itemTarget === null) {
-        this.lines.push({ type: 'item', item: d.id || '', item_name: d.name || '',
+        this.lines.push({ type: 'item', item: d.id || '', item_name: d.name || '', new_item: '',
           description: d.name || '', qty: '1', price: '0', discount: '0', tax: '0',
           account: d.account || '', capitalize: d.capitalize === '1', serial: '', warranty: '' });
       } else {
         const l = this.lines[this.itemTarget];
         l.item = d.id || '';
         l.item_name = d.name || '';
+        l.new_item = '';
         l.account = d.account || '';
         l.capitalize = d.capitalize === '1';
         if (!l.description) l.description = d.name || '';
@@ -205,8 +221,17 @@ function billForm() {
     },
     pickFor(i) { this.itemTarget = i; if (this.$refs.itemSearch) this.$refs.itemSearch.focus(); },
     cancelPick() { this.itemTarget = null; },
+    addNewItem() {
+      const name = this.newItemName.trim();
+      if (!name) return;
+      const type = this.newItemKind === 'service' ? 'service' : 'item';
+      this.lines.push({ type, item: '', item_name: name, new_item: name, description: name,
+        qty: '1', price: '0', discount: '0', tax: '0', account: '', capitalize: false,
+        serial: '', warranty: '' });
+      this.newItemName = ''; this.newItem = false;
+    },
     addLine(t) {
-      this.lines.push({ type: t, item: '', item_name: '', description: '', qty: '1', price: '0',
+      this.lines.push({ type: t, item: '', item_name: '', new_item: '', description: '', qty: '1', price: '0',
         discount: '0', tax: '0', account: '', capitalize: false, serial: '', warranty: '' });
     },
     removeLine(i) { this.lines.splice(i, 1); },

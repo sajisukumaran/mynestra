@@ -355,9 +355,20 @@ def bill_list(request):
     return render(request, "payables/bill_list.html", ctx)
 
 
+def _resolve_new_item(name, line_type):
+    """Get-or-create a minimal catalog Item for an inline 'new item' captured on a bill line —
+    reuse a same-named item if one exists, else create it (name + good/service kind only)."""
+    existing = Item.objects.filter(name__iexact=name).first()
+    if existing:
+        return existing
+    kind = Item.Kind.SERVICE if line_type == BillLine.LineType.SERVICE else Item.Kind.GOOD
+    return Item.objects.create(name=name, kind=kind)
+
+
 def _save_bill_lines(request, bill):
     types = request.POST.getlist("line_type")
     items = request.POST.getlist("line_item")
+    new_items = request.POST.getlist("line_new_item")
     descs = request.POST.getlist("line_description")
     qtys = request.POST.getlist("line_quantity")
     prices = request.POST.getlist("line_unit_price")
@@ -376,9 +387,12 @@ def _save_bill_lines(request, bill):
         price = _decimal(_at(prices, i)) or ZERO
         if qty == ZERO and price == ZERO and not desc:
             continue  # skip a blank row
+        item = Item.objects.filter(pk=_at(items, i) or 0).first()
+        if item is None and _at(new_items, i).strip():
+            item = _resolve_new_item(_at(new_items, i).strip(), lt)
         BillLine.objects.create(
             bill=bill, line_type=lt, order=i,
-            item=Item.objects.filter(pk=_at(items, i) or 0).first(),
+            item=item,
             description=desc, quantity=qty, unit_price=price,
             line_discount=_decimal(_at(discounts, i)) or ZERO,
             line_tax=_decimal(_at(taxes, i)) or ZERO,
@@ -447,7 +461,8 @@ def _render_bill_form(request, bill, mode):
     lines_data = [
         {
             "type": li.line_type, "item": str(li.item_id or ""),
-            "item_name": li.item.name if li.item_id else "", "description": li.description,
+            "item_name": li.item.name if li.item_id else "", "new_item": "",
+            "description": li.description,
             "qty": str(li.quantity), "price": str(li.unit_price),
             "discount": str(li.line_discount), "tax": str(li.line_tax),
             "account": str(li.account_id or ""), "capitalize": li.capitalize,
