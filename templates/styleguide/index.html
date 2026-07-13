@@ -254,6 +254,22 @@
       </div>
     </c-card>
 
+    {# ---- Money summary (totals block) ---- #}
+    <c-card title="Money summary" id="money-total" icon="coins">
+      <p class="muted" style="margin-bottom:12px;">A <code>c-money-total</code> composed of <code>c-mt-row</code>s — the Payables bill/vendor totals block.</p>
+      <div style="max-width:340px;">
+        <c-money-total title="Bill total">
+          <c-mt-row label="Subtotal" amount="128.00" symbol="$" />
+          <c-mt-row label="Shipping" amount="6.99" symbol="$" />
+          <c-mt-row label="Tax" amount="9.60" symbol="$" />
+          <c-mt-row label="Discount" amount="-5.00" symbol="$" variant="muted" />
+          <c-mt-row label="Total" amount="139.59" symbol="$" variant="strong" />
+          <c-mt-row label="Paid" amount="50.00" symbol="$" variant="muted" />
+          <c-mt-row label="Balance due" amount="89.59" symbol="$" variant="strong" />
+        </c-money-total>
+      </div>
+    </c-card>
+
     <c-card title="People" icon="user-round" flush>
       <c-slot name="actions"><c-button size="sm"><c-icon name="filter" size="sm" /> Filter</c-button></c-slot>
       <c-table>

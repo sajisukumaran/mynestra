@@ -462,6 +462,17 @@ img { max-width:100%; display:block; }
 .amount { font-variant-numeric:tabular-nums; white-space:nowrap; }
 .amount-neg { color:var(--danger); }
 .amount-zero { color:var(--text-subtle); }
+
+/* Money summary — a labeled totals block (subtotal / tax / total / balance due …). */
+.money-summary { border:1px solid var(--border); border-radius:var(--r-md); padding:12px 14px;
+  display:flex; flex-direction:column; gap:6px; background:var(--surface); }
+.money-summary .mt-title { font-size:var(--fs-xs); text-transform:uppercase; letter-spacing:.04em;
+  color:var(--text-subtle); font-weight:600; margin-bottom:2px; }
+.mt-row { display:flex; justify-content:space-between; align-items:baseline; gap:24px; }
+.mt-row .mt-label { color:var(--text-muted); }
+.mt-muted .mt-label, .mt-muted .amount { color:var(--text-subtle); }
+.mt-strong { font-weight:700; padding-top:6px; margin-top:2px; border-top:1px solid var(--border); }
+.mt-strong .mt-label { color:var(--text-strong); }
 .app-tile h3 { font-size:var(--fs-md); font-weight:700; line-height:1.2; }
 .app-tile .tile-desc { color:var(--text-muted); font-size:var(--fs-xs); margin-top:2px;
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }

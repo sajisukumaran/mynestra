@@ -1,0 +1,7 @@
+<c-vars title="" class="" />
+{% comment %}A totals summary block (subtotal / tax / shipping / discount / total / paid / balance).
+Compose rows with <c-mt-row>. Server-rendered; the bill form's live preview is Alpine-driven.{% endcomment %}
+<div class="money-summary {{ class }}" {{ attrs }}>
+  {% if title %}<div class="mt-title">{{ title }}</div>{% endif %}
+  {{ slot }}
+</div>

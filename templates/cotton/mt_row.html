@@ -1,0 +1,6 @@
+<c-vars label="" amount="0" symbol="" dp="2" grouping="thousands" variant="default" class="" />
+{% comment %}One labeled amount row inside <c-money-total>. variant: default | muted | strong.{% endcomment %}
+<div class="mt-row mt-{{ variant }} {{ class }}">
+  <span class="mt-label">{{ label }}{{ slot }}</span>
+  <c-money :amount="amount" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" />
+</div>
