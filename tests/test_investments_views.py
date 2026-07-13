@@ -207,6 +207,9 @@ def test_net_amount_and_reactive_bindings_render(make_tenant, make_user, client)
     assert 'x-model="amount"' in body and 'x-model="fee"' in body
     assert "Net amount" in body
     assert "['buy','buy_to_cover']" in body  # net adds commission for buys, subtracts for sells
+    # No Django template comment leaked into the page: a multi-line {# #} renders its literal
+    # delimiters as text (only {% comment %} spans lines), so the raw marker must never appear.
+    assert "{#" not in body
 
 
 def test_security_create_and_price(make_tenant, make_user, client):

@@ -42,9 +42,7 @@ prefill) + unique
   </div>
 </div>
 
-{# Commission + auto-calculated net — buy / sell / short / cover. Net applies the commission to the
-   amount: ADDED on a buy/cover (it's capitalized into cost), DEDUCTED on a sell/short (it nets out
-   of proceeds). Read-only, computed live from amount + commission; not submitted. #}
+{# Commission + auto net (buy/sell/short/cover): net = amount ± commission — added on buy/cover, deducted on sell/short; read-only, computed live, not submitted. #}
 <div x-show="['buy','sell','sell_short','buy_to_cover'].includes(type)" x-cloak>
   <div class="grid-halves">
     <c-field label="Commission" help="Added to cost basis on a buy; nets out of proceeds on a sell.">
