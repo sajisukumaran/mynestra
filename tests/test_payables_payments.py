@@ -8,6 +8,8 @@ from django_tenants.utils import schema_context
 
 from apps.banking.models import AccountType, BankAccount, BankTransaction
 from apps.banking.services import ensure_gl_account as bank_gl
+from apps.cards.models import CardTxnType, CreditCard, CreditCardTransaction
+from apps.cards.services import ensure_gl_account as card_gl
 from apps.finance.models import Currency
 from apps.finance.services import account_balance
 from apps.organizations.models import Organization
@@ -120,6 +122,35 @@ def test_bank_payment_creates_withdrawal(make_tenant, make_user, client):
             account=acct, txn_type="withdrawal", amount=D("100")
         ).exists()
         assert account_balance(acct.gl_account) == gl_before - D("100")
+
+
+def test_card_payment_creates_charge(make_tenant, make_user, client):
+    tenant, user = _member(make_tenant, make_user)
+    client.force_login(user)
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.create(name="Acme")
+        bill = _bill(org, "100")
+        card = CreditCard.objects.create(
+            issuer=Organization.objects.create(name="American Express"),
+            nickname="Amex", number="1", currency=Currency.objects.get(code="USD"),
+            credit_limit=D("5000"),
+        )
+        card_gl(card)
+    resp = client.post(_u(tenant, "payments/new/"), {
+        "vendor_kind": "organization", "vendor_id": str(org.pk),
+        "date": "2026-02-05", "funding_kind": "card", "credit_card": str(card.pk),
+        f"alloc_{bill.pk}": "100",
+    })
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        bill.refresh_from_db()
+        assert bill.status == Bill.Status.PAID
+        assert account_balance("accounts_payable") == D("0")
+        assert CreditCardTransaction.objects.filter(
+            card=card, txn_type=CardTxnType.CHARGE, amount=D("100")
+        ).exists()
+        card.refresh_from_db()
+        assert card.balance == D("100")   # liability owed rose by the charge
 
 
 def test_delete_payment_reopens_bill(make_tenant, make_user, client):
