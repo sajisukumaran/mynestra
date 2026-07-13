@@ -27,6 +27,12 @@
         <c-slot name="trigger"><c-button variant="ghost">Void</c-button></c-slot>
         <c-slot name="confirm"><form method="post" action="{{ ui_tenant_url }}payables/bills/{{ bill.pk }}/void/">{% csrf_token %}<c-button type="submit" variant="danger">Void bill</c-button></form></c-slot>
       </c-confirm-dialog>
+      {% if not bill.amount_paid %}
+      <c-confirm-dialog title="Delete {{ bill.bill_number }}?" message="Permanently erases the bill and its ledger entry — for correcting a data-entry mistake. To cancel a real bill, use Void instead.">
+        <c-slot name="trigger"><c-button variant="ghost"><c-icon name="trash-2" size="sm" /> Delete</c-button></c-slot>
+        <c-slot name="confirm"><form method="post" action="{{ ui_tenant_url }}payables/bills/{{ bill.pk }}/delete/">{% csrf_token %}<c-button type="submit" variant="danger">Delete bill</c-button></form></c-slot>
+      </c-confirm-dialog>
+      {% endif %}
     {% endif %}
   </c-slot>
 </c-page-header>

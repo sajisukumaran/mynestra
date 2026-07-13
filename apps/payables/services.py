@@ -3,7 +3,8 @@
 A bill posts accrual double-entry through `apps.finance.services` (never direct JournalEntry/Line
 rows): each line DRs an expense/asset (shipping/tax to their own accounts, a discount CRs Purchase
 Discounts) and the bill total CRs Accounts Payable, tagged with the vendor party. Bills post on save
-and are edited **in place** via `finance.repost_entry` (no reversal); deleting reverses. Capitalized
+and are edited **in place** via `finance.repost_entry` (no reversal). Voiding *reverses* the entry
+(keeps the record); deleting *erases* the entry and the record (a data-entry mistake). Capitalized
 lines materialize an `AssetItem` (held at cost, warranty-tracked).
 """
 
@@ -138,10 +139,20 @@ def repost_bill(bill, *, user=None) -> JournalEntry:
 
 
 def unpost_bill(bill, *, user=None) -> None:
-    """Undo a bill's GL impact (on delete): reverse its posted entry and drop its asset items."""
+    """Undo a bill's GL impact (on void): reverse its posted entry and drop its asset items."""
     if bill.journal_entry_id and bill.journal_entry.status == JournalEntry.Status.POSTED:
         reverse_entry(bill.journal_entry, user=user)
     AssetItem.objects.filter(bill_line__bill=bill).delete()
+
+
+def delete_bill(bill, *, user=None) -> None:
+    """Erase a bill (data-entry mistake): hard-remove its GL entry (lines cascade) and any
+    capitalized asset items. The caller hard-deletes the bill row. Guarded by the view to bills with
+    no payment allocated (and not already void)."""
+    for asset in AssetItem.all_objects.filter(bill_line__bill=bill):
+        asset.hard_delete()
+    if bill.journal_entry_id:
+        bill.journal_entry.hard_delete()
 
 
 def recompute_bill_status(bill) -> None:
@@ -245,22 +256,20 @@ def apply_payment(payment, allocations, *, user=None):
     return payment
 
 
-def unapply_payment(payment, *, user=None):
-    """Undo a payment (on delete): reverse the native funding transaction / cash entry and drop its
-    allocations, then refresh the affected bills' status."""
-    from apps.banking.services import unpost_transaction as bank_unpost
-    from apps.cards.services import unpost_transaction as card_unpost
+def delete_payment(payment, *, user=None):
+    """Erase a payment (data-entry mistake): hard-remove the funding transaction / cash entry and
+    its allocations, then reopen the bills it settled. The caller hard-deletes the payment row."""
+    from apps.banking.services import delete_transaction as bank_delete
+    from apps.cards.services import delete_transaction as card_delete
 
     bills = [a.bill for a in payment.allocations.all()]
     payment.allocations.all().delete()
     if payment.bank_txn_id:
-        bank_unpost(payment.bank_txn)
-        payment.bank_txn.delete()
+        bank_delete(payment.bank_txn)
     elif payment.card_txn_id:
-        card_unpost(payment.card_txn)
-        payment.card_txn.delete()
-    elif payment.journal_entry_id and payment.journal_entry.status == JournalEntry.Status.POSTED:
-        reverse_entry(payment.journal_entry, user=user)
+        card_delete(payment.card_txn)
+    elif payment.journal_entry_id:
+        payment.journal_entry.hard_delete()
     for bill in bills:
         recompute_bill_status(bill)
 

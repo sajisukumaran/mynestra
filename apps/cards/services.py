@@ -199,6 +199,15 @@ def unpost_transaction(txn: CreditCardTransaction, *, user=None) -> None:
         reverse_entry(current, user=user)
 
 
+def delete_transaction(txn: CreditCardTransaction, *, user=None) -> None:
+    """Hard-remove the transaction and its GL entry — used to erase a data-entry mistake (vs
+    `unpost_transaction`, which reverses). The entry's lines cascade and the row is truly gone."""
+    entry = txn.journal_entry
+    if entry is not None:
+        entry.hard_delete()
+    txn.hard_delete()
+
+
 def create_matching_leg(txn: CreditCardTransaction, *, user=None):
     """For a payment from a tracked bank account, create + post the matching bank withdrawal
     (a TRANSFER_OUT), so the 1150 clearing account nets to zero across both modules."""

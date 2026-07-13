@@ -26,12 +26,13 @@ from apps.payables.services import (
     aging,
     apply_payment,
     dashboard_stats,
+    delete_bill,
+    delete_payment,
     due_soon,
     ensure_vendor_profile,
     open_bills_for,
     post_bill,
     repost_bill,
-    unapply_payment,
     unpost_bill,
     warranty_expiring,
 )
@@ -485,11 +486,19 @@ def bill_void(request, pk):
 
 
 def bill_delete(request, pk):
+    """Erase a mistaken bill: hard-remove its GL entry + the record. Refused when it's locked,
+    already void (a kept record), or has any payment allocated (delete the payment first)."""
     bill = get_object_or_404(Bill, pk=pk)
-    if request.method == "POST" and not bill.is_locked:
-        unpost_bill(bill, user=request.user)
-        bill.delete()  # soft-delete
-    return redirect(tenant_url(request, "payables/bills/"))
+    deletable = (
+        not bill.is_locked
+        and bill.status != Bill.Status.VOID
+        and not bill.allocations.exists()
+    )
+    if request.method == "POST" and deletable:
+        delete_bill(bill, user=request.user)
+        bill.hard_delete()
+        return redirect(tenant_url(request, "payables/bills/"))
+    return redirect(tenant_url(request, f"payables/bills/{pk}/"))
 
 
 # --- Payments (funding-integrated; allocate across one vendor's bills) ------------------------
@@ -587,10 +596,12 @@ def payment_list(request):
 
 
 def payment_delete(request, pk):
+    """Erase a mistaken payment: hard-remove its funding transaction / cash entry + the record;
+    the bills it settled reopen."""
     payment = get_object_or_404(Payment, pk=pk)
     if request.method == "POST":
-        unapply_payment(payment, user=request.user)
-        payment.delete()  # soft-delete
+        delete_payment(payment, user=request.user)
+        payment.hard_delete()
     return redirect(tenant_url(request, "payables/payments/"))
 
 

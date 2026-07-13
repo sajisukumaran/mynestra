@@ -26,7 +26,7 @@
         <td class="col-num"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
         <td>
           <div class="cell-actions">
-            <c-confirm-dialog title="Delete {{ p.payment_number }}?" message="This reverses the payment and re-opens the bills it settled.">
+            <c-confirm-dialog title="Delete {{ p.payment_number }}?" message="This erases the payment and its funding entry, and re-opens the bills it settled.">
               <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
               <c-slot name="confirm">
                 <form method="post" action="{{ ui_tenant_url }}payables/payments/{{ p.pk }}/delete/">{% csrf_token %}

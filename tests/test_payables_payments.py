@@ -140,7 +140,8 @@ def test_delete_payment_reopens_bill(make_tenant, make_user, client):
         bill.refresh_from_db()
         assert bill.status == Bill.Status.OPEN and bill.balance_due == D("100")
         assert account_balance("accounts_payable") == D("100")
-        assert not Payment.objects.filter(pk=payment.pk).exists()
+        # Delete erases the record entirely (not a soft-delete) and leaves no reversal behind.
+        assert not Payment.all_objects.filter(pk=payment.pk).exists()
 
 
 def test_dashboard_and_launcher_tile(make_tenant, make_user, client):

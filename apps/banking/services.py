@@ -207,6 +207,16 @@ def unpost_transaction(txn: BankTransaction, *, user=None) -> None:
         reverse_entry(current, user=user)
 
 
+def delete_transaction(txn: BankTransaction, *, user=None) -> None:
+    """Hard-remove the transaction and its GL entry — used to erase a data-entry mistake (vs
+    `unpost_transaction`, which reverses). The entry's lines cascade and the row is truly gone.
+    Scoped to non-transfer transactions (no counter leg to unwind)."""
+    entry = txn.journal_entry
+    if entry is not None:
+        entry.hard_delete()
+    txn.hard_delete()
+
+
 def create_matching_leg(txn: BankTransaction, *, user=None) -> BankTransaction | None:
     """For a transfer against a tracked counter account, create + post the opposite leg."""
     if txn.counter_account_id is None or txn.txn_type not in (
