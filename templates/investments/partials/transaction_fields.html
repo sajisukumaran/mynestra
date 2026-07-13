@@ -1,9 +1,9 @@
 {% comment %}Investment transaction add/edit fields. Included inside a <form> whose Alpine x-data
 provides `type` (selected txn type) + the payee picker state (payeeKind/payeeId/payeeName/payeeTint/
 payeeInit + pickPayee/clearPayee). Fields reveal per type via x-show. Needs: account, picker_types,
-securities, income_accounts, expense_accounts, bank_accounts, investment_accounts. Pass `txn` (edit
-prefill) + unique
-`suffix`. Sells draw lots first-in, first-out.{% endcomment %}
+securities (full master, for acquisitions), account_securities (this account's ever-transacted, for
+income/holding ops), income_accounts, expense_accounts, bank_accounts, investment_accounts. Pass
+`txn` (edit prefill) + unique `suffix`. Sells draw lots first-in, first-out.{% endcomment %}
 <div class="form-grid">
   <c-field label="Type" required>
     <div class="control is-select">
@@ -24,8 +24,16 @@ prefill) + unique
 {# Security — for holdings-related types (for options, the contract; underlying is on it) #}
 <div x-show="['buy','sell','dividend','dividend_reinvest','interest','cap_gain_dist','return_of_capital','split','opening','in_kind_out','in_kind_in','worthless','cash_merger','merger','spinoff','sell_short','buy_to_cover','div_paid_short','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
   <c-field label="Security" help="The instrument this applies to (required for buy/sell/split/reinvest). For a merger/spin-off this is the original security (X).">
-    <div class="control is-select">
-      <select name="security">
+    {# Two pickers share name="security", :disabled-guarded so only the active submits: acquisitions (buy/opening/in-kind-in/short-open/option-open) list every instrument; everything else only this account's transacted securities. #}
+    <div x-show="!['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)" x-cloak class="control is-select">
+      <select name="security" :disabled="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
+        <option value="">— none / cash —</option>
+        {% for s in account_securities %}<option value="{{ s.pk }}"{% if txn.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+    <div x-show="['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)" x-cloak class="control is-select">
+      <select name="security" :disabled="!['buy','opening','in_kind_in','sell_short','opt_buy_open','opt_sell_open'].includes(type)">
         <option value="">— none / cash —</option>
         {% for s in securities %}<option value="{{ s.pk }}"{% if txn.security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
       </select>

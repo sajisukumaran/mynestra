@@ -439,6 +439,13 @@ def account_detail(request, pk):
     hold = holdings(account)
     market = sum((h.market_value for h in hold), Decimal("0"))
     vesting_rows, vesting_totals = vesting_summary(account)
+    # Securities this account has ever transacted (held now or previously) — scopes the register's
+    # Security picker for income / holding operations (dividend, sell, split, …) so it isn't the
+    # whole instrument master. Acquisitions (buy / opening / in-kind-in / short/option open) still
+    # offer every active security.
+    sec_ids = set(
+        account.transactions.filter(security__isnull=False).values_list("security_id", flat=True)
+    ) | set(account.lots.values_list("security_id", flat=True))
     ctx = inv_context(
         request, "accounts",
         account=account,
@@ -452,6 +459,7 @@ def account_detail(request, pk):
         base=base_currency(),
         picker_types=PICKER_TYPES,
         securities=Security.objects.filter(is_active=True).order_by("symbol", "name"),
+        account_securities=Security.objects.filter(pk__in=sec_ids).order_by("symbol", "name"),
         income_accounts=_income_accounts(),
         expense_accounts=_expense_accounts(),
         bank_accounts=_bank_accounts(),

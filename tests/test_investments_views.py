@@ -227,6 +227,36 @@ def test_dividend_dates_are_captured_and_metadata_only(make_tenant, make_user, c
         assert interest.ex_dividend_date is None
 
 
+def test_security_picker_scopes_to_account_transacted_securities(make_tenant, make_user, client):
+    """The register's Security picker for income/holding ops lists only securities THIS account has
+    transacted (account_securities); acquisitions still offer the full master (securities)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        usd = Currency.objects.get(code="USD")
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=usd)
+        ensure_gl_account(acct)
+        held = Security.objects.create(symbol="AAA", name="Held Co", currency=usd)
+        Security.objects.create(symbol="BBB", name="Never Held Co", currency=usd)  # not held here
+        aid, held_id = acct.pk, held.pk
+    client.force_login(owner)
+    # Transact AAA in this account so it becomes one of the account's securities.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2026-01-05", "security": held_id,
+        "quantity": "10", "price": "50", "amount": "500", "fee": "0"})
+
+    resp = client.get(_url(tenant, f"accounts/{aid}/"))
+    account_secs = set(resp.context["account_securities"].values_list("symbol", flat=True))
+    all_secs = set(resp.context["securities"].values_list("symbol", flat=True))
+    assert "AAA" in account_secs and "BBB" not in account_secs   # scoped to this account
+    assert {"AAA", "BBB"} <= all_secs                            # full master still has both
+    # Two type-scoped security pickers render (account-list + full-list), guarded so one submits.
+    assert resp.content.decode().count('name="security"') >= 2
+
+
 def test_net_amount_and_reactive_bindings_render(make_tenant, make_user, client):
     """The net-amount readout is computed client-side from amount + commission, so amount/fee must
     be x-model bound and the net expression present (added on a buy, deducted on a sell)."""
