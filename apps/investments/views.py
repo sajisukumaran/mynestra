@@ -693,6 +693,12 @@ def _apply_txn_post(request, txn):
 
     txn.txn_type = t
     txn.date = date
+    # Settlement date is informational and only meaningful on trades; cleared otherwise.
+    txn.settlement_date = (
+        parse_date(request.POST.get("settlement_date", "") or "")
+        if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER)
+        else None
+    )
     txn.amount = amount
     txn.fee = fee if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.FEE,
                            InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER) else Decimal("0")

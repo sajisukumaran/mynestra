@@ -49,6 +49,13 @@ prefill) + unique
   </c-field>
 </div>
 
+{# Settlement date — when the trade's cash cleared (e.g. T+1/T+2); informational only #}
+<div x-show="['buy','sell','sell_short','buy_to_cover'].includes(type)" x-cloak>
+  <c-field label="Settlement date" help="When the cash settled (optional, e.g. T+1). The trade date above drives the accounting.">
+    <div class="control"><input type="date" name="settlement_date" value="{% if txn and txn.settlement_date %}{{ txn.settlement_date|date:'Y-m-d' }}{% endif %}"></div>
+  </c-field>
+</div>
+
 {# Sell — cost basis note #}
 <div x-show="type === 'sell'" x-cloak><c-hint icon="info">Lots are sold first-in, first-out; the realized gain posts to Realized Capital Gain/Loss.</c-hint></div>
 

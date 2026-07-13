@@ -618,6 +618,11 @@ class InvestmentTransaction(SoftDeleteModel):
     txn_type = models.CharField(max_length=20, choices=InvTxnType.choices)
     date = models.DateField()
 
+    # Settlement date (e.g. T+1/T+2): informational only — the trade `date` above drives lot
+    # acquisition and the ledger, so this never affects the GL or the invariant. Recorded on trades
+    # (buy/sell/short/cover); null elsewhere.
+    settlement_date = models.DateField(null=True, blank=True)
+
     security = models.ForeignKey(
         Security, on_delete=models.PROTECT, null=True, blank=True, related_name="transactions"
     )

@@ -74,6 +74,22 @@ def test_buy_posts_no_gl_entry(make_tenant):
         assert account_balance(acct.gl_account) == D("1000")  # gl unchanged (still at cost)
 
 
+def test_settlement_date_is_metadata_only(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct, sec = _setup()
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        trade = datetime.date(2026, 2, 1)
+        settle = datetime.date(2026, 2, 3)
+        buy = _add(acct, InvTxnType.BUY, trade, security=sec,
+                   quantity="10", price="50", amount="500", settlement_date=settle)
+        assert buy.settlement_date == settle
+        # The lot acquires on the TRADE date, not the settlement date.
+        assert acct.lots.get(open=True).acquired_date == trade
+        # Still cost-neutral, and the invariant holds regardless of settlement.
+        assert buy.journal_entry_id is None
+        assert account_balance(acct.gl_account) == cash_balance(acct) + cost_basis(acct)
+
+
 def test_sell_gain_credits_realized_capital_gain(make_tenant):
     with schema_context(make_tenant().schema_name):
         acct, sec = _setup()
