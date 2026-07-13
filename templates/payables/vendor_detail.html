@@ -1,0 +1,42 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}{{ vendor.name }}{% endblock %}
+
+{% block pay %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}payables/vendors/">Vendors</a><c-icon name="chevron-right" />
+  <span class="strong">{{ vendor.name }}</span>
+</c-breadcrumb>
+
+<c-page-header title="{{ vendor.name }}" subtitle="{% if vendor.party_kind == 'organization' %}Organization vendor{% else %}Individual vendor{% endif %}{% if not vendor.is_active %} · inactive{% endif %}">
+  <c-slot name="actions">
+    <c-button variant="default" href="{{ ui_tenant_url }}payables/vendors/{{ vendor.pk }}/edit/"><c-icon name="pencil" size="sm" /> Edit</c-button>
+    <c-confirm-dialog title="Remove &ldquo;{{ vendor.name }}&rdquo; as a vendor?" message="This removes the vendor profile. The underlying contact record is kept.">
+      <c-slot name="trigger"><c-button variant="ghost"><c-icon name="trash-2" size="sm" /> Remove</c-button></c-slot>
+      <c-slot name="confirm">
+        <form method="post" action="{{ ui_tenant_url }}payables/vendors/{{ vendor.pk }}/delete/">{% csrf_token %}
+          <c-button type="submit" variant="danger">Remove</c-button>
+        </form>
+      </c-slot>
+    </c-confirm-dialog>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <c-card title="Defaults" icon="coins">
+    <c-key-value>
+      <c-kv-row key="Type">{% if vendor.party_kind == 'organization' %}Organization{% else %}Person{% endif %}</c-kv-row>
+      <c-kv-row key="Account #">{{ vendor.account_number|default:"—" }}</c-kv-row>
+      <c-kv-row key="Default terms">{% if vendor.default_terms %}{{ vendor.default_terms.name }}{% else %}<span class="subtle">—</span>{% endif %}</c-kv-row>
+      <c-kv-row key="Default expense">{% if vendor.default_expense_account %}{{ vendor.default_expense_account.display }}{% else %}<span class="subtle">—</span>{% endif %}</c-kv-row>
+      <c-kv-row key="Currency">{% if vendor.currency %}{{ vendor.currency.code }}{% else %}<span class="subtle">Household default</span>{% endif %}</c-kv-row>
+    </c-key-value>
+    {% if vendor.notes %}<p class="muted">{{ vendor.notes }}</p>{% endif %}
+  </c-card>
+
+  <c-card title="Bills" icon="file-text">
+    <c-empty-state icon="file-text" title="No bills yet" text="Bills you enter for this vendor will appear here." />
+  </c-card>
+</div>
+{% endblock %}

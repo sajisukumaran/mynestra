@@ -1,0 +1,20 @@
+{% comment %}htmx vendor-party picker results — People + Organizations. Each button feeds the vendor
+form's Alpine `pick()` via data-attrs.{% endcomment %}
+{% if people or orgs %}
+<div class="rel-preview stack-8">
+  {% for p in people %}
+  <button type="button" class="rel-pick" data-kind="person" data-id="{{ p.pk }}" data-name="{{ p.display_name }}" @click="pick($el.dataset)">
+    <c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>
+    <span><span class="strong">{{ p.display_name }}</span> <span class="subtle">· Person</span></span>
+  </button>
+  {% endfor %}
+  {% for o in orgs %}
+  <button type="button" class="rel-pick" data-kind="organization" data-id="{{ o.pk }}" data-name="{{ o.display_name|default:o.name }}" @click="pick($el.dataset)">
+    <c-avatar tint="{{ o.avatar_tint }}" size="sm" square>{{ o.initials }}</c-avatar>
+    <span><span class="strong">{{ o.display_name|default:o.name }}</span> <span class="subtle">· Organization</span></span>
+  </button>
+  {% endfor %}
+</div>
+{% elif q %}
+<p class="subtle">No matches for “{{ q }}”.</p>
+{% endif %}

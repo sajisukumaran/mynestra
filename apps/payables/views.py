@@ -11,10 +11,14 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.finance.models import Account, AccountType
+from apps.contacts.models import Person
+from apps.finance.models import Account, AccountType, Currency
 from apps.finance.services import base_currency
+from apps.organizations.models import Organization
 from apps.payables.forms import ItemForm
-from apps.payables.models import Item, ItemSku
+from apps.payables.models import Item, ItemSku, PaymentTerm, VendorProfile
+from apps.payables.services import ensure_vendor_profile
+from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
 
@@ -35,6 +39,7 @@ def pay_context(request, active, **extra):
         "is_owner": _is_owner(request),
         "base": base_currency(),
         "nav_items": Item.objects.count(),
+        "nav_vendors": VendorProfile.objects.count(),
     }
     ctx.update(extra)
     return ctx
@@ -164,7 +169,134 @@ def sku_delete(request, pk, sku_id):
     return redirect(tenant_url(request, f"payables/items/{pk}/"))
 
 
+# --- Vendors (a Person or Organization you owe) ----------------------------------------------
+
+def _ensure_vendor_category(org):
+    cat = Category.objects.filter(kind=Category.Kind.ORG, name="Vendor").first()
+    if cat:
+        org.categories.add(cat)
+
+
+def _resolve_vendor(request):
+    """The bill/vendor party from POST: an inline-created Org, or a picked Person/Org. Returns
+    (person, organization) with exactly one set, or (None, None) if unresolved."""
+    new_name = request.POST.get("new_vendor_name", "").strip()
+    if new_name:
+        org = Organization.objects.create(name=new_name)
+        _ensure_vendor_category(org)
+        return None, org
+    kind = request.POST.get("party_kind", "")
+    pid = request.POST.get("party_id") or 0
+    if kind == "person":
+        return Person.objects.filter(pk=pid).first(), None
+    if kind == "organization":
+        return None, Organization.objects.filter(pk=pid).first()
+    return None, None
+
+
+def _apply_vendor_defaults(request, profile):
+    profile.default_terms = PaymentTerm.objects.filter(
+        pk=request.POST.get("default_terms") or 0
+    ).first()
+    profile.default_expense_account = _expense_accounts().filter(
+        pk=request.POST.get("default_expense_account") or 0
+    ).first()
+    profile.currency = Currency.objects.filter(code=request.POST.get("currency") or "").first()
+    profile.account_number = request.POST.get("account_number", "").strip()
+    profile.notes = request.POST.get("notes", "").strip()
+    profile.is_active = request.POST.get("is_active") == "on"
+    profile.save()
+
+
+def vendor_list(request):
+    qs = VendorProfile.objects.select_related("person", "organization")
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(organization__name__icontains=q)
+            | Q(organization__display_name__icontains=q)
+            | Q(person__first_name__icontains=q)
+            | Q(person__last_name__icontains=q)
+            | Q(person__preferred_name__icontains=q)
+        )
+    ptype = request.GET.get("type", "")
+    if ptype == "person":
+        qs = qs.filter(person__isnull=False)
+    elif ptype == "organization":
+        qs = qs.filter(organization__isnull=False)
+    qs = qs.order_by("-id")
+    page = Paginator(qs, 20).get_page(request.GET.get("page"))
+    ctx = pay_context(
+        request, "vendors",
+        page=page, vendors=page.object_list, q=q, ptype=ptype,
+        total=VendorProfile.objects.count(),
+    )
+    return render(request, "payables/vendor_list.html", ctx)
+
+
+def vendor_create(request):
+    if request.method == "POST":
+        person, org = _resolve_vendor(request)
+        if person or org:
+            if org:
+                _ensure_vendor_category(org)
+            profile = ensure_vendor_profile(person=person, organization=org)
+            _apply_vendor_defaults(request, profile)
+            return redirect(tenant_url(request, f"payables/vendors/{profile.pk}/"))
+        return _render_vendor_form(request, VendorProfile(), "create", error="Choose a vendor.")
+    return _render_vendor_form(request, VendorProfile(), "create")
+
+
+def vendor_edit(request, pk):
+    profile = get_object_or_404(VendorProfile, pk=pk)
+    if request.method == "POST":
+        _apply_vendor_defaults(request, profile)
+        return redirect(tenant_url(request, f"payables/vendors/{profile.pk}/"))
+    return _render_vendor_form(request, profile, "edit")
+
+
+def _render_vendor_form(request, profile, mode, error=""):
+    ctx = pay_context(
+        request, "vendors",
+        vendor=profile, mode=mode, error=error,
+        terms=PaymentTerm.objects.filter(is_active=True),
+        expense_accounts=_expense_accounts(),
+        currencies=Currency.objects.filter(is_active=True),
+    )
+    return render(request, "payables/vendor_form.html", ctx)
+
+
+def vendor_detail(request, pk):
+    profile = get_object_or_404(VendorProfile, pk=pk)
+    ctx = pay_context(request, "vendors", vendor=profile)
+    return render(request, "payables/vendor_detail.html", ctx)
+
+
+def vendor_delete(request, pk):
+    profile = get_object_or_404(VendorProfile, pk=pk)
+    if request.method == "POST":
+        profile.delete()  # soft-delete (the underlying Person/Org is untouched)
+    return redirect(tenant_url(request, "payables/vendors/"))
+
+
 # --- htmx fragments --------------------------------------------------------------------------
+
+def vendor_search(request):
+    """htmx: People + Organizations matching the query — candidates to pick as a vendor."""
+    q = request.GET.get("q", "").strip()
+    people = Person.objects.none()
+    orgs = Organization.objects.none()
+    if q:
+        people = Person.objects.filter(
+            Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(preferred_name__icontains=q)
+        )[:6]
+        orgs = Organization.objects.filter(
+            Q(name__icontains=q) | Q(display_name__icontains=q)
+        )[:6]
+    return render(
+        request, "payables/partials/vendor_search.html", {"people": people, "orgs": orgs, "q": q}
+    )
+
 
 def item_search(request):
     """htmx: items matching the query (name / UPC / SKU) — to pick an item on a bill line."""

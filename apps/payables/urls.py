@@ -17,6 +17,13 @@ urlpatterns = [
     path("items/<int:pk>/skus/new/", views.sku_add, name="sku-add"),
     path("items/<int:pk>/skus/<int:sku_id>/edit/", views.sku_edit, name="sku-edit"),
     path("items/<int:pk>/skus/<int:sku_id>/delete/", views.sku_delete, name="sku-delete"),
+    # Vendors
+    path("vendors/", views.vendor_list, name="vendors"),
+    path("vendors/new/", views.vendor_create, name="vendor-create"),
+    path("vendors/<int:pk>/", views.vendor_detail, name="vendor-detail"),
+    path("vendors/<int:pk>/edit/", views.vendor_edit, name="vendor-edit"),
+    path("vendors/<int:pk>/delete/", views.vendor_delete, name="vendor-delete"),
     # htmx fragments
     path("item-search/", views.item_search, name="item-search"),
+    path("vendor-search/", views.vendor_search, name="vendor-search"),
 ]

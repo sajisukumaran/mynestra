@@ -1,0 +1,70 @@
+{% extends "payables/base.html" %}
+{% block pay_heading %}Vendors{% endblock %}
+
+{% block pay %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}payables/">Payables</a><c-icon name="chevron-right" /><span class="strong">Vendors</span></c-breadcrumb>
+
+<c-page-header title="Vendors" subtitle="{{ total }} {{ total|pluralize:'vendor,vendors' }} you buy from">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}payables/vendors/new/"><c-icon name="plus" /> New vendor</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search vendors…"></label>
+    {% if ptype %}<input type="hidden" name="type" value="{{ ptype }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}payables/vendors/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not ptype %} active{% endif %}" href="{% querystring type=None page=None %}">All</a>
+    <a class="fchip{% if ptype == 'organization' %} active{% endif %}" href="{% querystring type='organization' page=None %}">Organizations</a>
+    <a class="fchip{% if ptype == 'person' %} active{% endif %}" href="{% querystring type='person' page=None %}">People</a>
+  </div>
+
+  <c-card flush>
+    {% if vendors %}
+    <c-table>
+      <thead><tr>
+        <c-th>Vendor</c-th>
+        <c-th>Type</c-th>
+        <c-th>Account #</c-th>
+        <c-th>Default terms</c-th>
+      </tr></thead>
+      <tbody>
+        {% for v in vendors %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}payables/vendors/{{ v.pk }}/">
+              <c-avatar tint="{{ v.tint }}" size="sm" {% if v.party_kind == 'organization' %}square{% endif %}>{{ v.initials }}</c-avatar>
+              <div><div class="pc-name">{{ v.name }}{% if not v.is_active %} <c-badge variant="warning">Inactive</c-badge>{% endif %}</div></div>
+            </a>
+          </td>
+          <td><c-badge>{% if v.party_kind == 'organization' %}Organization{% else %}Person{% endif %}</c-badge></td>
+          <td class="muted">{{ v.account_number|default:"—" }}</td>
+          <td class="muted">{% if v.default_terms %}{{ v.default_terms.name }}{% else %}<span class="subtle">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="building-2"
+      title="{% if q or ptype %}No vendors match{% else %}No vendors yet{% endif %}"
+      text="{% if q or ptype %}Try a different search or filter.{% else %}Add the people and companies you receive bills from.{% endif %}">
+      {% if not q and not ptype %}<c-button variant="primary" href="{{ ui_tenant_url }}payables/vendors/new/"><c-icon name="plus" /> New vendor</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

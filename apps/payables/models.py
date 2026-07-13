@@ -192,3 +192,82 @@ class ItemSku(TimeStampedModel):
         if self.store_id:
             return self.store.name
         return self.store_name or "—"
+
+
+class VendorProfile(SoftDeleteModel):
+    """A vendor — someone you owe. Points to a Person OR an Organization (exactly one), plus the
+    household's purchase defaults for them. Organization vendors are additionally tagged the locked
+    'Vendor' category for cross-module discoverability; Person vendors just carry this profile."""
+
+    person = models.ForeignKey(
+        "contacts.Person", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="vendor_profile",
+    )
+    organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="vendor_profile",
+    )
+    default_terms = models.ForeignKey(
+        PaymentTerm, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    default_expense_account = models.ForeignKey(
+        "finance.Account", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    account_number = models.CharField(max_length=60, blank=True)  # your account # with them
+    currency = models.ForeignKey(
+        "finance.Currency", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(person__isnull=False, organization__isnull=True)
+                    | models.Q(person__isnull=True, organization__isnull=False)
+                ),
+                name="vendorprofile_one_party",
+            ),
+            models.UniqueConstraint(
+                fields=["person"],
+                condition=models.Q(deleted_at__isnull=True, person__isnull=False),
+                name="uniq_vendor_person",
+            ),
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=models.Q(deleted_at__isnull=True, organization__isnull=False),
+                name="uniq_vendor_org",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def party(self):
+        return self.person or self.organization
+
+    @property
+    def party_kind(self) -> str:
+        return "person" if self.person_id else "organization"
+
+    @property
+    def name(self) -> str:
+        party = self.party
+        for attr in ("display_name", "full_name", "name"):
+            val = getattr(party, attr, "")
+            if val:
+                return val
+        return str(party)
+
+    @property
+    def initials(self) -> str:
+        return getattr(self.party, "initials", "?")
+
+    @property
+    def tint(self) -> str:
+        return getattr(self.party, "avatar_tint", "slate")
