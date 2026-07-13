@@ -144,6 +144,71 @@ def test_duplicate_named_trade_inputs_are_disable_guarded(make_tenant, make_user
         assert all(":disabled=" in t for t in tags), f"{field}: an input lacks a :disabled guard"
 
 
+def test_invalid_transaction_save_is_rejected_and_messaged(make_tenant, make_user, client):
+    """Fix for silent failure: a rejected save no longer vanishes — nothing is written and the
+    detail page shows an error toast. Also guards negative money/quantity values."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="VZ", name="Verizon",
+                                      currency=Currency.objects.get(code="USD"))
+        aid, sid = acct.pk, sec.pk
+    client.force_login(owner)
+
+    # (a) Negative commission is rejected outright.
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2026-01-05", "security": sid,
+        "quantity": "10", "price": "50", "amount": "500", "fee": "-1"}, follow=True)
+    assert "Couldn&#x27;t save" in resp.content.decode() or "Couldn't save" in resp.content.decode()
+    with schema_context(tenant.schema_name):
+        assert not InvestmentTransaction.objects.filter(account_id=aid).exists()
+
+    # (b) A buy missing its security is rejected too (not silently dropped).
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2026-01-05",
+        "quantity": "10", "price": "50", "amount": "500"}, follow=True)
+    assert "save" in resp.content.decode().lower()
+    with schema_context(tenant.schema_name):
+        assert not InvestmentTransaction.objects.filter(account_id=aid).exists()
+
+    # (c) A valid buy still saves cleanly.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2026-01-05", "security": sid,
+        "quantity": "10", "price": "50", "amount": "500", "fee": "0"})
+    with schema_context(tenant.schema_name):
+        assert InvestmentTransaction.objects.filter(account_id=aid, txn_type="buy").count() == 1
+
+
+def test_net_amount_and_reactive_bindings_render(make_tenant, make_user, client):
+    """The net-amount readout is computed client-side from amount + commission, so amount/fee must
+    be x-model bound and the net expression present (added on a buy, deducted on a sell)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="VZ", name="Verizon",
+                                      currency=Currency.objects.get(code="USD"))
+        aid, sid = acct.pk, sec.pk
+    client.force_login(owner)
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2026-01-05", "security": sid,
+        "quantity": "10", "price": "50", "amount": "500", "fee": "9.99"})
+
+    body = client.get(_url(tenant, f"accounts/{aid}/")).content.decode()
+    assert 'x-model="amount"' in body and 'x-model="fee"' in body
+    assert "Net amount" in body
+    assert "['buy','buy_to_cover']" in body  # net adds commission for buys, subtracts for sells
+
+
 def test_security_create_and_price(make_tenant, make_user, client):
     from decimal import Decimal
 

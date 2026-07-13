@@ -10,6 +10,13 @@
 </c-breadcrumb>
 
 <div class="stack-20">
+  {# Flash messages (e.g. a rejected transaction save — never fail silently) #}
+  {% if messages %}{% for m in messages %}
+  <div x-data="{ show: true }" x-show="show" @click="show = false">
+    <c-toast variant="{% if m.level_tag == 'error' %}danger{% else %}{{ m.level_tag }}{% endif %}" icon="{% if m.level_tag == 'error' %}triangle-alert{% elif m.level_tag == 'success' %}circle-check{% else %}info{% endif %}" message="{{ m }}" />
+  </div>
+  {% endfor %}{% endif %}
+
   {# Identity header #}
   <c-card>
     <div class="person-head">
@@ -108,7 +115,7 @@
           <c-modal title="Add transaction" class="modal-wide">
             <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add transaction</c-button></c-slot>
             <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/new/"
-                  x-data="{ type:'buy', date:'{% now 'Y-m-d' %}', taxYear:'', payeeKind:'', payeeId:'', payeeName:'', payeeTint:'slate', payeeInit:'?', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
+                  x-data="{ type:'buy', date:'{% now 'Y-m-d' %}', amount:'', fee:'', taxYear:'', payeeKind:'', payeeId:'', payeeName:'', payeeTint:'slate', payeeInit:'?', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
               <div class="stack-16">
                 {% include "investments/partials/transaction_fields.html" with suffix='new' %}
                 <div class="row"><c-button type="submit" variant="primary">Add transaction</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
@@ -217,7 +224,7 @@
                     <c-modal title="Edit transaction" class="modal-wide">
                       <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                       <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/edit/"
-                            x-data="{ type:'{{ t.txn_type }}', date:'{{ t.date|date:'Y-m-d' }}', taxYear:'{{ t.tax_year|default:'' }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
+                            x-data="{ type:'{{ t.txn_type }}', date:'{{ t.date|date:'Y-m-d' }}', amount:'{{ t.amount|floatformat:'-4' }}', fee:'{{ t.fee|floatformat:'-4' }}', taxYear:'{{ t.tax_year|default:'' }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; } }">{% csrf_token %}
                         <div class="stack-16">
                           {% include "investments/partials/transaction_fields.html" with txn=t suffix=t.pk %}
                           <div class="between">

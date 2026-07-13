@@ -7,6 +7,7 @@ apps.investments.services; this layer only reads POST, calls the service, and re
 import datetime
 from decimal import Decimal, InvalidOperation
 
+from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
@@ -624,6 +625,10 @@ def _apply_txn_post(request, txn):
     fee = _decimal(request.POST.get("fee")) or Decimal("0")
     quantity = _decimal(request.POST.get("quantity")) or Decimal("0")
     price = _decimal(request.POST.get("price")) or Decimal("0")
+    # No money/quantity figure is ever negative (a short uses a positive quantity; the engine signs
+    # it). Reject rather than silently store nonsense.
+    if amount < 0 or fee < 0 or quantity < 0 or price < 0:
+        return None
 
     security = None
     if t in SECURITY_TYPES or t in (InvTxnType.DIVIDEND, InvTxnType.INTEREST,
@@ -818,6 +823,13 @@ def _apply_txn_post(request, txn):
     return txn
 
 
+# Shown (as a toast) when a save is rejected, so an invalid entry is never silently dropped.
+TXN_INVALID_MSG = (
+    "Couldn't save the transaction. Check the required fields for its type — a date, and for a "
+    "trade a security with a positive quantity and amount — and that no value is negative."
+)
+
+
 def txn_create(request, pk):
     account = get_object_or_404(InvestmentAccount, pk=pk)
     if request.method == "POST":
@@ -830,6 +842,8 @@ def txn_create(request, pk):
                 and request.POST.get("auto_match")
             ):
                 create_matching_leg(txn, user=request.user)
+        else:
+            messages.error(request, TXN_INVALID_MSG)
     return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
 
 
@@ -839,8 +853,11 @@ def txn_edit(request, pk, tx):
     # A managed mirror IN leg is maintained via its OUT leg — never edited directly.
     if txn.is_managed_in_leg:
         return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
-    if request.method == "POST" and _apply_txn_post(request, txn) is not None:
-        apply_transaction(txn, user=request.user, is_new=False)
+    if request.method == "POST":
+        if _apply_txn_post(request, txn) is not None:
+            apply_transaction(txn, user=request.user, is_new=False)
+        else:
+            messages.error(request, TXN_INVALID_MSG)
     return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
 
 

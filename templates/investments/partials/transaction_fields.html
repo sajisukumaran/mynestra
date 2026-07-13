@@ -16,7 +16,7 @@ prefill) + unique
   <c-field label="Date" required><div class="control"><input type="date" name="date" x-model="date"></div></c-field>
   <div x-show="!['in_kind_out','in_kind_in','worthless','merger','spinoff','opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close','opt_expire','opt_exercise','opt_assign'].includes(type)" x-cloak>
     <c-field label="Amount" required help="In {{ account.currency.code }}.">
-      <div class="control"><input name="amount" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
+      <div class="control"><input name="amount" inputmode="decimal" x-model="amount" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
     </c-field>
   </div>
 </div>
@@ -42,11 +42,19 @@ prefill) + unique
   </div>
 </div>
 
-{# Commission — buy / sell / short / cover (capitalized into cost basis) #}
+{# Commission + auto-calculated net — buy / sell / short / cover. Net applies the commission to the
+   amount: ADDED on a buy/cover (it's capitalized into cost), DEDUCTED on a sell/short (it nets out
+   of proceeds). Read-only, computed live from amount + commission; not submitted. #}
 <div x-show="['buy','sell','sell_short','buy_to_cover'].includes(type)" x-cloak>
-  <c-field label="Commission" help="Added to cost basis on a buy; nets out of proceeds on a sell.">
-    <div class="control"><input name="fee" inputmode="decimal" value="{% if txn and txn.fee %}{{ txn.fee|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
-  </c-field>
+  <div class="grid-halves">
+    <c-field label="Commission" help="Added to cost basis on a buy; nets out of proceeds on a sell.">
+      <div class="control"><input name="fee" inputmode="decimal" x-model="fee" value="{% if txn and txn.fee %}{{ txn.fee|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div>
+    </c-field>
+    <c-field label="Net amount" help="Amount with commission applied — added on a buy, deducted on a sell.">
+      <div class="control"><input readonly tabindex="-1"
+        :value="'{{ account.currency.symbol }}' + ((parseFloat(amount) || 0) + ((['buy','buy_to_cover'].includes(type) ? 1 : -1) * (parseFloat(fee) || 0))).toFixed({{ account.currency.decimal_places }})"></div>
+    </c-field>
+  </div>
 </div>
 
 {# Settlement date — when the trade's cash cleared (e.g. T+1/T+2); informational only #}
