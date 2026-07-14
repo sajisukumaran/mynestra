@@ -306,6 +306,53 @@ def test_net_amount_and_reactive_bindings_render(make_tenant, make_user, client)
     assert "{#" not in body
 
 
+def test_register_is_paginated_and_sortable(make_tenant, make_user, client):
+    """The register paginates (50/page, newest first by default) and sorts by column; the active tab
+    rides in ?tab= so a sort/page reload lands back on the Register tab. Balance stays chronological
+    regardless of the display sort."""
+    import datetime
+    from decimal import Decimal
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account, register_page
+        usd = Currency.objects.get(code="USD")
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=usd)
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="ZZ", name="Zed", currency=usd)
+        base = datetime.date(2020, 1, 1)
+        InvestmentTransaction.objects.bulk_create([
+            InvestmentTransaction(
+                account=acct, txn_type="buy", date=base + datetime.timedelta(days=i),
+                security=sec, quantity=Decimal("1"), price=Decimal("10"),
+                amount=Decimal("10") + i)
+            for i in range(120)
+        ])
+        aid = acct.pk
+
+        pg = register_page(acct, sort="date", direction="desc", page=1)
+        assert len(pg["rows"]) == 50                       # one page
+        assert pg["total"] == 120
+        assert pg["page_obj"].paginator.num_pages == 3
+        assert pg["rows"][0]["txn"].date > pg["rows"][-1]["txn"].date  # newest first
+        # Page 2 continues where page 1 left off (no overlap, still date-desc).
+        pg2 = register_page(acct, sort="date", direction="desc", page=2)
+        assert pg["rows"][-1]["txn"].date > pg2["rows"][0]["txn"].date
+        # Sort by cash ascending → most-negative (largest) buy first.
+        pc = register_page(acct, sort="cash", direction="asc", page=1)
+        assert pc["rows"][0]["txn"].signed_cash <= pc["rows"][1]["txn"].signed_cash
+
+    client.force_login(owner)
+    body = client.get(_url(tenant, f"accounts/{aid}/?tab=register")).content.decode()
+    assert "sortable" in body        # sortable column headers rendered
+    assert "pager" in body           # pagination control rendered
+    assert "tab=register" in body    # sort/page links carry the active tab
+    assert ">120<" in body           # the Register tab badge shows the TOTAL, not the page size
+
+
 def test_transaction_form_validates_exotic_types_client_side(make_tenant, make_user, client):
     """The client-side guard covers the corporate-action / exotic types too — spin-off, merger,
     split, in-kind — not just plain trades. Their fields are reactive (x-model) and both modals

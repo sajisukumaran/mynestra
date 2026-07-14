@@ -60,7 +60,7 @@ from apps.investments.services import (
     institution_row,
     institution_summary,
     line_chart_points,
-    register,
+    register_page,
     remove_transaction,
     repool_security,
     security_performance,
@@ -433,6 +433,23 @@ def account_delete(request, pk):
 
 # --- Account detail (Holdings / Register / Holders / History) -------------------------------
 
+def _register_sort_cols(sort, direction):
+    """Per-column sort state for the register headers: the direction a header click should apply +
+    the arrow to show. The active column toggles; others default to descending (ascending for the
+    alphabetical Type column)."""
+    cols = {}
+    for key in ("date", "type", "cash", "balance"):
+        if key == sort:
+            cols[key] = {
+                "active": True,
+                "dir": "asc" if direction == "desc" else "desc",
+                "arrow": "▲" if direction == "asc" else "▼",
+            }
+        else:
+            cols[key] = {"active": False, "dir": "asc" if key == "type" else "desc", "arrow": ""}
+    return cols
+
+
 def account_detail(request, pk):
     account = get_object_or_404(
         InvestmentAccount.objects.select_related("institution", "branch", "currency", "gl_account"),
@@ -448,6 +465,17 @@ def account_detail(request, pk):
     sec_ids = set(
         account.transactions.filter(security__isnull=False).values_list("security_id", flat=True)
     ) | set(account.lots.values_list("security_id", flat=True))
+    # Register: sorted + paginated so a large register renders (and reloads) fast. The active tab is
+    # carried in ?tab= so a sort/page link lands the reader back on the Register tab.
+    reg = register_page(
+        account,
+        sort=request.GET.get("sort", "date"),
+        direction=request.GET.get("dir", "desc"),
+        page=request.GET.get("page") or 1,
+    )
+    tab = request.GET.get("tab", "holdings")
+    if tab not in ("holdings", "register", "performance", "holders", "vesting", "history"):
+        tab = "holdings"
     ctx = inv_context(
         request, "accounts",
         account=account,
@@ -455,7 +483,9 @@ def account_detail(request, pk):
         vesting_rows=vesting_rows,
         vesting_totals=vesting_totals,
         market_total=market,
-        rows=register(account),
+        register=reg,
+        register_cols=_register_sort_cols(reg["sort"], reg["direction"]),
+        active_tab=tab,
         holders=list(account.holders.select_related("person").all()),
         history=account.history.all()[:60],
         base=base_currency(),
@@ -870,7 +900,7 @@ def txn_create(request, pk):
                 create_matching_leg(txn, user=request.user)
         else:
             messages.error(request, TXN_INVALID_MSG)
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=register"))
 
 
 def txn_edit(request, pk, tx):
@@ -878,13 +908,13 @@ def txn_edit(request, pk, tx):
     txn = get_object_or_404(InvestmentTransaction, pk=tx, account=account)
     # A managed mirror IN leg is maintained via its OUT leg — never edited directly.
     if txn.is_managed_in_leg:
-        return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+        return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=register"))
     if request.method == "POST":
         if _apply_txn_post(request, txn) is not None:
             apply_transaction(txn, user=request.user, is_new=False)
         else:
             messages.error(request, TXN_INVALID_MSG)
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=register"))
 
 
 def txn_delete(request, pk, tx):
@@ -892,7 +922,7 @@ def txn_delete(request, pk, tx):
     txn = get_object_or_404(InvestmentTransaction, pk=tx, account=account)
     if request.method == "POST" and not txn.is_managed_in_leg:
         remove_transaction(txn, user=request.user)
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=register"))
 
 
 def txn_toggle_cleared(request, pk, tx):
@@ -901,7 +931,7 @@ def txn_toggle_cleared(request, pk, tx):
     if request.method == "POST":
         txn.cleared = not txn.cleared
         txn.save(update_fields=["cleared", "updated_at"])
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=register"))
 
 
 # --- Vesting (employer match & equity grants; module-level overlay, no GL) -------------------
@@ -968,7 +998,7 @@ def vesting_create(request, pk):
     account = get_object_or_404(InvestmentAccount, pk=pk)
     if request.method == "POST":
         _apply_vesting_post(request, VestingGrant(account=account))
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=vesting"))
 
 
 def vesting_edit(request, pk, vid):
@@ -976,7 +1006,7 @@ def vesting_edit(request, pk, vid):
     grant = get_object_or_404(VestingGrant, pk=vid, account=account)
     if request.method == "POST":
         _apply_vesting_post(request, grant)
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=vesting"))
 
 
 def vesting_delete(request, pk, vid):
@@ -984,7 +1014,7 @@ def vesting_delete(request, pk, vid):
     grant = get_object_or_404(VestingGrant, pk=vid, account=account)
     if request.method == "POST":
         grant.delete()  # soft delete
-    return redirect(tenant_url(request, f"investments/accounts/{pk}/"))
+    return redirect(tenant_url(request, f"investments/accounts/{pk}/?tab=vesting"))
 
 
 # --- Securities (instrument master) ---------------------------------------------------------

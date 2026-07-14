@@ -1,0 +1,84 @@
+{% comment %}Register panel: the account's transactions, sorted + paginated (register_page result in
+`register`, per-column sort state in `register_cols`). Sort headers + pager are plain links carrying
+?tab=register so the reload returns to this tab. The running Balance is always chronological (each
+row = the balance AFTER that txn), independent of the display sort. Row edit modals use the page's
+Alpine state (window.txnFormError, held-qty map).{% endcomment %}
+{% if register.total %}
+<c-card flush>
+  <c-table>
+    <thead><tr>
+      <c-th sortable {% if register_cols.date.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='date' dir=register_cols.date.dir page=1 %}">Date</a></c-th>
+      <c-th sortable {% if register_cols.type.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='type' dir=register_cols.type.dir page=1 %}">Type</a></c-th>
+      <c-th>Details</c-th>
+      <c-th>Cleared</c-th>
+      <c-th sortable class="col-num" {% if register_cols.cash.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='cash' dir=register_cols.cash.dir page=1 %}">Cash</a></c-th>
+      <c-th sortable class="col-num" {% if register_cols.balance.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='balance' dir=register_cols.balance.dir page=1 %}">Balance</a></c-th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in register.rows %}{% with t=r.txn %}
+      <tr>
+        <td class="muted tnum">{{ t.date|date:"d M Y" }}</td>
+        <td><span class="row"><c-icon name="{{ t.type_glyph }}" size="sm" class="subtle" /><c-badge>{{ t.type_label }}</c-badge></span></td>
+        <td>
+          <div class="pc-name">{% if t.security %}{{ t.security.display }}{% elif t.counter_account %}{{ t.counter_account.nickname }}{% elif t.counter_investment_account %}{{ t.counter_investment_account.nickname }}{% elif t.counter_external %}{{ t.counter_external }}{% else %}{{ t.type_label }}{% endif %}</div>
+          <div class="pc-sub">
+            {% if t.security.is_option %}{{ t.option_contracts|floatformat:'-2' }} contracts{% if t.price %} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />/sh{% endif %}{% elif t.quantity %}{{ t.quantity|floatformat:'-4' }}{% if t.price %} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}{% endif %}
+            {% if t.realized_gain %} · realized <c-money :amount="t.realized_gain" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
+            {% if t.counter_investment_account and t.security %} · {% if t.txn_type == 'in_kind_out' %}to{% else %}from{% endif %} {{ t.counter_investment_account.nickname }}{% endif %}
+            {% if t.split_ratio_display %}{{ t.split_ratio_display }}{% endif %}
+            {% if t.target_security %} · → {{ t.target_security.display }}{% if t.basis_pct %} ({{ t.basis_pct|floatformat:'-2' }}% basis){% endif %}{% endif %}
+            {% if t.payee %}{% if t.quantity %} · {% endif %}{{ t.payee }}{% endif %}{% if t.memo %} · {{ t.memo }}{% endif %}
+            {% if t.settlement_date %} · settled {{ t.settlement_date|date:"d M Y" }}{% endif %}
+            {% if t.ex_dividend_date %} · ex-div {{ t.ex_dividend_date|date:"d M Y" }}{% endif %}
+            {% if t.tax_year %} · <span class="chip chip-{{ account.group_tint }}">TY {{ t.tax_year }}</span>{% endif %}
+          </div>
+        </td>
+        <td>
+          <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/cleared/">{% csrf_token %}
+            <c-button type="submit" icon_only size="sm" variant="ghost" title="{% if t.cleared %}Cleared — click to unmark{% else %}Not cleared — click to mark{% endif %}"><c-icon name="{% if t.cleared %}circle-check{% else %}clock{% endif %}" size="sm" /></c-button>
+          </form>
+        </td>
+        <td class="col-num">{% if t.signed_cash %}<span class="{% if t.direction == 'in' %}amount-pos{% elif t.direction == 'out' %}amount-neg{% endif %}"><c-money :amount="t.signed_cash" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>{% else %}<span class="subtle">—</span>{% endif %}</td>
+        <td class="col-num"><c-money :amount="r.balance" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+        <td>
+          <div class="cell-actions">
+            {% if t.is_managed_in_leg %}
+            <span class="muted" title="Managed automatically by the in-kind transfer from {{ t.counter_investment_account.nickname }}">Auto</span>
+            {% else %}
+            <c-modal title="Edit transaction" class="modal-wide">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+              <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/edit/"
+                    @submit="if (!$event.submitter?.formAction?.includes('/delete/') && formError) { $event.preventDefault(); attempted = true }"
+                    x-data="{ type:'{{ t.txn_type }}', date:'{{ t.date|date:'Y-m-d' }}', amount:'{{ t.amount|floatformat:'-4' }}', fee:'{{ t.fee|floatformat:'-4' }}', quantity:'{% if t.quantity %}{{ t.quantity|floatformat:'-6' }}{% endif %}', security:'{{ t.security_id|default:'' }}', ratioNew:'{{ t.split_ratio_new|default:'' }}', ratioOld:'{{ t.split_ratio_old|default:'' }}', basisPct:'{{ t.basis_pct|default:'' }}', targetSec:'{{ t.target_security_id|default:'' }}', newSym:'', newName:'', contracts:'{% if t.security.is_option %}{{ t.option_contracts|floatformat:'-6' }}{% endif %}', premium:'{% if t.security.is_option and t.price %}{{ t.price|floatformat:'-6' }}{% endif %}', inKindLots:0, attempted:false, taxYear:'{{ t.tax_year|default:'' }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; }, get formError(){ return window.txnFormError(this); } }">{% csrf_token %}
+                <div class="stack-16">
+                  {% include "investments/partials/transaction_fields.html" with txn=t suffix=t.pk %}
+                  <div class="err-msg" x-show="attempted && formError" x-cloak><c-icon name="triangle-alert" size="sm" /> <span x-text="formError"></span></div>
+                  <div class="between">
+                    <c-button type="submit" variant="primary">Save</c-button>
+                    <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                  </div>
+                </div>
+              </form>
+            </c-modal>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endwith %}{% endfor %}
+    </tbody>
+  </c-table>
+  <c-slot name="foot">
+    <span class="subtle">Showing <span class="strong tnum">{{ register.page_obj.start_index }}–{{ register.page_obj.end_index }}</span> of <span class="strong tnum">{{ register.total }}</span></span>
+    {% if register.page_obj.paginator.num_pages > 1 %}
+    <c-pagination class="ml-auto">
+      {% if register.page_obj.has_previous %}<a class="pg" href="{% querystring tab='register' page=register.page_obj.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+      <span class="pg active tnum">{{ register.page_obj.number }} / {{ register.page_obj.paginator.num_pages }}</span>
+      {% if register.page_obj.has_next %}<a class="pg" href="{% querystring tab='register' page=register.page_obj.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+    </c-pagination>
+    {% endif %}
+  </c-slot>
+</c-card>
+{% else %}
+<c-card><c-empty-state icon="coins" title="No transactions yet" text="Record buys, sells, dividends, interest, transfers and fees to build the register." /></c-card>
+{% endif %}

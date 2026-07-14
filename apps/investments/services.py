@@ -29,6 +29,7 @@ import datetime
 from dataclasses import dataclass
 from decimal import Decimal
 
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.db.models import Sum
 from django.db.models.functions import ExtractYear
@@ -1381,8 +1382,26 @@ def donut_segments(slices) -> list[dict]:
     return segs
 
 
-def register(account) -> list[dict]:
-    """The account's transactions with a running settlement-cash balance, newest-first."""
+# Register display sorts. Keys map to a sort key over a {"txn","balance"} row. The running balance
+# is ALWAYS chronological (below), so it stays each row's own "balance after this txn" regardless of
+# the display sort; date ties break by id (the insertion order the running balance was built in).
+_REGISTER_SORTS = {
+    "date": lambda r: (r["txn"].date, r["txn"].id),
+    "type": lambda r: (r["txn"].type_label.lower(), r["txn"].date, r["txn"].id),
+    "cash": lambda r: (r["txn"].signed_cash, r["txn"].date, r["txn"].id),
+    "balance": lambda r: (r["balance"], r["txn"].id),
+}
+REGISTER_PER_PAGE = 50
+
+
+def register_page(account, *, sort="date", direction="desc", page=1, per_page=REGISTER_PER_PAGE):
+    """The account register — every transaction with a chronological running settlement-cash balance
+    — sorted by a column and paginated. The balance is always a date-ordered running total (the
+    balance AFTER each transaction), computed independently of the display sort, so sorting by any
+    column keeps each row's own balance. Read-only; one query loads the transactions, the running
+    total + sort + page are computed in Python."""
+    sort = sort if sort in _REGISTER_SORTS else "date"
+    reverse = direction != "asc"
     running = ZERO
     rows = []
     txns = account.transactions.select_related(
@@ -1392,8 +1411,15 @@ def register(account) -> list[dict]:
     for txn in txns:
         running = _q_amount(running + txn.signed_cash)
         rows.append({"txn": txn, "balance": running})
-    rows.reverse()
-    return rows
+    rows.sort(key=_REGISTER_SORTS[sort], reverse=reverse)
+    page_obj = Paginator(rows, per_page).get_page(page)
+    return {
+        "rows": page_obj.object_list,
+        "page_obj": page_obj,
+        "sort": sort,
+        "direction": "asc" if not reverse else "desc",
+        "total": page_obj.paginator.count,
+    }
 
 
 def contribution_summary(account) -> list[dict]:
