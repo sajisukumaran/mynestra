@@ -306,6 +306,36 @@ def test_net_amount_and_reactive_bindings_render(make_tenant, make_user, client)
     assert "{#" not in body
 
 
+def test_transaction_form_validates_exotic_types_client_side(make_tenant, make_user, client):
+    """The client-side guard covers the corporate-action / exotic types too — spin-off, merger,
+    split, in-kind — not just plain trades. Their fields are reactive (x-model) and both modals
+    delegate to one shared window.txnFormError, so e.g. a spin-off missing its target or basis %
+    keeps the modal open with an inline error instead of submitting and bouncing to a page toast."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        aid = acct.pk
+    client.force_login(owner)
+    body = client.get(_url(tenant, f"accounts/{aid}/")).content.decode()
+    # One shared validator drives the add + edit modals so they can never drift.
+    assert "window.txnFormError" in body
+    assert "return window.txnFormError(this)" in body
+    # Spin-off / merger / split fields must be reactive for the validator to see them.
+    assert 'x-model="ratioNew"' in body and 'x-model="ratioOld"' in body
+    assert 'x-model="basisPct"' in body and 'x-model="targetSec"' in body
+    assert 'x-model="newSym"' in body and 'x-model="newName"' in body
+    # In-kind incoming lots surface a validity count up to the parent scope.
+    assert 'x-effect="inKindLots' in body
+    # The validator enforces the spin-off basis rule and the merger/spin-off target.
+    assert "basis %" in body and "security received" in body
+    assert "{#" not in body
+
+
 def test_security_create_and_price(make_tenant, make_user, client):
     from decimal import Decimal
 

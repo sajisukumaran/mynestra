@@ -95,8 +95,8 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 {# Split ratio #}
 <div x-show="type === 'split'" x-cloak>
   <div class="grid-halves">
-    <c-field label="New shares" help="e.g. 2 for a 2-for-1 split."><div class="control"><input name="split_ratio_new" inputmode="decimal" :disabled="type !== 'split'" value="{{ txn.split_ratio_new|default:'' }}" placeholder="2"></div></c-field>
-    <c-field label="Per old shares" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" :disabled="type !== 'split'" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
+    <c-field label="New shares" help="e.g. 2 for a 2-for-1 split."><div class="control"><input name="split_ratio_new" inputmode="decimal" x-model="ratioNew" :disabled="type !== 'split'" placeholder="2"></div></c-field>
+    <c-field label="Per old shares" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" x-model="ratioOld" :disabled="type !== 'split'" placeholder="1"></div></c-field>
   </div>
 </div>
 
@@ -113,7 +113,8 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 
 {# In-kind transfer in (external) — securities received from outside; enter each incoming lot #}
 <div x-show="type === 'in_kind_in'" x-cloak
-     x-data="{ lots: [{% if txn and txn.lot_carry %}{% for e in txn.lot_carry %}{ acquired: '{{ e.acquired_date }}', qty: '{{ e.quantity }}', cost: '{{ e.cost }}' }{% if not forloop.last %},{% endif %}{% endfor %}{% else %}{ acquired: '', qty: '', cost: '' }{% endif %}] }">
+     x-data="{ lots: [{% if txn and txn.lot_carry %}{% for e in txn.lot_carry %}{ acquired: '{{ e.acquired_date }}', qty: '{{ e.quantity }}', cost: '{{ e.cost }}' }{% if not forloop.last %},{% endif %}{% endfor %}{% else %}{ acquired: '', qty: '', cost: '' }{% endif %}] }"
+     x-effect="inKindLots = lots.filter(l => (parseFloat(l.qty) || 0) > 0 && ('' + l.cost).trim() !== '').length">
   <c-field label="Incoming lots" help="One row per acquired lot — preserves the cost basis and holding period (gift, inheritance step-up, RSU vest).">
     <div class="stack-8">
       <template x-for="(lot, i) in lots" :key="i">
@@ -145,7 +146,7 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
   <c-field label="Into security (Y)" help="The acquirer (merger) or spun-off (spin-off) security you receive.">
     <div x-show="!newTarget" class="stack-8">
       <div class="control is-select">
-        <select name="target_security" :disabled="newTarget">
+        <select name="target_security" x-model="targetSec" :disabled="newTarget">
           <option value="">Choose a security…</option>
           {% for s in securities %}<option value="{{ s.pk }}"{% if txn.target_security_id == s.pk %} selected{% endif %}>{{ s.display }}</option>{% endfor %}
         </select>
@@ -155,18 +156,18 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
     </div>
     <div x-show="newTarget" x-cloak class="stack-8">
       <div class="grid-halves">
-        <div class="control"><input name="new_target_symbol" placeholder="Symbol (e.g. NEWCO)"></div>
-        <div class="control"><input name="new_target_name" placeholder="Name"></div>
+        <div class="control"><input name="new_target_symbol" x-model="newSym" placeholder="Symbol (e.g. NEWCO)"></div>
+        <div class="control"><input name="new_target_name" x-model="newName" placeholder="Name"></div>
       </div>
       <c-button type="button" variant="ghost" size="sm" @click="newTarget = false"><c-icon name="chevron-left" size="sm" /> Choose an existing security</c-button>
     </div>
   </c-field>
   <div class="grid-halves">
-    <c-field label="New shares (Y)" help="Y shares received per old X share, e.g. 1.5."><div class="control"><input name="split_ratio_new" inputmode="decimal" :disabled="!['merger','spinoff'].includes(type)" value="{{ txn.split_ratio_new|default:'' }}" placeholder="1"></div></c-field>
-    <c-field label="Per old shares (X)" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" :disabled="!['merger','spinoff'].includes(type)" value="{{ txn.split_ratio_old|default:'' }}" placeholder="1"></div></c-field>
+    <c-field label="New shares (Y)" help="Y shares received per old X share, e.g. 1.5."><div class="control"><input name="split_ratio_new" inputmode="decimal" x-model="ratioNew" :disabled="!['merger','spinoff'].includes(type)" placeholder="1"></div></c-field>
+    <c-field label="Per old shares (X)" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" x-model="ratioOld" :disabled="!['merger','spinoff'].includes(type)" placeholder="1"></div></c-field>
   </div>
   <div x-show="type === 'spinoff'" x-cloak>
-    <c-field label="Basis allocated to Y (%)" help="Percent of the original cost basis assigned to the spun-off security; the parent keeps the rest."><div class="control"><input name="basis_pct" inputmode="decimal" value="{{ txn.basis_pct|default:'' }}" placeholder="e.g. 20"></div></c-field>
+    <c-field label="Basis allocated to Y (%)" help="Percent of the original cost basis assigned to the spun-off security; the parent keeps the rest."><div class="control"><input name="basis_pct" inputmode="decimal" x-model="basisPct" placeholder="e.g. 20"></div></c-field>
   </div>
   <c-hint icon="info">Cash-neutral: cost basis carries from X to Y and the holding period is preserved; nothing posts to the ledger.</c-hint>
 </div>
@@ -209,10 +210,10 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 <div x-show="['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" x-cloak>
   <div class="grid-halves">
     <c-field label="Contracts" help="Each controls the contract's multiplier (usually 100) shares.">
-      <div class="control"><input name="contracts" inputmode="decimal" :disabled="!['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
+      <div class="control"><input name="contracts" inputmode="decimal" x-model="contracts" :disabled="!['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" placeholder="1"></div>
     </c-field>
     <c-field label="Premium / share" help="Per underlying share; total = premium × multiplier × contracts.">
-      <div class="control"><input name="price" inputmode="decimal" :disabled="!['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" value="{% if txn and txn.price %}{{ txn.price|floatformat:'-6' }}{% endif %}" placeholder="0.00"></div>
+      <div class="control"><input name="price" inputmode="decimal" x-model="premium" :disabled="!['opt_buy_open','opt_sell_close','opt_sell_open','opt_buy_close'].includes(type)" placeholder="0.00"></div>
     </c-field>
   </div>
   <c-hint icon="info">Buy/sell to open creates the position and posts nothing; closing realizes the gain to Realized Capital Gain/Loss.</c-hint>
@@ -221,7 +222,7 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 {# Option exercise / assignment — contracts; strike, right and underlying come from the contract #}
 <div x-show="type === 'opt_exercise' || type === 'opt_assign'" x-cloak>
   <c-field label="Contracts" help="Strike, right and underlying are taken from the selected option contract.">
-    <div class="control"><input name="contracts" inputmode="decimal" :disabled="!['opt_exercise','opt_assign'].includes(type)" value="{% if txn and txn.security and txn.security.is_option %}{{ txn.option_contracts|floatformat:'-6' }}{% endif %}" placeholder="1"></div>
+    <div class="control"><input name="contracts" inputmode="decimal" x-model="contracts" :disabled="!['opt_exercise','opt_assign'].includes(type)" placeholder="1"></div>
   </c-field>
   <c-hint icon="info">The option closes at zero gain; its premium rolls into the underlying — a call exercise / put assignment BUYS at strike, a put exercise / call assignment SELLS at strike.</c-hint>
 </div>

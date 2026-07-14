@@ -10,7 +10,57 @@
 </c-breadcrumb>
 
 {# Held quantities per security (JS) — drives the cash-in-lieu fractional-quantity default #}
-<script>window.__invHeldQty = {{ held_qty_json|safe }};</script>
+<script>
+  window.__invHeldQty = {{ held_qty_json|safe }};
+
+  // Shared client-side validation for the add + edit transaction modals, so the two can never
+  // drift. Mirrors the per-type required-field guard in views._apply_txn_post: an invalid entry is
+  // caught IN the modal (which stays open, preserving everything typed) instead of the form
+  // submitting, being rejected, and surfacing a page-level toast the user never sees.
+  window.txnFormError = function (s) {
+    var num = function (v) { return parseFloat(v) || 0; };
+    var t = s.type, a = num(s.amount), q = num(s.quantity);
+    if (!s.date) return 'Pick a date.';
+    if (['buy', 'sell', 'cash_in_lieu', 'dividend_reinvest', 'sell_short', 'buy_to_cover'].includes(t)) {
+      if (!s.security) return 'Pick a security.';
+      if (q <= 0) return 'Enter a quantity above 0.';
+      if (a <= 0) return 'Enter an amount above 0.';
+    } else if (t === 'in_kind_out') {
+      if (!s.security) return 'Pick a security.';
+      if (q <= 0) return 'Enter a quantity above 0.';
+    } else if (t === 'in_kind_in') {
+      if (!s.security) return 'Pick a security.';
+      if (!s.inKindLots) return 'Enter at least one incoming lot with a quantity and cost.';
+    } else if (['return_of_capital', 'cash_merger', 'div_paid_short'].includes(t)) {
+      if (!s.security) return 'Pick a security.';
+      if (a <= 0) return 'Enter an amount above 0.';
+    } else if (t === 'worthless') {
+      if (!s.security) return 'Pick a security.';
+    } else if (t === 'split') {
+      if (!s.security) return 'Pick a security.';
+      if (num(s.ratioNew) <= 0 || num(s.ratioOld) <= 0) return 'Enter the split ratio — both sides above 0.';
+    } else if (t === 'merger' || t === 'spinoff') {
+      if (!s.security) return 'Pick the original security (X).';
+      if (num(s.ratioNew) <= 0 || num(s.ratioOld) <= 0) return 'Enter the share ratio — both sides above 0.';
+      if (!s.targetSec && !(s.newSym || '').trim() && !(s.newName || '').trim()) return 'Choose or name the security received (Y).';
+      if (t === 'spinoff') { var bp = num(s.basisPct); if (bp <= 0 || bp > 100) return 'Enter the basis % allocated to Y (1–100).'; }
+    } else if (['opt_buy_open', 'opt_sell_close', 'opt_sell_open', 'opt_buy_close'].includes(t)) {
+      if (!s.security) return 'Pick the option contract.';
+      if (num(s.contracts) <= 0) return 'Enter the number of contracts.';
+      if (num(s.premium) <= 0) return 'Enter the premium per share.';
+    } else if (t === 'opt_exercise' || t === 'opt_assign') {
+      if (!s.security) return 'Pick the option contract.';
+      if (num(s.contracts) <= 0) return 'Enter the number of contracts.';
+    } else if (t === 'opt_expire') {
+      if (!s.security) return 'Pick the option contract.';
+    } else {
+      // Cash types: opening, contribution, withdrawal, transfer in/out, dividend, interest,
+      // capital-gains distribution, fee, margin interest — a positive amount is the only requirement.
+      if (a <= 0) return 'Enter an amount above 0.';
+    }
+    return '';
+  };
+</script>
 
 <div class="stack-20">
   {# Flash messages (e.g. a rejected transaction save — never fail silently) #}
@@ -119,7 +169,7 @@
             <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add transaction</c-button></c-slot>
             <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/new/"
                   @submit="if (!$event.submitter?.formAction?.includes('/delete/') && formError) { $event.preventDefault(); attempted = true }"
-                  x-data="{ type:'buy', date:'{% now 'Y-m-d' %}', amount:'', fee:'', quantity:'', security:'', attempted:false, taxYear:'', payeeKind:'', payeeId:'', payeeName:'', payeeTint:'slate', payeeInit:'?', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; }, get formError(){ const a=parseFloat(this.amount)||0, q=parseFloat(this.quantity)||0; if(!this.date) return 'Pick a date.'; if(['buy','sell','cash_in_lieu','dividend_reinvest','sell_short','buy_to_cover'].includes(this.type)){ if(!this.security) return 'Pick a security.'; if(q<=0) return 'Enter a quantity above 0.'; if(a<=0) return 'Enter an amount above 0.'; } else if(['contribution','withdrawal','transfer_in','transfer_out','dividend','interest','cap_gain_dist','return_of_capital','fee','opening','cash_merger','margin_interest','div_paid_short'].includes(this.type)){ if(a<=0) return 'Enter an amount above 0.'; } return ''; } }">{% csrf_token %}
+                  x-data="{ type:'buy', date:'{% now 'Y-m-d' %}', amount:'', fee:'', quantity:'', security:'', ratioNew:'', ratioOld:'', basisPct:'', targetSec:'', newSym:'', newName:'', contracts:'', premium:'', inKindLots:0, attempted:false, taxYear:'', payeeKind:'', payeeId:'', payeeName:'', payeeTint:'slate', payeeInit:'?', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; }, get formError(){ return window.txnFormError(this); } }">{% csrf_token %}
               <div class="stack-16">
                 {% include "investments/partials/transaction_fields.html" with suffix='new' %}
                 <div class="err-msg" x-show="attempted && formError" x-cloak><c-icon name="triangle-alert" size="sm" /> <span x-text="formError"></span></div>
@@ -231,7 +281,7 @@
                       <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
                       <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/{{ t.pk }}/edit/"
                             @submit="if (!$event.submitter?.formAction?.includes('/delete/') && formError) { $event.preventDefault(); attempted = true }"
-                            x-data="{ type:'{{ t.txn_type }}', date:'{{ t.date|date:'Y-m-d' }}', amount:'{{ t.amount|floatformat:'-4' }}', fee:'{{ t.fee|floatformat:'-4' }}', quantity:'{% if t.quantity %}{{ t.quantity|floatformat:'-6' }}{% endif %}', security:'{{ t.security_id|default:'' }}', attempted:false, taxYear:'{{ t.tax_year|default:'' }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; }, get formError(){ const a=parseFloat(this.amount)||0, q=parseFloat(this.quantity)||0; if(!this.date) return 'Pick a date.'; if(['buy','sell','cash_in_lieu','dividend_reinvest','sell_short','buy_to_cover'].includes(this.type)){ if(!this.security) return 'Pick a security.'; if(q<=0) return 'Enter a quantity above 0.'; if(a<=0) return 'Enter an amount above 0.'; } else if(['contribution','withdrawal','transfer_in','transfer_out','dividend','interest','cap_gain_dist','return_of_capital','fee','opening','cash_merger','margin_interest','div_paid_short'].includes(this.type)){ if(a<=0) return 'Enter an amount above 0.'; } return ''; } }">{% csrf_token %}
+                            x-data="{ type:'{{ t.txn_type }}', date:'{{ t.date|date:'Y-m-d' }}', amount:'{{ t.amount|floatformat:'-4' }}', fee:'{{ t.fee|floatformat:'-4' }}', quantity:'{% if t.quantity %}{{ t.quantity|floatformat:'-6' }}{% endif %}', security:'{{ t.security_id|default:'' }}', ratioNew:'{{ t.split_ratio_new|default:'' }}', ratioOld:'{{ t.split_ratio_old|default:'' }}', basisPct:'{{ t.basis_pct|default:'' }}', targetSec:'{{ t.target_security_id|default:'' }}', newSym:'', newName:'', contracts:'{% if t.security.is_option %}{{ t.option_contracts|floatformat:'-6' }}{% endif %}', premium:'{% if t.security.is_option and t.price %}{{ t.price|floatformat:'-6' }}{% endif %}', inKindLots:0, attempted:false, taxYear:'{{ t.tax_year|default:'' }}', payeeKind:'{% if t.payee_person %}person{% elif t.payee_organization %}org{% endif %}', payeeId:'{{ t.payee_person_id|default:t.payee_organization_id|default:'' }}', payeeName:'{{ t.payee|default:''|escapejs }}', payeeTint:'{{ t.payee.avatar_tint|default:'slate' }}', payeeInit:'{{ t.payee.initials|default:'?' }}', pickPayee(d){ this.payeeKind=d.kind; this.payeeId=d.id; this.payeeName=d.name; this.payeeTint=d.tint; this.payeeInit=d.initials; }, clearPayee(){ this.payeeKind=''; this.payeeId=''; }, get formError(){ return window.txnFormError(this); } }">{% csrf_token %}
                         <div class="stack-16">
                           {% include "investments/partials/transaction_fields.html" with txn=t suffix=t.pk %}
                           <div class="err-msg" x-show="attempted && formError" x-cloak><c-icon name="triangle-alert" size="sm" /> <span x-text="formError"></span></div>
