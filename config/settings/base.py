@@ -57,6 +57,7 @@ TENANT_APPS = [
     "apps.cards",              # Credit cards (liability ledger) + debit-card registry (module 4)
     "apps.investments",        # Investment accounts, holdings + tax lots → GL (module 5)
     "apps.payables",           # Vendor bills + payments + item catalog; posts to the GL (module 6)
+    "apps.loans",              # Loans & liabilities: debt register + amortization → GL (module 7)
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]
