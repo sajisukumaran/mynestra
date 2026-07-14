@@ -14,6 +14,7 @@ from apps.investments.models import (
     InvestmentTransaction,
     InvTxnType,
     Lot,
+    LotConsumption,
     Security,
 )
 from apps.investments.services import apply_transaction, cost_basis, ensure_gl_account, holdings
@@ -101,6 +102,114 @@ def test_rebuild_query_count_does_not_grow_with_register_size(make_tenant):
         large = _rebuild_queries(120, "PERFB")
     # 12x the transactions must not mean materially more queries.
     assert large <= small + 3, f"rebuild query count grew with register size: {small} -> {large}"
+
+
+def _engine_state(acct):
+    """Everything the lot engine owns, keyed without DB pks (a rebuild renumbers rows)."""
+    lots = sorted(
+        (lot.security_id, lot.acquired_date, lot.original_quantity, lot.remaining_quantity,
+         lot.original_cost, lot.cost_basis, lot.open, lot.source_txn_id)
+        for lot in Lot.objects.filter(account=acct)
+    )
+    cons = sorted(
+        (c.sale_txn_id, c.quantity, c.cost, c.proceeds)
+        for c in LotConsumption.objects.filter(sale_txn__account=acct)
+    )
+    gains = {t.id: t.realized_gain for t in acct.transactions.all()}
+    return lots, cons, gains
+
+
+def test_append_fast_path_matches_full_rebuild(make_tenant):
+    """The append fast path must leave lots / consumptions / realized gains EXACTLY as a full
+    replay would — a rebuild right after a series of appended posts is a strict no-op."""
+    from apps.investments.services import rebuild_account_lots
+
+    with schema_context(make_tenant().schema_name):
+        acct, sec = _setup()
+        _add(acct, InvTxnType.BUY, JAN,
+             security=sec, qty="10", price="10", amount="100", fee="5")
+        _add(acct, InvTxnType.BUY, datetime.date(2026, 2, 2),
+             security=sec, qty="10", price="20", amount="200")
+        _add(acct, InvTxnType.DIVIDEND_REINVEST, datetime.date(2026, 3, 2),
+             security=sec, qty="2", amount="50")
+        _add(acct, InvTxnType.SELL, datetime.date(2026, 4, 2),
+             security=sec, qty="12", price="30", amount="360")
+        _add(acct, InvTxnType.SPLIT, datetime.date(2026, 5, 2),
+             security=sec, split_ratio_new=D("2"), split_ratio_old=D("1"))
+        _add(acct, InvTxnType.RETURN_OF_CAPITAL, datetime.date(2026, 6, 2),
+             security=sec, amount="30")
+        _add(acct, InvTxnType.SELL, datetime.date(2026, 7, 2),
+             security=sec, qty="5", price="18", amount="90")
+
+        before = _engine_state(acct)
+        result = rebuild_account_lots(acct)
+        assert result.resell_ids == [] and result.resync_out_ids == []
+        assert _engine_state(acct) == before
+
+
+def test_append_skips_full_rebuild_backdated_takes_it(make_tenant, monkeypatch):
+    """An end-of-register post must bypass the wipe-and-replay; a backdated one must replay.
+    A date TIE with the register's last day still counts as an append (the new id sorts last)."""
+    import apps.investments.services as services
+
+    with schema_context(make_tenant().schema_name):
+        acct, sec = _setup()
+        _add(acct, InvTxnType.BUY, datetime.date(2026, 2, 1),
+             security=sec, qty="10", price="10", amount="100")
+
+        calls = []
+        real = services.rebuild_account_lots
+
+        def spy(account):
+            calls.append(account.pk)
+            return real(account)
+
+        monkeypatch.setattr(services, "rebuild_account_lots", spy)
+        _add(acct, InvTxnType.SELL, datetime.date(2026, 3, 1),
+             security=sec, qty="4", price="20", amount="80")
+        assert calls == []  # later date → append fast path
+        _add(acct, InvTxnType.SELL, datetime.date(2026, 3, 1),
+             security=sec, qty="1", price="20", amount="20")
+        assert calls == []  # same-date tie → still an append
+        _add(acct, InvTxnType.BUY, JAN, security=sec, qty="1", price="10", amount="10")
+        assert calls == [acct.pk]  # backdated → full replay
+
+
+def test_append_post_query_count_flat_with_register_size(make_tenant):
+    """Posting a NEW end-of-register transaction fires a flat number of queries no matter how many
+    transactions the account already holds — the append fast path never replays the register."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.investments.services import rebuild_account_lots
+
+    def _append_queries(n, sym):
+        org = Organization.objects.create(name=f"A{sym}")
+        acct = InvestmentAccount.objects.create(
+            institution=org, nickname="T", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(
+            symbol=sym, name="X", currency=Currency.objects.get(code="USD"))
+        base = datetime.date(2020, 1, 1)
+        InvestmentTransaction.objects.bulk_create([
+            InvestmentTransaction(
+                account=acct, txn_type=InvTxnType.BUY, date=base + datetime.timedelta(days=i),
+                security=sec, quantity=D("1"), price=D("10"), amount=D("10"))
+            for i in range(n)
+        ])
+        rebuild_account_lots(acct)  # materialize the lots the appended sell draws from
+        txn = InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.SELL, date=datetime.date(2026, 1, 1),
+            security=sec, quantity=D("1"), price=D("20"), amount=D("20"))
+        with CaptureQueriesContext(connection) as ctx:
+            apply_transaction(txn, is_new=True)
+        return len(ctx.captured_queries)
+
+    with schema_context(make_tenant().schema_name):
+        small = _append_queries(10, "APPA")
+        large = _append_queries(120, "APPB")
+    assert large <= small, f"append post query count grew with register size: {small} -> {large}"
 
 
 def test_fifo_sell_spans_multiple_lots(make_tenant):

@@ -7,7 +7,10 @@ Two coupled responsibilities:
    consume them (FIFO or specific) into `LotConsumption`s and compute a realized gain; splits scale
    lots; return-of-capital reduces basis. Because lot state is order-dependent, it is never mutated
    in place per edit — instead `rebuild_account_lots` **replays the whole register** in date order.
-   That makes every edit/delete trivially correct (just replay) at household scale.
+   That makes every edit/delete trivially correct (just replay) at household scale. The one
+   exception is the common case: a NEW transaction that sorts last in the register applies its lot
+   effect directly to the persisted lots (the append fast path), since nothing after it exists to
+   be affected — posting stays O(1) as the register grows.
 
 2. **GL posting (cost in the ledger).** Each transaction posts a balanced journal entry through
    `apps.finance.services` (never a hand-written row). The account's one postable ledger node holds
@@ -167,13 +170,14 @@ def ensure_gl_account(account: InvestmentAccount, *, parent=None, existing=None)
 # --- Tax-lot engine --------------------------------------------------------------------------
 #
 # The engine replays the register through `_apply_lot_effect`, touching lots ONLY via an injected
-# `store` (a LotStore). `RebuildStore` is the live rebuild path: it replays in memory then writes
+# `store` (a LotStore). `RebuildStore` is the full-rebuild path: it replays in memory then writes
 # the resulting lots + consumptions in two bulk queries — a rebuild always starts from a clean slate
-# (all lots deleted first), so `open_lots` need only reflect the in-progress replay. This collapses
-# the old per-lot INSERT/SELECT churn (~2 queries per transaction) into O(1) round-trips, so adding
-# a transaction no longer gets slower as the register grows. `MemLotStore` is the non-mutating
-# in-memory path the value-over-time overlay uses to reconstruct as-of-date holdings, writing
-# nothing (`RebuildStore` extends it, adding consumption tracking + `persist`).
+# (all lots deleted first), so `open_lots` need only reflect the in-progress replay. `DbLotStore`
+# is the APPEND fast path's store: a new transaction that sorts last in the register can't shift
+# anything replayed before it, so its lot effect is applied directly to the persisted lot rows —
+# no wipe, no replay, O(1) in register size. `MemLotStore` is the non-mutating in-memory path the
+# value-over-time overlay uses to reconstruct as-of-date holdings, writing nothing (`RebuildStore`
+# extends it, adding consumption tracking + `persist`).
 
 def _sid(security):
     """Normalize a Security instance or pk to a pk."""
@@ -282,6 +286,37 @@ class RebuildStore(MemLotStore):
             )
             for mem, stid, q, c, p in self._consumptions
         ])
+
+
+class DbLotStore:
+    """Direct-to-table lot store for the APPEND fast path: reads open lots from the live table and
+    writes lot mutations / consumptions row-by-row. Only correct when the transaction being applied
+    sorts LAST in replay order — the persisted lots then ARE the replay state just before it."""
+
+    def __init__(self, account):
+        self.account = account
+
+    def open_lots(self, security):
+        return list(
+            Lot.objects.filter(account=self.account, security_id=_sid(security), open=True)
+            .order_by("acquired_date", "id")
+        )
+
+    def add_lot(self, *, security_id, acquired_date, original_quantity, remaining_quantity,
+                original_cost, cost_basis, open, source_txn):
+        return Lot.objects.create(
+            account=self.account, security_id=security_id, acquired_date=acquired_date,
+            original_quantity=original_quantity, remaining_quantity=remaining_quantity,
+            original_cost=original_cost, cost_basis=cost_basis, open=open, source_txn=source_txn,
+        )
+
+    def save(self, lot, fields):
+        lot.save(update_fields=[*fields, "updated_at"])
+
+    def record_consumption(self, *, sale_txn, lot, quantity, cost, proceeds):
+        LotConsumption.objects.create(
+            sale_txn=sale_txn, lot=lot, quantity=quantity, cost=cost, proceeds=proceeds
+        )
 
 
 def _plan_draws(txn, store, security=None, qty=None) -> list[tuple]:
@@ -1068,11 +1103,46 @@ def _resync_out_legs(ids, *, user=None, seen=None) -> None:
             sync_in_kind_pair(out, user=user, seen=seen)
 
 
+def _is_append(txn) -> bool:
+    """True when `txn` sorts last in the account's replay order (date, id). A fresh insert always
+    holds the highest id, so a date tie still sorts last — only a strictly later date beats it."""
+    return not txn.account.transactions.filter(date__gt=txn.date).exists()
+
+
+def _apply_append(txn, *, user=None) -> None:
+    """The append fast path: apply a new last-in-order transaction's lot effect directly to the
+    persisted lots (no wipe-and-replay) and post it. Nothing replays after it, so no other
+    disposition's realized gain or in-kind snapshot can shift — the full-rebuild bookkeeping
+    (`resell_ids` / `resync_out_ids`) is empty by construction, except this txn's own mirror leg."""
+    prev_carry = txn.lot_carry
+    rg = _q_amount(_apply_lot_effect(txn, DbLotStore(txn.account)))
+    fields = []
+    if txn.realized_gain != rg:
+        txn.realized_gain = rg
+        fields.append("realized_gain")
+    carry_changed = txn.txn_type == InvTxnType.IN_KIND_OUT and txn.lot_carry != prev_carry
+    if carry_changed:
+        fields.append("lot_carry")  # materialized from the lots just consumed
+    if fields:
+        txn.save(update_fields=[*fields, "updated_at"])
+    post_transaction(txn, user=user)
+    if carry_changed:
+        sync_in_kind_pair(txn, user=user)
+
+
 @transaction.atomic
 def apply_transaction(txn, *, user=None, is_new=True):
     """Rebuild lots (so realized gains + in-kind snapshots are current), post/repost this txn,
     re-post any other disposition whose realized gain shifted, and sync the mirror leg of any
-    internal in-kind-out whose materialized snapshot changed (including this one on create/edit)."""
+    internal in-kind-out whose materialized snapshot changed (including this one on create/edit).
+
+    A NEW transaction landing at the end of the register — the overwhelmingly common case — skips
+    the full replay entirely and applies its lot effect against the persisted lots (`DbLotStore`),
+    keeping the cost of posting flat as the register grows. Backdated inserts and all edits still
+    take the full wipe-and-replay, which is what makes them trivially correct."""
+    if is_new and _is_append(txn):
+        _apply_append(txn, user=user)
+        return
     result = rebuild_account_lots(txn.account)
     txn.refresh_from_db()
     if is_new:
