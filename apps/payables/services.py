@@ -34,6 +34,36 @@ _OPEN = [Bill.Status.OPEN, Bill.Status.PARTIALLY_PAID]
 _CATEGORY_TYPES = {BillLine.LineType.ITEM, BillLine.LineType.SERVICE, BillLine.LineType.EXPENSE}
 
 
+def bills_with_totals(qs):
+    """Annotate a Bill queryset with `total_agg` / `paid_agg` (subquery sums — a plain double
+    Sum would fan out across the two joins), which `Bill.total` / `amount_paid` / `balance_due`
+    honor. Wrap any queryset whose bills are totalled in a loop: one query, however many bills.
+    The line amount here is the SQL twin of `BillLine.amount` — keep them in lockstep."""
+    from django.db.models import Case, DecimalField, F, OuterRef, Subquery, Sum, Value, When
+    from django.db.models.functions import Coalesce
+
+    money = DecimalField(max_digits=18, decimal_places=4)
+    zero = Value(ZERO, output_field=money)
+    base = F("quantity") * F("unit_price") - F("line_discount") + F("line_tax")
+    signed = Case(
+        When(line_type=BillLine.LineType.DISCOUNT, then=-base),
+        default=base,
+        output_field=money,
+    )
+    line_sum = (
+        BillLine.objects.filter(bill=OuterRef("pk"))
+        .values("bill").annotate(s=Sum(signed)).values("s")
+    )
+    alloc_sum = (
+        PaymentAllocation.objects.filter(bill=OuterRef("pk"))
+        .values("bill").annotate(s=Sum("amount")).values("s")
+    )
+    return qs.annotate(
+        total_agg=Coalesce(Subquery(line_sum), zero),
+        paid_agg=Coalesce(Subquery(alloc_sum), zero),
+    )
+
+
 # --- Vendors ---------------------------------------------------------------------------------
 
 def ensure_vendor_profile(*, person=None, organization=None) -> VendorProfile:
@@ -53,7 +83,7 @@ def vendor_balance(vendor_profile) -> Decimal:
         if vendor_profile.person_id
         else qs.filter(vendor_organization=vendor_profile.organization)
     )
-    return sum((b.balance_due for b in qs), ZERO)
+    return sum((b.balance_due for b in bills_with_totals(qs)), ZERO)
 
 
 # --- Bill posting (accrual; in-place edits) --------------------------------------------------
@@ -159,6 +189,11 @@ def recompute_bill_status(bill) -> None:
     """Flip Open → Partially Paid → Paid from the applied payment total (void is sticky)."""
     if bill.status == Bill.Status.VOID:
         return
+    # A bill fetched through `bills_with_totals` carries aggregates computed BEFORE the mutation
+    # that triggered this recompute — drop them so the status decision reads live sums.
+    for attr in ("total_agg", "paid_agg"):
+        if hasattr(bill, attr):
+            delattr(bill, attr)
     paid = bill.amount_paid
     if paid <= ZERO:
         status = Bill.Status.OPEN
@@ -203,7 +238,7 @@ def open_bills_for(*, person=None, organization=None):
         qs.filter(vendor_person=person) if person
         else qs.filter(vendor_organization=organization)
     )
-    return qs.order_by("due_date", "bill_date")
+    return bills_with_totals(qs.order_by("due_date", "bill_date"))
 
 
 def apply_payment(payment, allocations, *, user=None):
@@ -309,7 +344,7 @@ def aging(as_of=None) -> dict:
     """Open payables bucketed by how overdue each bill is (current / 1-30 / 31-60 / 61-90 / 90+)."""
     as_of = as_of or datetime.date.today()
     buckets = {"current": ZERO, "d1_30": ZERO, "d31_60": ZERO, "d61_90": ZERO, "d90_plus": ZERO}
-    for bill in Bill.objects.filter(status__in=_OPEN):
+    for bill in bills_with_totals(Bill.objects.filter(status__in=_OPEN)):
         bal = bill.balance_due
         if bal <= ZERO:
             continue
@@ -330,9 +365,11 @@ def aging(as_of=None) -> dict:
 def due_soon(within_days: int = 14):
     """Open bills due on/before `today + within_days` (past-due included), soonest first."""
     horizon = datetime.date.today() + datetime.timedelta(days=within_days)
-    return Bill.objects.filter(
-        status__in=_OPEN, due_date__isnull=False, due_date__lte=horizon
-    ).order_by("due_date")
+    return bills_with_totals(
+        Bill.objects.filter(status__in=_OPEN, due_date__isnull=False, due_date__lte=horizon)
+        .select_related("vendor_person", "vendor_organization")
+        .order_by("due_date")
+    )
 
 
 def warranty_expiring(within_days: int = 90):
@@ -346,7 +383,7 @@ def warranty_expiring(within_days: int = 90):
 def dashboard_stats() -> dict:
     today = datetime.date.today()
     week = today + datetime.timedelta(days=7)
-    open_bills = list(Bill.objects.filter(status__in=_OPEN))
+    open_bills = list(bills_with_totals(Bill.objects.filter(status__in=_OPEN)))
     total_payable = sum((b.balance_due for b in open_bills), ZERO)
     overdue_total = sum(
         (b.balance_due for b in open_bills if b.due_date and b.due_date < today), ZERO

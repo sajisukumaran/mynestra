@@ -447,14 +447,20 @@ class Bill(SoftDeleteModel):
 
     @property
     def total(self):
+        # Honors the `total_agg` annotation from `services.bills_with_totals`, so loops over
+        # annotated querysets don't fire a lines query per bill.
+        agg = getattr(self, "total_agg", None)
+        if agg is not None:
+            return agg
         return sum((li.amount for li in self.lines.all()), ZERO)
 
     @property
     def amount_paid(self):
-        # PaymentAllocation (reverse `allocations`) arrives in a later commit; 0 until then.
-        if hasattr(self, "allocations"):
-            return sum((a.amount for a in self.allocations.all()), ZERO)
-        return ZERO
+        # Honors the `paid_agg` annotation from `services.bills_with_totals` (see `total`).
+        agg = getattr(self, "paid_agg", None)
+        if agg is not None:
+            return agg
+        return sum((a.amount for a in self.allocations.all()), ZERO)
 
     @property
     def balance_due(self):
@@ -527,7 +533,10 @@ class BillLine(TimeStampedModel):
 
     @property
     def amount(self):
-        """Signed contribution to the bill total (discount lines are negative)."""
+        """Signed contribution to the bill total (discount lines are negative).
+
+        `services.bills_with_totals` computes this same formula in SQL — any change here MUST be
+        mirrored there."""
         base = self.base_amount
         return -base if self.line_type == self.LineType.DISCOUNT else base
 

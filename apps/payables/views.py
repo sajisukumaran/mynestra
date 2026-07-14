@@ -9,7 +9,7 @@ import datetime
 from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
@@ -25,6 +25,7 @@ from apps.payables.models import Bill, BillLine, Item, ItemSku, Payment, Payment
 from apps.payables.services import (
     aging,
     apply_payment,
+    bills_with_totals,
     dashboard_stats,
     delete_bill,
     delete_payment,
@@ -344,13 +345,17 @@ def bill_list(request):
     status = request.GET.get("status", "")
     if status in Bill.Status.values:
         qs = qs.filter(status=status)
-    qs = qs.order_by("-bill_date", "-id")
+    qs = bills_with_totals(qs.order_by("-bill_date", "-id"))  # row totals in the page query
     page = Paginator(qs, 20).get_page(request.GET.get("page"))
-    counts = {s: Bill.objects.filter(status=s).count() for s, _ in Bill.Status.choices}
+    # One grouped count for the status chips (not a COUNT query per status).
+    by_status = dict(
+        Bill.objects.values_list("status").annotate(n=Count("id")).order_by()
+    )
+    counts = {s: by_status.get(s, 0) for s, _ in Bill.Status.choices}
     ctx = pay_context(
         request, "bills",
         page=page, bills=page.object_list, q=q, status=status,
-        statuses=Bill.Status.choices, status_counts=counts, total=Bill.objects.count(),
+        statuses=Bill.Status.choices, status_counts=counts, total=sum(by_status.values()),
     )
     return render(request, "payables/bill_list.html", ctx)
 

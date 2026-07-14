@@ -134,3 +134,34 @@ def test_vendor_balance_sums_open_bills(make_tenant):
         post_bill(_mixed_bill(org))
         post_bill(_mixed_bill(org))
         assert vendor_balance(vp) == D("226")  # 113 + 113
+
+
+def test_bills_with_totals_matches_properties_and_stays_flat(make_tenant):
+    """`bills_with_totals` annotates the SAME figures the per-bill properties compute — one query
+    however many bills — and dashboard_stats/aging read through it without a per-bill N+1."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.payables.services import aging, bills_with_totals, dashboard_stats
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        org = Organization.objects.create(name="Acme")
+        for _ in range(4):
+            post_bill(_mixed_bill(org))
+
+        plain = {b.pk: (b.total, b.amount_paid, b.balance_due) for b in Bill.objects.all()}
+        with CaptureQueriesContext(connection) as ctx:
+            annotated = {
+                b.pk: (b.total, b.amount_paid, b.balance_due)
+                for b in bills_with_totals(Bill.objects.all())
+            }
+        assert annotated == plain
+        assert len(ctx.captured_queries) == 1  # subquery aggregates ride the page query
+
+        with CaptureQueriesContext(connection) as dctx:
+            stats = dashboard_stats()
+            buckets = aging()
+        assert stats["total_payable"] == D("452")            # 4 × 113
+        assert sum(buckets.values(), D("0")) == D("452")
+        assert len(dctx.captured_queries) <= 4               # rollup queries, not one per bill
