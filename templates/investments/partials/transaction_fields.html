@@ -166,11 +166,13 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
     <c-field label="New shares (Y)" help="Y shares received per old X share, e.g. 1.5."><div class="control"><input name="split_ratio_new" inputmode="decimal" x-model="ratioNew" :disabled="!['merger','spinoff'].includes(type)" placeholder="1"></div></c-field>
     <c-field label="Per old shares (X)" help="e.g. 1."><div class="control"><input name="split_ratio_old" inputmode="decimal" x-model="ratioOld" :disabled="!['merger','spinoff'].includes(type)" placeholder="1"></div></c-field>
   </div>
-  <div x-show="type === 'spinoff'" x-cloak>
+  <div x-show="type === 'spinoff'" x-cloak class="stack-16">
     <c-field label="Basis allocated to Y (%) — optional" help="Percent of your original cost basis to move to the spun-off shares (from the issuer's tax guidance / Form 8937). Leave blank to keep all cost on the parent (Y then has $0 basis) — you can edit it later.">
       <div class="control"><input name="basis_pct" inputmode="decimal" x-model="basisPct" placeholder="blank = all stays on X"></div></c-field>
+    <c-field label="Cash in lieu of fractional share — optional" help="If the broker paid cash for the leftover fraction (so you received whole Y shares): enter the FULL entitlement in the ratio above (e.g. 16.80278 per 70) and the cash here. The fraction is sold for it, your Y holding rounds down to whole shares, and the small gain/loss posts to Realized Capital Gain/Loss.">
+      <div class="control"><input name="cash_in_lieu" inputmode="decimal" value="{% if txn.txn_type == 'spinoff' and txn.amount %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="e.g. 5.74"></div></c-field>
   </div>
-  <c-hint icon="info">Cash-neutral: you keep every X share, receive the Y shares, the holding period carries over, and nothing posts to the ledger. Only the cost basis is split — X keeps the rest.</c-hint>
+  <c-hint icon="info">You keep every X share and receive the Y shares; the holding period carries over. Cost basis is split — X keeps the rest. Nothing posts to the ledger unless you enter cash in lieu (which sells the fraction for a small realized gain/loss).</c-hint>
 </div>
 
 {# Sell short — opens a negative position; proceeds come in as cash #}

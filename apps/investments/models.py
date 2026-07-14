@@ -774,8 +774,10 @@ class InvestmentTransaction(SoftDeleteModel):
             return self.amount if self.security_id is None else ZERO
         if t in (InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
                  InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL,
-                 InvTxnType.CASH_MERGER):
-            return self.amount  # CASH_MERGER: the buyout check comes in as cash
+                 InvTxnType.CASH_MERGER, InvTxnType.SPINOFF):
+            # CASH_MERGER: the buyout check comes in as cash. SPINOFF: `amount` is the optional
+            # cash-in-lieu of a fractional share (0 for a plain, cash-neutral spin-off).
+            return self.amount
         if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE,
                  InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT):
             return -self.amount
@@ -794,8 +796,7 @@ class InvestmentTransaction(SoftDeleteModel):
                 or (t == InvTxnType.OPT_ASSIGN and right == OptionRight.CALL)
             )
             return self.net_proceeds if cash_in else -(self.amount + self.fee)
-        # DIVIDEND_REINVEST, SPLIT, MERGER, SPINOFF, in-kind, WORTHLESS and OPT_EXPIRE are
-        # cash-neutral.
+        # DIVIDEND_REINVEST, SPLIT, MERGER, in-kind, WORTHLESS and OPT_EXPIRE are cash-neutral.
         return ZERO
 
     @property

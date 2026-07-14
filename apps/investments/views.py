@@ -706,6 +706,9 @@ def _apply_txn_post(request, txn):
             bp = _decimal(request.POST.get("basis_pct")) or Decimal("0")
             if bp < 0 or bp > 100:
                 return None
+            # Optional cash-in-lieu of the fractional share — never negative.
+            if (_decimal(request.POST.get("cash_in_lieu")) or Decimal("0")) < 0:
+                return None
     else:  # cash types
         if amount <= 0:
             return None
@@ -744,6 +747,7 @@ def _apply_txn_post(request, txn):
             return None
     elif t in (InvTxnType.MERGER, InvTxnType.SPINOFF):
         # Cash-neutral corporate action: X (`security`) → Y (`target_security`) at a share ratio.
+        # (A spin-off may also bring in cash-in-lieu of a fractional share — stored in `amount`.)
         txn.split_ratio_new = _decimal(request.POST.get("split_ratio_new"))
         txn.split_ratio_old = _decimal(request.POST.get("split_ratio_old"))
         txn.target_security = _resolve_target_security(request, security)
@@ -752,6 +756,9 @@ def _apply_txn_post(request, txn):
             return None
         if t == InvTxnType.SPINOFF:
             txn.basis_pct = _decimal(request.POST.get("basis_pct")) or Decimal("0")
+            # Cash received in lieu of the fractional Y share; the engine sells that fraction for it
+            # so the entitlement lands on whole shares + cash. Blank / 0 = keep the fraction.
+            txn.amount = _decimal(request.POST.get("cash_in_lieu")) or Decimal("0")
 
     # Options: expand contracts → shares-equivalent once (quantity = contracts × multiplier) and
     # derive the cash amount. Open/close use the premium/share; exercise/assignment use the strike.

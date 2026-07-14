@@ -484,16 +484,42 @@ def _apply_merger(txn, store) -> None:
         store.save(lot, ["remaining_quantity", "cost_basis", "open"])
 
 
-def _apply_spinoff(txn, store) -> None:
+def _sell_fractional_remainder(txn, store, security, cash) -> Decimal:
+    """Sell the aggregate fractional remainder of `security` for `cash` — cash-in-lieu of a
+    fractional share (e.g. a broker pays cash for the leftover fraction of a spin-off entitlement).
+    Rounds the total holding down to whole shares, drawing the fraction FIFO, and returns the
+    realized gain (cash − the fraction's cost basis). No fraction → nothing sold, returns 0."""
+    lots = [lot for lot in store.open_lots(security) if lot.remaining_quantity > ZERO]
+    total = _q_qty(sum((lot.remaining_quantity for lot in lots), ZERO))
+    fraction = _q_qty(total - (total // 1))          # 16.80278 → 0.80278
+    if fraction <= ZERO:
+        return ZERO
+    draws: list[tuple] = []
+    remaining = fraction
+    for lot in lots:
+        if remaining <= ZERO:
+            break
+        take = min(lot.remaining_quantity, remaining)
+        if take > ZERO:
+            draws.append((lot, _q_qty(take)))
+            remaining = _q_qty(remaining - take)
+    return _consume_draws(txn, store, draws, _q_amount(cash))
+
+
+def _apply_spinoff(txn, store) -> Decimal:
     """Spin-off: allocate `basis_pct`% of each open X lot's basis to a new lot of `target_security`
     (Y); the parent (X) keeps the remainder. Distribute `ratio` Y shares per original X share; new Y
     lots inherit X's acquisition date (holding period tacks). X's share count is unchanged. Cost
-    basis is conserved per lot (X_after + Y == X_before, exactly)."""
+    basis is conserved per lot (X_after + Y == X_before, exactly).
+
+    If `amount` > 0 (cash received in lieu of the fractional Y share), the fractional remainder of Y
+    is then sold for that cash and the realized gain returned — so the entitlement lands on whole
+    shares + cash. Returns 0 for a plain (cash-neutral) spin-off."""
     if not (
         txn.split_ratio_new and txn.split_ratio_old
         and txn.target_security_id and txn.basis_pct is not None
     ):
-        return
+        return ZERO
     dist = txn.split_ratio_new / txn.split_ratio_old
     f = txn.basis_pct / Decimal("100")
     for lot in store.open_lots(txn.security):
@@ -511,6 +537,10 @@ def _apply_spinoff(txn, store) -> None:
         )
         lot.cost_basis = _q_amount(lot.cost_basis - alloc)
         store.save(lot, ["cost_basis"])
+    cash = _q_amount(txn.amount)
+    if cash > ZERO:
+        return _sell_fractional_remainder(txn, store, txn.target_security, cash)
+    return ZERO
 
 
 def _apply_return_of_capital(txn, store) -> Decimal:
@@ -775,8 +805,7 @@ def _apply_lot_effect(txn, store) -> Decimal:
         _apply_merger(txn, store)
         return ZERO
     if t == InvTxnType.SPINOFF:
-        _apply_spinoff(txn, store)
-        return ZERO
+        return _apply_spinoff(txn, store)
     if t == InvTxnType.OPT_BUY_OPEN:
         _make_lot(txn, store, txn.security, txn.quantity, _q_amount(txn.amount + txn.fee), txn.date)
         return ZERO
@@ -809,7 +838,7 @@ class RebuildResult:
 # Types whose realized gain, if it shifts on replay, requires re-posting their GL entry.
 _GAIN_TYPES = frozenset({
     InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
-    InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER,
+    InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.SPINOFF,
     InvTxnType.BUY_TO_COVER,
     InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
     InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN,
@@ -927,7 +956,8 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(gl, debit=cost), line(contra, credit=cost)]
         return [line(contra, debit=cost), line(gl, credit=cost)]
     if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
-             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.BUY_TO_COVER,
+             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.SPINOFF,
+             InvTxnType.BUY_TO_COVER,
              InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
              InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
         # Only the realized gain/loss hits the ledger — the gl node already carries the position at
@@ -935,6 +965,7 @@ def _lines_for(txn) -> list[LineInput]:
         # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss);
         # buy-to-cover pays cash via `signed_cash`, realizing (short proceeds − buy-back cost). An
         # option exercise/assignment that ACQUIRES the underlying rolls basis in at zero gain → [].
+        # A spin-off with cash-in-lieu realizes the gain on the fraction sold (else gain 0 → []).
         gain = _q_amount(txn.realized_gain)
         if gain > ZERO:
             return [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
@@ -943,7 +974,7 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
         return []
     if t in (InvTxnType.BUY, InvTxnType.SELL_SHORT,
-             InvTxnType.SPLIT, InvTxnType.MERGER, InvTxnType.SPINOFF,
+             InvTxnType.SPLIT, InvTxnType.MERGER,
              InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_OPEN):
         # Cost-neutral: cash and total cost basis move equal-and-opposite, so nothing posts.
         # SELL_SHORT / OPT_SELL_OPEN mirror BUY — proceeds in via `signed_cash`, offset by a

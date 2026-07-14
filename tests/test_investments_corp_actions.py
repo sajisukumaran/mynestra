@@ -299,6 +299,35 @@ def test_spinoff_with_blank_basis_keeps_all_cost_on_parent(make_tenant, make_use
         assert _inv(acct)                             # invariant holds
 
 
+def test_spinoff_with_cash_in_lieu_lands_on_whole_shares(make_tenant, make_user, client):
+    """One-step spin-off with cash-in-lieu (the E*TRADE VZ -> FTR case): entering the FULL
+    fractional entitlement in the ratio plus the cash sells the fraction, so the account lands on
+    WHOLE Y shares + the cash in a single transaction, X is untouched, and the gain posts to
+    Realized Capital Gain/Loss. Basis blank keeps all cost on X, so the $0-basis fraction sells for
+    the full cash and the invariant holds exactly."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        org = _brokerage()
+        acct = _account(org=org)
+        vz, ftr = _sec("VZ"), _sec("FTR")
+        _add(acct, InvTxnType.OPENING, JAN, amount="2000")
+        _add(acct, InvTxnType.BUY, FEB, security=vz, qty="70", price="20", amount="1400")
+        aid, vid, fid = acct.pk, vz.pk, ftr.pk
+    client.force_login(owner)
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "spinoff", "date": "2026-03-02", "security": vid,
+        "target_security": fid, "split_ratio_new": "16.80278", "split_ratio_old": "70",
+        "basis_pct": "", "cash_in_lieu": "5.74"})  # 16.80278 entitlement, cash for the 0.80278 frac
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        assert _open(acct, vz)[0].remaining_quantity == D("70")    # VZ untouched
+        assert _open(acct, ftr)[0].remaining_quantity == D("16")   # 16.80278 less 0.80278 frac
+        spin = InvestmentTransaction.objects.get(account_id=aid, txn_type="spinoff")
+        assert spin.realized_gain == D("5.74")     # $0-basis fraction sold for the cash
+        assert cash_balance(acct) == D("605.74")   # 2000 − 1400 + 5.74
+        assert _inv(acct)                          # exact — no sub-cent basis on the fraction
+
+
 # --- Cash in lieu of a fractional share (spin-off tail) --------------------------------------
 
 def test_spinoff_then_cash_in_lieu_of_fractional(make_tenant):
