@@ -224,6 +224,10 @@
           <p class="muted stack-8">Value over time (c-line-chart) — market vs. invested, shaded gain band; server-rendered SVG, theme- + palette-aware, no JS.</p>
           <c-line-chart :geo="line_geo" :market="line_market" :invested="line_invested" :gain="line_gain" symbol="$" dp="0" />
         </div>
+        <div>
+          <p class="muted stack-8">Loan paydown (c-loan-chart) — balance to date (solid) + projected payoff (dashed) with a "today" marker; server-rendered SVG, accent-stroked, no JS.</p>
+          <c-loan-chart :geo="loan_geo" :balance="loan_balance" :payoff="loan_payoff" :interest="loan_interest" symbol="$" dp="0" />
+        </div>
       </div>
     </c-card>
 

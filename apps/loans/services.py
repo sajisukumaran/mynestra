@@ -29,6 +29,7 @@ from apps.finance.services import (
     resolve_posting_account,
     reverse_entry,
 )
+from apps.loans.amortization import payoff_projection
 from apps.loans.models import (
     LOAN_TYPE_PARENT,
     PERIODS_PER_YEAR,
@@ -445,3 +446,76 @@ def monthly_obligation(loans) -> Decimal:
             ppy = PERIODS_PER_YEAR.get(loan.payment_frequency, 12)
             total += loan.payment_amount * Decimal(ppy) / Decimal(12)
     return total
+
+
+# --- Paydown chart (a single balance line: actual so far + dashed projection) ----------------
+
+CHART_W = 640
+CHART_H = 200
+CHART_PAD_X = 8
+CHART_PAD_TOP = 12
+CHART_PAD_BOT = 22
+
+
+def loan_value_series(loan, *, today=None, extra_principal=ZERO) -> dict:
+    """The paydown series for `c-loan-chart`: `actual` = the running balance after each recorded
+    transaction up to today (carried forward to today), `projected` = the forward payoff series from
+    `payoff_projection`. A pure read (posts nothing)."""
+    today = today or datetime.date.today()
+    txns = list(loan.transactions.order_by("date", "id"))
+    actual: list = []
+    running = ZERO
+    for txn in txns:
+        if txn.date > today:
+            continue
+        running += txn.balance_delta
+        actual.append((txn.date, running))
+    if actual and actual[-1][0] < today:
+        actual.append((today, actual[-1][1]))  # carry the balance flat to today
+    projection = payoff_projection(loan, as_of=today, extra_principal=extra_principal)
+    projected = projection.get("balance_series") or []
+    return {
+        "actual": actual,
+        "projected": projected,
+        "payoff_date": projection.get("payoff_date"),
+        "remaining_interest": projection.get("remaining_interest", ZERO),
+        "current_balance": running if actual else ZERO,
+    }
+
+
+def loan_chart_points(actual, projected, *, min_v, max_v, start, end,
+                      width=CHART_W, height=CHART_H) -> dict:
+    """Precompute SVG geometry for the paydown chart: `actual_points` (solid) + `projected_points`
+    (dashed) polylines, a `today_x` marker where actual meets projection, gridline/axis ticks and a
+    viewBox. Coordinates are pre-formatted (the template does no math)."""
+    plot_w = width - CHART_PAD_X * 2
+    plot_h = height - CHART_PAD_TOP - CHART_PAD_BOT
+    span = max_v - min_v
+    pad = max(Decimal("1"), (span * Decimal("0.08")).quantize(Decimal("0.01")))
+    y_lo, y_hi = min_v - pad, max_v + pad
+    if y_hi <= y_lo:  # fully flat — give the axis breathing room
+        y_lo, y_hi = min_v - Decimal("1"), min_v + Decimal("1")
+    total_days = (end - start).days or 1
+    y_range = float(y_hi - y_lo)
+
+    def px(d) -> float:
+        return CHART_PAD_X + float((d - start).days) / total_days * plot_w
+
+    def py(v) -> float:
+        return CHART_PAD_TOP + (float(y_hi) - float(v)) / y_range * plot_h
+
+    def poly(series) -> str:
+        return " ".join(f"{px(d):.2f},{py(v):.2f}" for d, v in series)
+
+    today_x = round(px(actual[-1][0]), 2) if actual and projected else None
+    mid = start + datetime.timedelta(days=total_days // 2)
+    y_mid = (y_hi + y_lo) / 2
+    return {
+        "actual_points": poly(actual),
+        "projected_points": poly(projected) if projected else "",
+        "today_x": today_x,
+        "points": [{"date": d, "value": v} for d, v in (actual + projected)],
+        "y_ticks": [{"y": round(py(v), 2)} for v in (y_hi, y_mid, y_lo)],
+        "x_ticks": [{"date": dt} for dt in (start, mid, end)],
+        "width": width, "height": height, "view_box": f"0 0 {width} {height}",
+    }

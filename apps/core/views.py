@@ -37,6 +37,7 @@ def styleguide(request):
     from decimal import Decimal
 
     from apps.investments.services import Slice, donut_segments, line_chart_points
+    from apps.loans.services import loan_chart_points
 
     demo_slices = [
         Slice("Equity", Decimal("62000"), "teal"),
@@ -60,6 +61,22 @@ def styleguide(request):
         (datetime.date(2026, 6, 1), Decimal("50000"), Decimal("56400")),
     ]
     line_vals = [v for _, inv, mkt in line_series for v in (inv, mkt)]
+    # Loan paydown: balance to date (solid) + projected payoff (dashed), through the real helper.
+    loan_actual = [
+        (datetime.date(2024, 1, 1), Decimal("30000")),
+        (datetime.date(2024, 7, 1), Decimal("26500")),
+        (datetime.date(2025, 1, 1), Decimal("22800")),
+        (datetime.date(2025, 7, 1), Decimal("18900")),
+        (datetime.date(2026, 1, 1), Decimal("14800")),
+    ]
+    loan_projected = [
+        (datetime.date(2026, 1, 1), Decimal("14800")),
+        (datetime.date(2026, 7, 1), Decimal("10500")),
+        (datetime.date(2027, 1, 1), Decimal("6000")),
+        (datetime.date(2027, 7, 1), Decimal("1300")),
+        (datetime.date(2027, 9, 1), Decimal("0")),
+    ]
+    loan_vals = [v for _, v in loan_actual + loan_projected]
     context = {
         "donut_segments": donut_segments(demo_slices),
         "donut_total": demo_total,
@@ -72,5 +89,12 @@ def styleguide(request):
         "line_market": line_series[-1][2],
         "line_invested": line_series[-1][1],
         "line_gain": line_series[-1][2] - line_series[-1][1],
+        "loan_geo": loan_chart_points(
+            loan_actual, loan_projected, min_v=min(loan_vals), max_v=max(loan_vals),
+            start=loan_actual[0][0], end=loan_projected[-1][0],
+        ),
+        "loan_balance": loan_actual[-1][1],
+        "loan_payoff": loan_projected[-1][0],
+        "loan_interest": Decimal("2400"),
     }
     return render(request, "styleguide/index.html", context)

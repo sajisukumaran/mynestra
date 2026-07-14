@@ -395,6 +395,8 @@ img { max-width:100%; display:block; }
 :root[data-theme="dark"] .tile-glyph.investments { background:rgba(139,92,246,.18); color:#c4b5fd; }
 .tile-glyph.payables { background:#ffedd5; color:#c2410c; }
 :root[data-theme="dark"] .tile-glyph.payables { background:rgba(249,115,22,.18); color:#fdba74; }
+.tile-glyph.loans { background:#fee2e2; color:#b91c1c; }
+:root[data-theme="dark"] .tile-glyph.loans { background:rgba(239,68,68,.18); color:#fca5a5; }
 .tile-glyph.soon { background:var(--surface-3); color:var(--text-subtle); }
 
 /* Meter — a thin utilization/progress bar (c-meter), e.g. credit-limit usage. */
@@ -457,6 +459,12 @@ img { max-width:100%; display:block; }
 .chart-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
 .chart-market { stroke:var(--accent); }
 .chart-invested { stroke:var(--text-subtle); stroke-dasharray:4 3; }
+/* Loan paydown chart: a single balance line (solid = to date, dashed = projected payoff). */
+.chart-dot-actual { background:var(--accent); }
+.chart-dot-projected { background:var(--accent); opacity:.55; }
+.chart-actual { stroke:var(--accent); }
+.chart-projected { stroke:var(--accent); stroke-dasharray:4 3; opacity:.6; }
+.chart-today { stroke:var(--border-strong); stroke-width:1; stroke-dasharray:2 3; }
 .chart-axis { display:flex; justify-content:space-between;
   font-size:var(--fs-xs); color:var(--text-subtle); font-variant-numeric:tabular-nums; }
 

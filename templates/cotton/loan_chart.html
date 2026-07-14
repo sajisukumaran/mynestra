@@ -1,0 +1,30 @@
+<c-vars geo="" balance="" payoff="" interest="" symbol="" dp="0" grouping="thousands"
+        empty_text="Not enough history yet" class="" />
+{% comment %}Server-rendered SVG loan-paydown chart. `geo` = services.loan_chart_points(...): a solid
+`actual_points` polyline (balance to date) + a dashed `projected_points` polyline (projected payoff)
+with a `today_x` marker where they meet, gridlines/axis ticks and a viewBox. No JS — geometry is
+precomputed; strokes use non-scaling-stroke so the line stays even when the SVG stretches. Colours:
+balance line = --accent, projection dashed --accent, today marker = --border.
+{% endcomment %}
+<div class="chart{% if class %} {{ class }}{% endif %}" {{ attrs }}>
+  {% if geo.points|length > 1 %}
+  <div class="chart-legend">
+    <span class="chart-key"><span class="chart-dot chart-dot-actual"></span>Balance
+      <b><c-money :amount="balance" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></b></span>
+    {% if payoff %}<span class="chart-key"><span class="chart-dot chart-dot-projected"></span>Projected payoff {{ payoff|date:"M Y" }}</span>{% endif %}
+    {% if interest %}<span class="chart-key ml-auto">Remaining interest
+      <b><c-money :amount="interest" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></b></span>{% endif %}
+  </div>
+  <svg class="chart-svg" viewBox="{{ geo.view_box }}" preserveAspectRatio="none" aria-hidden="true">
+    {% for t in geo.y_ticks %}<line class="chart-grid" x1="0" y1="{{ t.y }}" x2="{{ geo.width }}" y2="{{ t.y }}" vector-effect="non-scaling-stroke" />{% endfor %}
+    {% if geo.today_x %}<line class="chart-today" x1="{{ geo.today_x }}" y1="0" x2="{{ geo.today_x }}" y2="{{ geo.height }}" vector-effect="non-scaling-stroke" />{% endif %}
+    {% if geo.projected_points %}<polyline class="chart-line chart-projected" points="{{ geo.projected_points }}" vector-effect="non-scaling-stroke" />{% endif %}
+    <polyline class="chart-line chart-actual" points="{{ geo.actual_points }}" vector-effect="non-scaling-stroke" />
+  </svg>
+  <div class="chart-axis">
+    {% for t in geo.x_ticks %}<span>{{ t.date|date:"M Y" }}</span>{% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">{{ empty_text }}</p>
+  {% endif %}
+</div>
