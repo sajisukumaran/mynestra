@@ -725,11 +725,27 @@ def retained_earnings(*, as_of=None) -> Decimal:
     return net_income(end=datetime.date(as_of.year - 1, 12, 31))
 
 
-def net_worth(*, as_of=None) -> Decimal:
-    """Assets − liabilities (base) — the household's net worth."""
-    return _type_total(AccountType.ASSET, as_of=as_of) - _type_total(
-        AccountType.LIABILITY, as_of=as_of
-    )
+def _contingent_liability_total(*, as_of=None) -> Decimal:
+    """Natural (positive) base amount owed on the contingent-liabilities subtree (2950); ZERO when
+    the account isn't present (tenants predating the Loans module)."""
+    account = Account.objects.filter(system_key="contingent_liabilities").first()
+    if account is None:
+        return ZERO
+    return account_balance(account, as_of=as_of)
+
+
+def net_worth(*, as_of=None, include_contingent=False) -> Decimal:
+    """Assets − liabilities (base) — the household's net worth.
+
+    Contingent liabilities (the `2950` subtree: co-signed / guaranteed debts a household is only
+    secondarily liable for and that someone else pays) are treated as off-balance-sheet and excluded
+    by default — so a co-signed loan doesn't distort net worth even while it's fully tracked and
+    shown. Pass `include_contingent=True` for the total-obligations view.
+    """
+    liabilities = _type_total(AccountType.LIABILITY, as_of=as_of)
+    if not include_contingent:
+        liabilities -= _contingent_liability_total(as_of=as_of)
+    return _type_total(AccountType.ASSET, as_of=as_of) - liabilities
 
 
 def party_balance(*, person=None, organization=None, as_of=None) -> Decimal:

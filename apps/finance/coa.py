@@ -67,14 +67,27 @@ CHART_OF_ACCOUNTS = [
     # 2100 is a group header: the Cards module nests one postable sub-account per real credit card
     # beneath it (normal_side=credit), so per-card balances owed roll up here.
     ("2100", "Credit Cards", LIABILITY, "2000", False, "credit_cards"),
-    ("2200", "Loans", LIABILITY, "2000", False, ""),
-    ("2210", "Mortgage", LIABILITY, "2200", True, ""),
-    ("2220", "Auto Loan", LIABILITY, "2200", True, ""),
-    ("2230", "Personal Loan", LIABILITY, "2200", True, ""),
+    # 2200 groups all loans; 2210..2260 are per-type group headers (like 1120/1130 for banking): the
+    # Loans module nests one postable sub-account per loan under the header matching its loan_type,
+    # so per-loan balances roll up by type here (never posted to). Future Auto/Home modules resolve
+    # a type by system_key (e.g. "loans_auto") or by Loan.loan_type.
+    ("2200", "Loans", LIABILITY, "2000", False, "loans"),
+    ("2210", "Mortgage", LIABILITY, "2200", False, "loans_mortgage"),
+    ("2220", "Auto Loan", LIABILITY, "2200", False, "loans_auto"),
+    ("2230", "Personal Loan", LIABILITY, "2200", False, "loans_personal"),
+    ("2240", "Student Loan", LIABILITY, "2200", False, "loans_student"),
+    ("2250", "HELOC", LIABILITY, "2200", False, "loans_heloc"),
+    ("2260", "Line of Credit", LIABILITY, "2200", False, "loans_line_of_credit"),
     # 2300 is the Accounts-Payable control account: vendor bills credit it (accrual), payments
     # debit it. Per-vendor aging uses the line-level party dimension, not sub-accounts.
     ("2300", "Accounts Payable", LIABILITY, "2000", True, "accounts_payable"),
     ("2400", "Taxes Payable", LIABILITY, "2000", True, "taxes_payable"),
+    # 2900 groups generic non-loan liabilities (tax-payment plans, private notes). 2950 holds
+    # contingent / co-signed liabilities that are tracked but EXCLUDED from net worth (off-balance-
+    # sheet — see services.net_worth). The Loans module nests a postable sub-account per liability
+    # under each, matching the loan's counts_toward_net_worth flag.
+    ("2900", "Other Liabilities", LIABILITY, "2000", False, "other_liabilities"),
+    ("2950", "Contingent Liabilities", LIABILITY, "2000", False, "contingent_liabilities"),
     # --- Equity ---
     ("3000", "Equity", EQUITY, None, False, ""),
     ("3100", "Opening Balance Equity", EQUITY, "3000", True, "opening_balance_equity"),
@@ -106,6 +119,10 @@ CHART_OF_ACCOUNTS = [
     ("5110", "Rent / Mortgage Interest", EXPENSE, "5100", True, ""),
     ("5120", "Utilities", EXPENSE, "5100", True, ""),
     ("5130", "Maintenance", EXPENSE, "5100", True, ""),
+    # Escrow components on a mortgage payment default here (property tax) and to 5150 (insurance);
+    # both remappable per-loan in Expert mode.
+    ("5140", "Property Tax", EXPENSE, "5100", True, "property_tax"),
+    ("5150", "Home Insurance", EXPENSE, "5100", True, "home_insurance"),
     ("5200", "Food & Groceries", EXPENSE, "5000", True, ""),
     ("5300", "Transportation", EXPENSE, "5000", False, ""),
     ("5310", "Fuel", EXPENSE, "5300", True, ""),

@@ -147,6 +147,54 @@ def test_derived_close_and_net_worth(make_tenant):
         assert retained_earnings(as_of=as_of) == D("0")  # no prior-year activity
 
 
+def test_net_worth_excludes_contingent_liabilities(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        # A normal loan node (under 2210 Mortgage) and a contingent node (under 2950).
+        normal = Account.objects.create(
+            code="2210.01",
+            name="Mortgage — Acme",
+            type=AccountType.LIABILITY,
+            normal_side=Side.CREDIT,
+            parent=Account.objects.get(code="2210"),
+        )
+        contingent = Account.objects.create(
+            code="2950.01",
+            name="Co-signed auto — Son",
+            type=AccountType.LIABILITY,
+            normal_side=Side.CREDIT,
+            parent=Account.objects.get(code="2950"),
+        )
+        post_entry(
+            date=JAN,
+            lines=[
+                LineInput("1110", debit=D("1000")),
+                LineInput("opening_balance_equity", credit=D("1000")),
+            ],
+        )
+        post_entry(  # a mortgage that DOES count toward net worth
+            date=JAN,
+            lines=[
+                LineInput("opening_balance_equity", debit=D("300")),
+                LineInput(normal, credit=D("300")),
+            ],
+        )
+        post_entry(  # a contingent co-signed debt that should NOT count
+            date=JAN,
+            lines=[
+                LineInput("opening_balance_equity", debit=D("500")),
+                LineInput(contingent, credit=D("500")),
+            ],
+        )
+        # Default: contingent 500 is off-balance-sheet — only the 300 mortgage reduces net worth.
+        assert net_worth() == D("700")  # 1000 cash − 300
+        # Total-obligations view includes it.
+        assert net_worth(include_contingent=True) == D("200")  # 1000 − 300 − 500
+        # Both still roll into the liability subtree totals.
+        assert account_balance("2000") == D("800")
+        assert account_balance("2950") == D("500")
+
+
 def test_retained_earnings_rolls_prior_years_forward(make_tenant):
     tenant = make_tenant()
     with schema_context(tenant.schema_name):
