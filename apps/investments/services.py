@@ -34,7 +34,7 @@ from decimal import Decimal
 
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Case, CharField, F, Sum, Value, When, Window
 from django.db.models.functions import ExtractYear
 
 from apps.finance.models import ZERO, Account, AccountType, JournalEntry, Side
@@ -57,6 +57,7 @@ from apps.investments.models import (
     Security,
     SecurityPrice,
     VestingGrant,
+    signed_cash_sql,
 )
 
 # --- Fixed contras / remappable activities ---------------------------------------------------
@@ -1311,10 +1312,10 @@ def sync_holder_p2o(account, *, user=None) -> None:
 # --- Read models -----------------------------------------------------------------------------
 
 def cash_balance(account) -> Decimal:
-    """Settlement cash held in the account (from the register)."""
-    # select_related the security so signed_cash can read an option's right without an N+1.
-    txns = account.transactions.select_related("security")
-    return _q_amount(sum((t.signed_cash for t in txns), ZERO))
+    """Settlement cash held in the account (from the register) — ONE `SUM` computed in the
+    database via `signed_cash_sql`, not a Python walk of the register."""
+    total = account.transactions.aggregate(s=Sum(signed_cash_sql()))["s"]
+    return _q_amount(total or ZERO)
 
 
 def cost_basis(account) -> Decimal:
@@ -1452,39 +1453,51 @@ def donut_segments(slices) -> list[dict]:
     return segs
 
 
-# Register display sorts. Keys map to a sort key over a {"txn","balance"} row. The running balance
-# is ALWAYS chronological (below), so it stays each row's own "balance after this txn" regardless of
-# the display sort; date ties break by id (the insertion order the running balance was built in).
+# Register display sorts → ORDER BY fields (annotation aliases included). The running balance is
+# ALWAYS chronological (a window SUM over date, id), so it stays each row's own "balance after this
+# txn" regardless of the display sort; date ties break by id (insertion order).
 _REGISTER_SORTS = {
-    "date": lambda r: (r["txn"].date, r["txn"].id),
-    "type": lambda r: (r["txn"].type_label.lower(), r["txn"].date, r["txn"].id),
-    "cash": lambda r: (r["txn"].signed_cash, r["txn"].date, r["txn"].id),
-    "balance": lambda r: (r["balance"], r["txn"].id),
+    "date": ("date", "id"),
+    "type": ("type_order", "date", "id"),
+    "cash": ("cash_effect", "date", "id"),
+    "balance": ("balance_after", "id"),
 }
 REGISTER_PER_PAGE = 50
 
 
+def _type_order_sql():
+    """The Type column's alphabetical sort key — the lowercase display label — as a CASE
+    expression, matching the old Python `type_label.lower()` sort exactly."""
+    return Case(
+        *[When(txn_type=value, then=Value(str(label).lower()))
+          for value, label in InvTxnType.choices],
+        default=Value(""), output_field=CharField(),
+    )
+
+
 def register_page(account, *, sort="date", direction="desc", page=1, per_page=REGISTER_PER_PAGE):
-    """The account register — every transaction with a chronological running settlement-cash balance
-    — sorted by a column and paginated. The balance is always a date-ordered running total (the
-    balance AFTER each transaction), computed independently of the display sort, so sorting by any
-    column keeps each row's own balance. Read-only; one query loads the transactions, the running
-    total + sort + page are computed in Python."""
+    """One PAGE of the account register, each transaction with its chronological running
+    settlement-cash balance — sorted, balanced and paginated IN THE DATABASE. The balance is a
+    window SUM over (date, id) (the balance AFTER each transaction), computed independently of the
+    display sort, so sorting by any column keeps each row's own balance. Read-only; only the
+    page's rows are ever materialized."""
     sort = sort if sort in _REGISTER_SORTS else "date"
     reverse = direction != "asc"
-    running = ZERO
-    rows = []
     txns = account.transactions.select_related(
         "security", "security__underlying", "counter_account", "counter_investment_account",
         "target_security", "payee_person", "payee_organization",
-    ).order_by("date", "id")
-    for txn in txns:
-        running = _q_amount(running + txn.signed_cash)
-        rows.append({"txn": txn, "balance": running})
-    rows.sort(key=_REGISTER_SORTS[sort], reverse=reverse)
-    page_obj = Paginator(rows, per_page).get_page(page)
+    ).annotate(
+        cash_effect=signed_cash_sql(),
+        balance_after=Window(Sum(signed_cash_sql()), order_by=[F("date").asc(), F("id").asc()]),
+    )
+    if sort == "type":
+        txns = txns.annotate(type_order=_type_order_sql())
+    prefix = "-" if reverse else ""
+    txns = txns.order_by(*(f"{prefix}{field}" for field in _REGISTER_SORTS[sort]))
+    page_obj = Paginator(txns, per_page).get_page(page)
+    rows = [{"txn": t, "balance": _q_amount(t.balance_after)} for t in page_obj.object_list]
     return {
-        "rows": page_obj.object_list,
+        "rows": rows,
         "page_obj": page_obj,
         "sort": sort,
         "direction": "asc" if not reverse else "desc",

@@ -412,3 +412,86 @@ def test_expert_accounting_tab_appears_in_expert_mode(make_tenant, make_user, cl
     client.force_login(owner)
     body = client.get(_url(tenant, "accounts/new/")).content.decode()
     assert "Accounting" in body and "ledger node" in body
+
+
+def test_signed_cash_sql_matches_property_for_every_type(make_tenant):
+    """`signed_cash_sql` is the SQL twin of the `signed_cash` property — the pair must agree for
+    EVERY transaction type, including the option-right-dependent exercise/assignment cases and
+    security-less rows. This is the lockstep guard: edit one, you must edit the other."""
+    import datetime
+    from decimal import Decimal
+
+    from apps.finance.models import Currency
+    from apps.investments.models import InvTxnType, OptionRight, SecurityKind, signed_cash_sql
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        usd = Currency.objects.get(code="USD")
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Twin", registration="taxable_individual",
+            currency=usd)
+        stock = Security.objects.create(symbol="TWIN", name="Twin", currency=usd)
+        put = Security.objects.create(
+            symbol="TWINP", name="Twin put", currency=usd, kind=SecurityKind.OPTION,
+            option_right=OptionRight.PUT, underlying=stock)
+        call = Security.objects.create(
+            symbol="TWINC", name="Twin call", currency=usd, kind=SecurityKind.OPTION,
+            option_right=OptionRight.CALL, underlying=stock)
+
+        day = datetime.date(2026, 1, 2)
+        common = {"account": acct, "date": day, "quantity": Decimal("1"), "price": Decimal("1"),
+                  "amount": Decimal("100"), "fee": Decimal("7")}
+        rows = [InvestmentTransaction(txn_type=value, security=stock, **common)
+                for value, _label in InvTxnType.choices]
+        rows += [InvestmentTransaction(txn_type=t, security=s, **common)
+                 for t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN)
+                 for s in (put, call, None)]
+        rows.append(InvestmentTransaction(txn_type=InvTxnType.OPENING, security=None, **common))
+        InvestmentTransaction.objects.bulk_create(rows)
+
+        annotated = {t.pk: t.sc for t in acct.transactions.annotate(sc=signed_cash_sql())}
+        for t in acct.transactions.select_related("security"):
+            assert annotated[t.pk] == t.signed_cash, (t.txn_type, t.security_id)
+
+
+def test_cash_balance_and_register_page_queries_flat_with_register_size(make_tenant):
+    """`cash_balance` is ONE database SUM and `register_page` materializes only the requested page
+    — neither's query count grows with the size of the register."""
+    import datetime
+    from decimal import Decimal
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.finance.models import Currency
+    from apps.investments.models import InvTxnType
+    from apps.investments.services import cash_balance, ensure_gl_account, register_page
+
+    tenant = make_tenant()
+
+    def _counts(n, sym):
+        usd = Currency.objects.get(code="USD")
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(name=f"B{sym}"), nickname="T",
+            registration="taxable_individual", currency=usd)
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol=sym, name="X", currency=usd)
+        base = datetime.date(2020, 1, 1)
+        InvestmentTransaction.objects.bulk_create([
+            InvestmentTransaction(
+                account=acct, txn_type=InvTxnType.BUY, date=base + datetime.timedelta(days=i),
+                security=sec, quantity=Decimal("1"), price=Decimal("10"), amount=Decimal("10"))
+            for i in range(n)
+        ])
+        with CaptureQueriesContext(connection) as cash_ctx:
+            cash_balance(acct)
+        with CaptureQueriesContext(connection) as reg_ctx:
+            pg = register_page(acct, sort="date", direction="desc", page=1)
+        assert len(pg["rows"]) == min(n, 50)
+        return len(cash_ctx.captured_queries), len(reg_ctx.captured_queries)
+
+    with schema_context(tenant.schema_name):
+        cash_small, reg_small = _counts(10, "QFA")
+        cash_large, reg_large = _counts(200, "QFB")
+    assert cash_small == cash_large == 1
+    assert reg_large <= reg_small

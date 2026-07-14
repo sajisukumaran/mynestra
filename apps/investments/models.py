@@ -775,7 +775,10 @@ class InvestmentTransaction(SoftDeleteModel):
 
     @property
     def signed_cash(self):
-        """Effect of this transaction on the account's settlement cash balance."""
+        """Effect of this transaction on the account's settlement cash balance.
+
+        `signed_cash_sql()` (below) is this property's SQL twin — any change here MUST be
+        mirrored there."""
         t = self.txn_type
         if t == InvTxnType.OPENING:
             return self.amount if self.security_id is None else ZERO
@@ -844,6 +847,51 @@ class InvestmentTransaction(SoftDeleteModel):
             self.txn_type == InvTxnType.IN_KIND_IN
             and self.counter_investment_account_id is not None
         )
+
+
+def signed_cash_sql():
+    """SQL twin of `InvestmentTransaction.signed_cash`: the same per-type CASE as a query
+    expression, so cash balances (a SUM) and register running balances (a window SUM) compute in
+    the database without materializing the register. MUST stay in lockstep with the property —
+    a test posts a transaction of every type (including the option-right-dependent cases) and
+    asserts the two agree."""
+    amount, fee = models.F("amount"), models.F("fee")
+    return models.Case(
+        models.When(txn_type=InvTxnType.OPENING, security__isnull=True, then=amount),
+        models.When(
+            txn_type__in=(InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
+                          InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST,
+                          InvTxnType.RETURN_OF_CAPITAL, InvTxnType.CASH_MERGER,
+                          InvTxnType.SPINOFF),
+            then=amount,
+        ),
+        models.When(
+            txn_type__in=(InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE,
+                          InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT),
+            then=-amount,
+        ),
+        models.When(
+            txn_type__in=(InvTxnType.BUY, InvTxnType.BUY_TO_COVER,
+                          InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_BUY_CLOSE),
+            then=-(amount + fee),
+        ),
+        models.When(
+            txn_type__in=(InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.SELL_SHORT,
+                          InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE),
+            then=amount - fee,  # net proceeds
+        ),
+        models.When(txn_type=InvTxnType.OPT_EXERCISE, security__option_right=OptionRight.PUT,
+                    then=amount - fee),
+        models.When(txn_type=InvTxnType.OPT_ASSIGN, security__option_right=OptionRight.CALL,
+                    then=amount - fee),
+        models.When(txn_type__in=(InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN),
+                    then=-(amount + fee)),
+        # DIVIDEND_REINVEST, SPLIT, MERGER, in-kind, WORTHLESS, OPT_EXPIRE — cash-neutral.
+        default=models.Value(ZERO),
+        output_field=models.DecimalField(
+            max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS
+        ),
+    )
 
 
 class Lot(TimeStampedModel):
