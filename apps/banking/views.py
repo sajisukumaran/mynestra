@@ -356,10 +356,12 @@ def account_detail(request, pk):
     account = get_object_or_404(
         BankAccount.objects.select_related("bank", "branch", "currency", "gl_account"), pk=pk
     )
+    reg = register(account, page=request.GET.get("page") or 1)
     ctx = bank_context(
         request, "accounts",
         account=account,
-        rows=register(account),
+        register=reg,
+        rows=reg["rows"],
         holders=list(account.holders.select_related("person").all()),
         history=account.history.all()[:60],
         base=base_currency(),

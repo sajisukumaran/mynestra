@@ -316,3 +316,17 @@ class BankTransaction(SoftDeleteModel):
     @property
     def payee(self):
         return self.payee_person or self.payee_organization
+
+
+def signed_amount_sql():
+    """SQL twin of `BankTransaction.signed_amount`: the same sign rule as a query expression, so
+    account cash flows and register running balances compute in the database without materializing
+    the register. MUST stay in lockstep with the property — a test asserts the two agree for every
+    transaction type."""
+    return models.Case(
+        models.When(txn_type__in=INFLOW_TYPES, then=models.F("amount")),
+        default=-models.F("amount"),
+        output_field=models.DecimalField(
+            max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS
+        ),
+    )

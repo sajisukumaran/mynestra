@@ -318,10 +318,12 @@ def credit_detail(request, pk):
     card = get_object_or_404(
         CreditCard.objects.select_related("issuer", "currency", "gl_account"), pk=pk
     )
+    reg = register(card, page=request.GET.get("page") or 1)
     ctx = card_context(
         request, "credit",
         card=card,
-        rows=register(card),
+        register=reg,
+        rows=reg["rows"],
         holders=list(card.holders.select_related("person").all()),
         history=card.history.all()[:60],
         base=base_currency(),

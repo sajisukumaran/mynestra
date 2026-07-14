@@ -211,8 +211,52 @@ def test_register_running_balance_newest_first(make_tenant):
         card = _card()
         _txn(card, CardTxnType.OPENING, "100")
         _txn(card, CardTxnType.CHARGE, "50")
-        rows = register(card)
+        rows = register(card)["rows"]
         assert [r["balance"] for r in rows] == [D("150"), D("100")]  # newest-first
+
+
+def test_register_paginates_with_chronological_balance(make_tenant):
+    """The card register returns one page (50/page, newest first) with each row's own chronological
+    running balance owed — page 2 continues where page 1 left off."""
+    import datetime
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        card = _card()
+        base = datetime.date(2020, 1, 1)
+        CreditCardTransaction.objects.bulk_create([
+            CreditCardTransaction(
+                card=card, txn_type=CardTxnType.CHARGE,
+                date=base + datetime.timedelta(days=i), amount=D("10"))
+            for i in range(60)
+        ])
+        reg = register(card)
+        assert reg["total"] == 60
+        assert len(reg["rows"]) == 50
+        assert reg["rows"][0]["balance"] == D("600")   # newest row = full balance owed
+        reg2 = register(card, page=2)
+        assert len(reg2["rows"]) == 10
+        assert reg2["rows"][-1]["balance"] == D("10")  # oldest row = first charge
+
+
+def test_signed_amount_sql_matches_property_for_every_type(make_tenant):
+    """`signed_amount_sql` is the SQL twin of `CreditCardTransaction.signed_amount` — the pair
+    must agree for EVERY transaction type. Lockstep guard: edit one, you must edit the other."""
+    import datetime
+
+    from apps.cards.models import signed_amount_sql
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        card = _card()
+        CreditCardTransaction.objects.bulk_create([
+            CreditCardTransaction(card=card, txn_type=value, date=datetime.date(2026, 1, 2),
+                                  amount=D("100"))
+            for value, _label in CardTxnType.choices
+        ])
+        annotated = {t.pk: t.sa for t in card.transactions.annotate(sa=signed_amount_sql())}
+        for t in card.transactions.all():
+            assert annotated[t.pk] == t.signed_amount, t.txn_type
 
 
 def test_cardholder_p2o_sync(make_tenant):

@@ -258,16 +258,27 @@ def sync_holder_p2o(account: BankAccount, *, user=None) -> None:
 
 # --- Read models -----------------------------------------------------------------------------
 
-def register(account: BankAccount) -> list[dict]:
-    """The account's transactions with a running balance (in the account's own currency),
-    computed oldest-first and returned newest-first for display."""
-    running = ZERO
-    rows = []
-    for txn in account.transactions.order_by("date", "id"):
-        running += txn.signed_amount
-        rows.append({"txn": txn, "balance": running})
-    rows.reverse()
-    return rows
+REGISTER_PER_PAGE = 50
+
+
+def register(account: BankAccount, *, page=1, per_page=REGISTER_PER_PAGE) -> dict:
+    """One PAGE of the account register (newest first), each transaction with its chronological
+    running balance (in the account's own currency). The balance is a window SUM over (date, id) —
+    the balance AFTER each transaction — and sorting/pagination happen in the database, so only the
+    page's rows are ever materialized no matter how large the register grows."""
+    from django.core.paginator import Paginator
+    from django.db.models import F, Sum, Window
+
+    from apps.banking.models import signed_amount_sql
+
+    txns = account.transactions.select_related(
+        "category_account", "counter_account", "payee_person", "payee_organization",
+    ).annotate(
+        balance_after=Window(Sum(signed_amount_sql()), order_by=[F("date").asc(), F("id").asc()]),
+    ).order_by("-date", "-id")
+    page_obj = Paginator(txns, per_page).get_page(page)
+    rows = [{"txn": t, "balance": t.balance_after} for t in page_obj.object_list]
+    return {"rows": rows, "page_obj": page_obj, "total": page_obj.paginator.count}
 
 
 def total_balance() -> Decimal:

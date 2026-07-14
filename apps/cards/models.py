@@ -359,3 +359,16 @@ class DebitCard(SoftDeleteModel):
     @property
     def display_balance(self):
         return self.bank_account.display_balance
+
+
+def signed_amount_sql():
+    """SQL twin of `CreditCardTransaction.signed_amount`: the same sign rule as a query expression,
+    so register running balances compute in the database without materializing the register. MUST
+    stay in lockstep with the property — a test asserts the two agree for every transaction type."""
+    return models.Case(
+        models.When(txn_type__in=INCREASE_TYPES, then=models.F("amount")),
+        default=-models.F("amount"),
+        output_field=models.DecimalField(
+            max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS
+        ),
+    )

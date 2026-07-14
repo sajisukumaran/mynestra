@@ -220,5 +220,49 @@ def test_register_running_balance(make_tenant):
         _txn(acct, TxnType.OPENING, "1000")
         _txn(acct, TxnType.DEPOSIT, "200")
         _txn(acct, TxnType.WITHDRAWAL, "50")
-        rows = register(acct)  # newest-first
+        rows = register(acct)["rows"]  # newest-first
         assert [r["balance"] for r in rows] == [D("1150"), D("1200"), D("1000")]
+
+
+def test_register_paginates_with_chronological_balance(make_tenant):
+    """The register returns one page (50/page, newest first) with each row's own chronological
+    running balance — page 2 continues where page 1 left off, and only page rows materialize."""
+    import datetime
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        acct = _account()
+        base = datetime.date(2020, 1, 1)
+        BankTransaction.objects.bulk_create([
+            BankTransaction(
+                account=acct, txn_type=TxnType.DEPOSIT,
+                date=base + datetime.timedelta(days=i), amount=D("10"))
+            for i in range(60)
+        ])
+        reg = register(acct)
+        assert reg["total"] == 60
+        assert len(reg["rows"]) == 50
+        assert reg["rows"][0]["balance"] == D("600")   # newest row = full running total
+        reg2 = register(acct, page=2)
+        assert len(reg2["rows"]) == 10
+        assert reg2["rows"][-1]["balance"] == D("10")  # oldest row = first deposit
+
+
+def test_signed_amount_sql_matches_property_for_every_type(make_tenant):
+    """`signed_amount_sql` is the SQL twin of `BankTransaction.signed_amount` — the pair must
+    agree for EVERY transaction type. Lockstep guard: edit one, you must edit the other."""
+    import datetime
+
+    from apps.banking.models import signed_amount_sql
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        acct = _account()
+        BankTransaction.objects.bulk_create([
+            BankTransaction(account=acct, txn_type=value, date=datetime.date(2026, 1, 2),
+                            amount=D("100"))
+            for value, _label in TxnType.choices
+        ])
+        annotated = {t.pk: t.sa for t in acct.transactions.annotate(sa=signed_amount_sql())}
+        for t in acct.transactions.all():
+            assert annotated[t.pk] == t.signed_amount, t.txn_type

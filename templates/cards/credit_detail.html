@@ -54,7 +54,7 @@
   {# Tabs #}
   <div x-data="{ tab: 'register' }">
     <c-tabs>
-      <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="coins" size="sm" /> Register {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="coins" size="sm" /> Register {% if register.total %}<span class="tcount tnum">{{ register.total }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'holders' }" @click="tab = 'holders'"><c-icon name="users" size="sm" /> Holders {% if holders %}<span class="tcount tnum">{{ holders|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
     </c-tabs>
@@ -125,6 +125,16 @@
               {% endwith %}{% endfor %}
             </tbody>
           </c-table>
+          <c-slot name="foot">
+            <span class="subtle">Showing <span class="strong tnum">{{ register.page_obj.start_index }}–{{ register.page_obj.end_index }}</span> of <span class="strong tnum">{{ register.total }}</span></span>
+            {% if register.page_obj.paginator.num_pages > 1 %}
+            <c-pagination class="ml-auto">
+              {% if register.page_obj.has_previous %}<a class="pg" href="{% querystring page=register.page_obj.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+              <span class="pg active tnum">{{ register.page_obj.number }} / {{ register.page_obj.paginator.num_pages }}</span>
+              {% if register.page_obj.has_next %}<a class="pg" href="{% querystring page=register.page_obj.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+            </c-pagination>
+            {% endif %}
+          </c-slot>
         </c-card>
         {% else %}
         <c-card><c-empty-state icon="coins" title="No transactions yet" text="Record charges, payments, interest, fees and refunds to build the register." /></c-card>
