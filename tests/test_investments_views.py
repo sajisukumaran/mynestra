@@ -331,8 +331,8 @@ def test_transaction_form_validates_exotic_types_client_side(make_tenant, make_u
     assert 'x-model="newSym"' in body and 'x-model="newName"' in body
     # In-kind incoming lots surface a validity count up to the parent scope.
     assert 'x-effect="inKindLots' in body
-    # The validator enforces the spin-off basis rule and the merger/spin-off target.
-    assert "basis %" in body and "security received" in body
+    # The validator enforces the spin-off basis range and the merger/spin-off target.
+    assert "between 0 and 100" in body and "security received" in body
     assert "{#" not in body
 
 

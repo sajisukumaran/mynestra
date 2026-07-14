@@ -271,6 +271,34 @@ def test_spinoff_rejects_out_of_range_basis_pct(make_tenant, make_user, client):
         assert not InvestmentTransaction.objects.filter(txn_type="spinoff").exists()
 
 
+def test_spinoff_with_blank_basis_keeps_all_cost_on_parent(make_tenant, make_user, client):
+    """Basis % is optional: blank keeps all cost basis on the parent (X) and creates the spun-off
+    shares (Y) at $0 basis. The parent's share count is unchanged — a spin-off does not dissolve it
+    — and the action stays cash-neutral (nothing posts to the ledger, the invariant holds)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        org = _brokerage()
+        acct = _account(org=org)
+        parent, spinco = _sec("VZ"), _sec("FTR")
+        _add(acct, InvTxnType.OPENING, JAN, amount="2000")
+        _add(acct, InvTxnType.BUY, FEB, security=parent, qty="70", price="20", amount="1400")
+        aid, pid, sid = acct.pk, parent.pk, spinco.pk
+    client.force_login(owner)
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "spinoff", "date": "2026-03-02", "security": pid,
+        "target_security": sid, "split_ratio_new": "16", "split_ratio_old": "70",
+        "basis_pct": ""})  # blank → keep all cost on VZ
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        vz, ftr = _open(acct, parent), _open(acct, spinco)
+        assert vz[0].remaining_quantity == D("70")   # VZ shares untouched (not dissolved)
+        assert vz[0].cost_basis == D("1400")          # VZ keeps 100% of its cost
+        assert ftr[0].remaining_quantity == D("16")   # received 16 FTR (70 × 16/70)
+        assert ftr[0].cost_basis == D("0")            # $0 basis until allocated
+        assert cost_basis(acct) == D("1400")          # basis conserved
+        assert _inv(acct)                             # invariant holds
+
+
 # --- Cash in lieu of a fractional share (spin-off tail) --------------------------------------
 
 def test_spinoff_then_cash_in_lieu_of_fractional(make_tenant):

@@ -43,7 +43,7 @@
       if (!s.security) return 'Pick the original security (X).';
       if (num(s.ratioNew) <= 0 || num(s.ratioOld) <= 0) return 'Enter the share ratio — both sides above 0.';
       if (!s.targetSec && !(s.newSym || '').trim() && !(s.newName || '').trim()) return 'Choose or name the security received (Y).';
-      if (t === 'spinoff') { var bp = num(s.basisPct); if (bp <= 0 || bp > 100) return 'Enter the basis % allocated to Y (1–100).'; }
+      if (t === 'spinoff') { var bp = num(s.basisPct); if (bp < 0 || bp > 100) return 'Basis % must be between 0 and 100 (blank keeps all cost on the parent).'; }
     } else if (['opt_buy_open', 'opt_sell_close', 'opt_sell_open', 'opt_buy_close'].includes(t)) {
       if (!s.security) return 'Pick the option contract.';
       if (num(s.contracts) <= 0) return 'Enter the number of contracts.';

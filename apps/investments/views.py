@@ -701,8 +701,10 @@ def _apply_txn_post(request, txn):
         if security is None or not (rn and ro and rn > 0 and ro > 0) or not has_target:
             return None
         if t == InvTxnType.SPINOFF:
-            bp = _decimal(request.POST.get("basis_pct"))
-            if bp is None or bp <= 0 or bp > 100:
+            # Optional: blank / 0 keeps all cost basis on the parent (the spun-off shares get $0
+            # basis — a valid, conservative choice when the issuer's allocation isn't known yet).
+            bp = _decimal(request.POST.get("basis_pct")) or Decimal("0")
+            if bp < 0 or bp > 100:
                 return None
     else:  # cash types
         if amount <= 0:
@@ -749,7 +751,7 @@ def _apply_txn_post(request, txn):
         if txn.target_security is None:
             return None
         if t == InvTxnType.SPINOFF:
-            txn.basis_pct = _decimal(request.POST.get("basis_pct"))
+            txn.basis_pct = _decimal(request.POST.get("basis_pct")) or Decimal("0")
 
     # Options: expand contracts → shares-equivalent once (quantity = contracts × multiplier) and
     # derive the cash amount. Open/close use the premium/share; exercise/assignment use the strike.
