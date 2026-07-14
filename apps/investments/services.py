@@ -166,47 +166,17 @@ def ensure_gl_account(account: InvestmentAccount, *, parent=None, existing=None)
 # --- Tax-lot engine --------------------------------------------------------------------------
 #
 # The engine replays the register through `_apply_lot_effect`, touching lots ONLY via an injected
-# `store` (a LotStore). `DbLotStore` is the live path (persists Lot/LotConsumption — behaviour
-# identical to before this abstraction). `MemLotStore` is a non-mutating in-memory path the
-# value-over-time overlay uses to reconstruct holdings as of a past date, without writing anything.
+# `store` (a LotStore). `RebuildStore` is the live rebuild path: it replays in memory then writes
+# the resulting lots + consumptions in two bulk queries — a rebuild always starts from a clean slate
+# (all lots deleted first), so `open_lots` need only reflect the in-progress replay. This collapses
+# the old per-lot INSERT/SELECT churn (~2 queries per transaction) into O(1) round-trips, so adding
+# a transaction no longer gets slower as the register grows. `MemLotStore` is the non-mutating
+# in-memory path the value-over-time overlay uses to reconstruct as-of-date holdings, writing
+# nothing (`RebuildStore` extends it, adding consumption tracking + `persist`).
 
 def _sid(security):
     """Normalize a Security instance or pk to a pk."""
     return security.pk if hasattr(security, "pk") else security
-
-
-def _open_lots(account, security):
-    return list(
-        Lot.objects.filter(account=account, security=security, open=True).order_by(
-            "acquired_date", "id"
-        )
-    )
-
-
-class DbLotStore:
-    """The live lot store: reads/writes the real Lot + LotConsumption tables (unchanged)."""
-
-    def __init__(self, account):
-        self.account = account
-
-    def open_lots(self, security):
-        return _open_lots(self.account, security)
-
-    def add_lot(self, *, security_id, acquired_date, original_quantity, remaining_quantity,
-                original_cost, cost_basis, open, source_txn):
-        return Lot.objects.create(
-            account=self.account, security_id=security_id, acquired_date=acquired_date,
-            original_quantity=original_quantity, remaining_quantity=remaining_quantity,
-            original_cost=original_cost, cost_basis=cost_basis, open=open, source_txn=source_txn,
-        )
-
-    def save(self, lot, fields):
-        lot.save(update_fields=[*fields, "updated_at"])
-
-    def record_consumption(self, *, sale_txn, lot, quantity, cost, proceeds):
-        LotConsumption.objects.create(
-            sale_txn=sale_txn, lot=lot, quantity=quantity, cost=cost, proceeds=proceeds
-        )
 
 
 @dataclass
@@ -273,6 +243,44 @@ class MemLotStore:
             if qq != ZERO or cc != ZERO:
                 result[sid] = (qq, cc)
         return result
+
+
+class RebuildStore(MemLotStore):
+    """The live rebuild store. Replays the register in memory (reusing MemLotStore's open_lots /
+    add_lot) and additionally records consumptions, then writes everything in two bulk queries via
+    `persist` — vs. the old per-op store's INSERT/SELECT per lot. Correct because a rebuild deletes
+    all lots first, so `open_lots` need only see this replay."""
+
+    def __init__(self):
+        super().__init__()
+        self._consumptions: list[tuple] = []  # (mem_lot, sale_txn_id, quantity, cost, proceeds)
+
+    def record_consumption(self, *, sale_txn, lot, quantity, cost, proceeds):
+        self._consumptions.append((lot, sale_txn.id, quantity, cost, proceeds))
+
+    def persist(self, account):
+        """Bulk-insert the replayed lots in insertion order (so DB ids stay monotonic and the FIFO
+        acquired_date/id tie-break is preserved), then their consumptions FK-linked by that order.
+        Postgres populates PKs from bulk_create, so the mem-lot → row mapping is a simple zip."""
+        mem_lots = sorted(
+            (lot for lots in self._by_sec.values() for lot in lots), key=lambda m: m.seq
+        )
+        saved = Lot.objects.bulk_create([
+            Lot(
+                account=account, security_id=m.security_id, acquired_date=m.acquired_date,
+                original_quantity=m.original_quantity, remaining_quantity=m.remaining_quantity,
+                original_cost=m.original_cost, cost_basis=m.cost_basis, open=m.open,
+                source_txn_id=m.source_txn_id,
+            )
+            for m in mem_lots
+        ])
+        pk_by_seq = {m.seq: row.pk for m, row in zip(mem_lots, saved, strict=True)}
+        LotConsumption.objects.bulk_create([
+            LotConsumption(
+                sale_txn_id=stid, lot_id=pk_by_seq[mem.seq], quantity=q, cost=c, proceeds=p,
+            )
+            for mem, stid, q, c, p in self._consumptions
+        ])
 
 
 def _plan_draws(txn, store, security=None, qty=None) -> list[tuple]:
@@ -766,7 +774,7 @@ def _apply_option_expire(txn, store) -> Decimal:
 
 def _apply_lot_effect(txn, store) -> Decimal:
     """Apply a transaction's lot effect during a replay; return its realized gain (0 if n/a).
-    Touches lots only through `store` (DbLotStore live, MemLotStore for as-of reconstruction)."""
+    Touches lots only through `store` (RebuildStore live, MemLotStore for as-of reconstruction)."""
     t = txn.txn_type
     if t == InvTxnType.BUY:
         _create_lot(txn, store, _q_amount(txn.amount + txn.fee))  # commission capitalized
@@ -853,10 +861,15 @@ def rebuild_account_lots(account) -> RebuildResult:
     LotConsumption.objects.filter(sale_txn__account=account).delete()
     Lot.objects.filter(account=account).delete()
 
-    store = DbLotStore(account)
+    store = RebuildStore()
     resell: list[int] = []
     resync: list[int] = []
-    for txn in account.transactions.order_by("date", "id"):
+    # select_related the FKs the lot engine reads per txn (security + its underlying, and the
+    # merger/spin-off target) so the replay does not fire a query per transaction.
+    txns = account.transactions.select_related(
+        "security", "security__underlying", "target_security"
+    ).order_by("date", "id")
+    for txn in txns:
         rg = _q_amount(_apply_lot_effect(txn, store))
         fields = []
         if txn.realized_gain != rg:
@@ -870,6 +883,7 @@ def rebuild_account_lots(account) -> RebuildResult:
             txn.save(update_fields=[*fields, "updated_at"])
         if txn.txn_type in _GAIN_TYPES and before.get(txn.id, (ZERO, None))[0] != rg:
             resell.append(txn.id)
+    store.persist(account)
     return RebuildResult(resell, resync)
 
 

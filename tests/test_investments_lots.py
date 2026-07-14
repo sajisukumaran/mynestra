@@ -67,6 +67,42 @@ def test_fifo_partial_sell_realizes_gain_and_reduces_lot(make_tenant):
         assert lot.cost_basis == D("300")
 
 
+def test_rebuild_query_count_does_not_grow_with_register_size(make_tenant):
+    """The rebuild replays in memory and bulk-writes its lots + consumptions, so its query count is
+    flat regardless of how many transactions the account holds — this is what keeps adding a
+    transaction fast on a large register (regression guard for the RebuildStore bulk path; the old
+    per-lot store fired ~2 queries per transaction)."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.investments.services import rebuild_account_lots
+
+    def _rebuild_queries(n, sym):
+        org = Organization.objects.create(name=f"B{sym}")
+        acct = InvestmentAccount.objects.create(
+            institution=org, nickname="T", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(
+            symbol=sym, name="X", currency=Currency.objects.get(code="USD"))
+        base = datetime.date(2020, 1, 1)
+        InvestmentTransaction.objects.bulk_create([
+            InvestmentTransaction(
+                account=acct, txn_type=InvTxnType.BUY, date=base + datetime.timedelta(days=i),
+                security=sec, quantity=D("1"), price=D("10"), amount=D("10"))
+            for i in range(n)
+        ])
+        with CaptureQueriesContext(connection) as ctx:
+            rebuild_account_lots(acct)
+        return len(ctx.captured_queries)
+
+    with schema_context(make_tenant().schema_name):
+        small = _rebuild_queries(10, "PERFA")
+        large = _rebuild_queries(120, "PERFB")
+    # 12x the transactions must not mean materially more queries.
+    assert large <= small + 3, f"rebuild query count grew with register size: {small} -> {large}"
+
+
 def test_fifo_sell_spans_multiple_lots(make_tenant):
     with schema_context(make_tenant().schema_name):
         acct, sec = _setup()
