@@ -328,6 +328,40 @@ def test_spinoff_with_cash_in_lieu_lands_on_whole_shares(make_tenant, make_user,
         assert _inv(acct)                          # exact — no sub-cent basis on the fraction
 
 
+def test_spinoff_edit_adds_cash_in_lieu(make_tenant, make_user, client):
+    """Editing an existing plain spin-off to add cash-in-lieu sells the fraction and brings the cash
+    in (the edit / repost path, not just create) — cash total moves by the cash-in-lieu."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        org = _brokerage()
+        acct = _account(org=org)
+        vz, ftr = _sec("VZ"), _sec("FTR")
+        _add(acct, InvTxnType.OPENING, JAN, amount="2000")
+        _add(acct, InvTxnType.BUY, FEB, security=vz, qty="70", price="20", amount="1400")
+        aid, vid, fid = acct.pk, vz.pk, ftr.pk
+    client.force_login(owner)
+    # Plain spin-off first (full entitlement, no cash) → 16.80278 FTR, cash-neutral.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "spinoff", "date": "2026-03-02", "security": vid,
+        "target_security": fid, "split_ratio_new": "16.80278", "split_ratio_old": "70",
+        "basis_pct": ""})
+    with schema_context(tenant.schema_name):
+        spin_id = InvestmentTransaction.objects.get(account_id=aid, txn_type="spinoff").pk
+        assert cash_balance(acct) == D("600")  # cash-neutral so far
+    # Now edit it to add the cash in lieu of the fraction.
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/{spin_id}/edit/"), {
+        "txn_type": "spinoff", "date": "2026-03-02", "security": vid,
+        "target_security": fid, "split_ratio_new": "16.80278", "split_ratio_old": "70",
+        "basis_pct": "", "cash_in_lieu": "5.74"})
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        spin = InvestmentTransaction.objects.get(pk=spin_id)
+        assert spin.amount == D("5.74")                            # cash-in-lieu persisted
+        assert _open(acct, ftr)[0].remaining_quantity == D("16")   # fraction sold on repost
+        assert cash_balance(acct) == D("605.74")                   # cash total moved by +5.74
+        assert _inv(acct)
+
+
 # --- Cash in lieu of a fractional share (spin-off tail) --------------------------------------
 
 def test_spinoff_then_cash_in_lieu_of_fractional(make_tenant):
