@@ -1324,6 +1324,40 @@ def cost_basis(account) -> Decimal:
     return _q_amount(total or ZERO)
 
 
+def attach_account_totals(accounts) -> list:
+    """Stamp each account's `cash_balance` / `cost_basis` / `market_value` (and therefore
+    `total_value` / `unrealized_gain`) from THREE grouped queries + one price map, however many
+    accounts — the batch path for the dashboard, lists and institution rollups, instead of
+    recomputing each figure per account (and per property access) from scratch."""
+    accounts = list(accounts)
+    ids = [a.pk for a in accounts]
+    cash = {
+        r["account_id"]: _q_amount(r["s"] or ZERO)
+        for r in InvestmentTransaction.objects.filter(account_id__in=ids)
+        .values("account_id").annotate(s=Sum(signed_cash_sql()))
+    }
+    positions = list(
+        Lot.objects.filter(account_id__in=ids, open=True)
+        .values("account_id", "security_id")
+        .annotate(qty=Sum("remaining_quantity"), cost=Sum("cost_basis"))
+    )
+    prices = latest_prices({p["security_id"] for p in positions})
+    cost: dict[int, Decimal] = {}
+    market: dict[int, Decimal] = {}
+    for p in positions:
+        aid = p["account_id"]
+        qty, c = _q_qty(p["qty"] or ZERO), _q_amount(p["cost"] or ZERO)
+        price = prices.get(p["security_id"])
+        mv = _q_amount(qty * price) if price is not None else c
+        cost[aid] = _q_amount(cost.get(aid, ZERO) + c)
+        market[aid] = _q_amount(market.get(aid, ZERO) + mv)
+    for a in accounts:
+        a._cash_balance = cash.get(a.pk, ZERO)
+        a._cost_basis = cost.get(a.pk, ZERO)
+        a._market_value = market.get(a.pk, ZERO)
+    return accounts
+
+
 @dataclass
 class Holding:
     security: Security
@@ -1347,6 +1381,17 @@ class Holding:
         return _q_amount(self.unrealized_gain / base * 100) if base else ZERO
 
 
+def latest_prices(security_ids) -> dict[int, Decimal]:
+    """The latest recorded price per security in ONE query (DISTINCT ON), instead of the
+    `Security.latest_price` query-per-security N+1 — use this anywhere prices are read in a loop."""
+    return dict(
+        SecurityPrice.objects.filter(security_id__in=list(security_ids))
+        .order_by("security_id", "-as_of")
+        .distinct("security_id")
+        .values_list("security_id", "price")
+    )
+
+
 def holdings(account) -> list[Holding]:
     """Per-security open positions in an account (quantity, cost, market value)."""
     rows: dict[int, dict] = {}
@@ -1356,13 +1401,14 @@ def holdings(account) -> list[Holding]:
         )
         r["qty"] += lot.remaining_quantity
         r["cost"] += lot.cost_basis
+    prices = latest_prices(rows.keys())
     out: list[Holding] = []
-    for r in rows.values():
+    for sid, r in rows.items():
         qty = _q_qty(r["qty"])
         cost = _q_amount(r["cost"])
         if qty == ZERO and cost == ZERO:
             continue  # fully flat (e.g. a fully-covered short) — drop; shorts show as negatives
-        price = r["security"].latest_price
+        price = prices.get(sid)
         mv = _q_amount(qty * price) if price is not None else cost
         out.append(Holding(security=r["security"], quantity=qty, cost_basis=cost,
                             market_value=mv, price=price))
@@ -1385,13 +1431,17 @@ class Slice:
         return _q_amount(self.value / total * 100) if total else ZERO
 
 
-def allocation(accounts=None, *, by: str = "asset_class") -> list[Slice]:
+def allocation(accounts=None, *, by: str = "asset_class", holdings_map=None) -> list[Slice]:
     """Portfolio market value grouped for the dashboard donut/bars: by asset class, account group,
-    or institution. Settlement cash is folded in as its own 'Cash' slice."""
+    or institution. Settlement cash is folded in as its own 'Cash' slice. Pass `holdings_map`
+    ({account pk: holdings list}) when the caller already computed holdings — the dashboard calls
+    this twice and would otherwise recompute every account's positions each time."""
     from apps.investments.models import ASSET_CLASS_TINT, AssetClass
 
     if accounts is None:
-        accounts = list(InvestmentAccount.objects.select_related("institution"))
+        accounts = attach_account_totals(
+            InvestmentAccount.objects.select_related("institution")
+        )
     buckets: dict[str, dict] = {}
 
     def add(key, label, tint, value):
@@ -1403,7 +1453,10 @@ def allocation(accounts=None, *, by: str = "asset_class") -> list[Slice]:
     total_cash = ZERO
     for acct in accounts:
         total_cash += acct.cash_balance
-        for h in holdings(acct):
+        hs = holdings_map.get(acct.pk) if holdings_map is not None else None
+        if hs is None:
+            hs = holdings(acct)
+        for h in hs:
             if h.security.asset_class == AssetClass.DERIVATIVE:
                 continue  # options never render as a donut arc (may be net-negative when written)
             if by == "asset_class":
@@ -1533,7 +1586,9 @@ def institution_summary() -> list[dict]:
         .distinct().order_by("name")
     )
     by_org: dict[int, list] = {}
-    for acct in InvestmentAccount.objects.select_related("institution", "currency"):
+    for acct in attach_account_totals(
+        InvestmentAccount.objects.select_related("institution", "currency")
+    ):
         by_org.setdefault(acct.institution_id, []).append(acct)
 
     rows = [institution_row(org, by_org.get(org.id, [])) for org in orgs]
@@ -1542,9 +1597,10 @@ def institution_summary() -> list[dict]:
 
 
 def institution_row(org, accounts=None) -> dict:
-    """Totals for one brokerage over the given accounts (defaults to its investment accounts)."""
+    """Totals for one brokerage over the given accounts (defaults to its investment accounts,
+    batch-stamped; a caller passing `accounts` should attach_account_totals them first)."""
     if accounts is None:
-        accounts = list(org.investment_accounts.select_related("currency"))
+        accounts = attach_account_totals(org.investment_accounts.select_related("currency"))
     market = _q_amount(sum((a.market_value for a in accounts), ZERO))
     cash = _q_amount(sum((a.cash_balance for a in accounts), ZERO))
     cost = _q_amount(sum((a.cost_basis for a in accounts), ZERO))
@@ -1654,11 +1710,12 @@ def security_performance(account) -> dict:
         b["current_qty"] += lot.remaining_quantity
         b["cost_basis"] += lot.cost_basis
 
+    prices = latest_prices(agg.keys())
     rows: list[PerfRow] = []
     totals = dict.fromkeys(_PERF_MONEY_TOTALS, ZERO)
-    for b in agg.values():
+    for sid, b in agg.items():
         sec = b["security"]
-        price = sec.latest_price
+        price = prices.get(sid)
         qty = _q_qty(b["current_qty"])
         cost = _q_amount(b["cost_basis"])
         mv = _q_amount(qty * price) if price is not None else cost
@@ -1805,7 +1862,8 @@ def contribution_limit_status(account, as_of=None):
 
 def total_portfolio_value() -> Decimal:
     """Total market value (securities + cash) across every account — base/native assumed equal."""
-    return _q_amount(sum((a.total_value for a in InvestmentAccount.objects.all()), ZERO))
+    accounts = attach_account_totals(InvestmentAccount.objects.all())
+    return _q_amount(sum((a.total_value for a in accounts), ZERO))
 
 
 def _income_ytd(today) -> Decimal:
@@ -1836,9 +1894,12 @@ def upcoming_maturities(within_days: int = 365):
 
 
 def dashboard_stats() -> dict:
-    """Headline figures + drill-down feeds for the Investments dashboard."""
+    """Headline figures + drill-down feeds for the Investments dashboard. Account totals are
+    batch-stamped and each account's holdings are computed ONCE, shared by the top-holdings feed
+    and both allocation groupings."""
     today = datetime.date.today()
-    accounts = list(InvestmentAccount.objects.select_related("institution"))
+    accounts = attach_account_totals(InvestmentAccount.objects.select_related("institution"))
+    hold_map = {a.pk: holdings(a) for a in accounts}
 
     total_cash = _q_amount(sum((a.cash_balance for a in accounts), ZERO))
     total_cost = _q_amount(sum((a.cost_basis for a in accounts), ZERO))
@@ -1849,7 +1910,7 @@ def dashboard_stats() -> dict:
     # Top holdings across all accounts (aggregate the same security across accounts).
     agg: dict[int, dict] = {}
     for acct in accounts:
-        for h in holdings(acct):
+        for h in hold_map[acct.pk]:
             r = agg.setdefault(
                 h.security.id,
                 {"security": h.security, "qty": ZERO, "cost": ZERO, "mv": ZERO},
@@ -1877,8 +1938,8 @@ def dashboard_stats() -> dict:
         "unrealized": unrealized,
         "income_ytd": _income_ytd(today),
         "accounts": accounts,
-        "allocation": allocation(accounts, by="asset_class"),
-        "by_group": allocation(accounts, by="group"),
+        "allocation": allocation(accounts, by="asset_class", holdings_map=hold_map),
+        "by_group": allocation(accounts, by="group", holdings_map=hold_map),
         "top_holdings": top,
         "recent": recent,
         "maturities": upcoming_maturities(),

@@ -438,20 +438,32 @@ class InvestmentAccount(SoftDeleteModel):
 
     # -- Module-computed figures (account's own currency) --
 
+    # The three figure properties honor a value stamped by `services.attach_account_totals`, so
+    # dashboards / lists / rollups can batch-load them instead of recomputing per property access.
+
     @property
     def cash_balance(self):
+        stamped = getattr(self, "_cash_balance", None)
+        if stamped is not None:
+            return stamped
         from apps.investments.services import cash_balance
 
         return cash_balance(self)
 
     @property
     def cost_basis(self):
+        stamped = getattr(self, "_cost_basis", None)
+        if stamped is not None:
+            return stamped
         from apps.investments.services import cost_basis
 
         return cost_basis(self)
 
     @property
     def market_value(self):
+        stamped = getattr(self, "_market_value", None)
+        if stamped is not None:
+            return stamped
         from apps.investments.services import market_value
 
         return market_value(self)

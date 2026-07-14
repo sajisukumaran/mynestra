@@ -335,3 +335,53 @@ def test_specific_lot_selection_by_source_buy(make_tenant):
         apply_transaction(sell, is_new=True)
         sell.refresh_from_db()
         assert sell.realized_gain == D("100")
+
+
+def test_holdings_and_attach_totals_batch_queries_flat(make_tenant):
+    """`holdings` reads prices in ONE query however many securities are held (no per-security
+    latest_price N+1), and `attach_account_totals` stamps figures matching the per-account
+    computations in a fixed number of grouped queries."""
+    import datetime
+
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.investments.models import SecurityPrice
+    from apps.investments.services import attach_account_totals, cash_balance, market_value
+
+    def _built(n_secs, prefix):
+        org = Organization.objects.create(name=f"H{prefix}")
+        acct = InvestmentAccount.objects.create(
+            institution=org, nickname="T", registration="taxable_individual",
+            currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        for i in range(n_secs):
+            sec = Security.objects.create(
+                symbol=f"{prefix}{i}", name="X", currency=Currency.objects.get(code="USD"))
+            SecurityPrice.objects.create(
+                security=sec, as_of=datetime.date(2026, 1, 10), price=D("12"))
+            _add(acct, InvTxnType.BUY, JAN, security=sec, qty="2", price="10", amount="20")
+        return acct
+
+    with schema_context(make_tenant().schema_name):
+        small = _built(2, "HA")
+        large = _built(8, "HB")
+
+        with CaptureQueriesContext(connection) as small_ctx:
+            holdings(small)
+        with CaptureQueriesContext(connection) as large_ctx:
+            large_hold = holdings(large)
+        assert len(large_ctx.captured_queries) <= len(small_ctx.captured_queries)
+        assert all(h.price == D("12") for h in large_hold)  # batched price == latest price
+
+        # Batch totals agree with the per-account figures, in 3 grouped queries.
+        expected = {
+            a.pk: (cash_balance(a), market_value(a))
+            for a in InvestmentAccount.objects.filter(pk__in=[small.pk, large.pk])
+        }
+        fresh = list(InvestmentAccount.objects.filter(pk__in=[small.pk, large.pk]))
+        with CaptureQueriesContext(connection) as ctx:
+            attach_account_totals(fresh)
+            got = {a.pk: (a.cash_balance, a.market_value) for a in fresh}
+        assert got == expected
+        assert len(ctx.captured_queries) <= 3

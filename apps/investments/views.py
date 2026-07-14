@@ -49,6 +49,7 @@ from apps.investments.services import (
     POSTING_ACTIVITIES,
     allocation,
     apply_transaction,
+    attach_account_totals,
     contribution_limit_status,
     contribution_summary,
     create_matching_leg,
@@ -237,7 +238,8 @@ def account_list(request):
 
     ctx = inv_context(
         request, "accounts",
-        page=page, accounts=page.object_list, q=q, group=group, sort=sort,
+        page=page, accounts=attach_account_totals(page.object_list),
+        q=q, group=group, sort=sort,
         sort_name_next="-nickname" if sort == "nickname" else "nickname",
         sort_added_next="-added" if sort == "added" else "added",
         total=len(all_accounts), group_chips=group_chips,
@@ -455,6 +457,7 @@ def account_detail(request, pk):
         InvestmentAccount.objects.select_related("institution", "branch", "currency", "gl_account"),
         pk=pk,
     )
+    attach_account_totals([account])  # header stats read stamped figures, not one query each
     hold = holdings(account)
     market = sum((h.market_value for h in hold), Decimal("0"))
     vesting_rows, vesting_totals = vesting_summary(account)
@@ -556,7 +559,9 @@ def institution_detail(request, org):
     """One brokerage: totals, its accounts (with per-account breakdown), an asset-class allocation
     over just its holdings, and its branches."""
     organization = get_object_or_404(_brokerages(), pk=org)
-    accounts = list(organization.investment_accounts.select_related("currency", "branch"))
+    accounts = attach_account_totals(
+        organization.investment_accounts.select_related("currency", "branch")
+    )
     summary = institution_row(organization, accounts)
     donut = donut_segments(allocation(accounts=accounts, by="asset_class"))
     performance = [
