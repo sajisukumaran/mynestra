@@ -1609,11 +1609,11 @@ def contribution_limit_status(account, as_of=None):
     simple annual limit (SEP/SIMPLE/529/taxable) — the plain by-year rollup covers those. Pure read
     — attribution metadata only, no GL."""
     from apps.investments.models import (
-        CONTRIBUTION_LIMITS,
         CONTRIBUTION_TAX_YEAR_TYPES,
         HSA_CATCHUP_AGE,
         IRA_CATCHUP_AGE,
         IRA_LIMIT_REGISTRATIONS,
+        ContributionLimit,
         HsaCoverage,
         Registration,
     )
@@ -1641,21 +1641,23 @@ def contribution_limit_status(account, as_of=None):
     used_by_year = {r["tax_year"]: _q_amount(r["total"] or ZERO) for r in agg}
     this_by_year = {r["year"]: r["total"] for r in contribution_summary(account)}
     catch_age = IRA_CATCHUP_AGE if category == "ira" else HSA_CATCHUP_AGE
+    # Editable IRS figures from Setup; a year without a row shows no bar (graceful).
+    limits_by_year = {cl.tax_year: cl for cl in ContributionLimit.objects.all()}
 
     rows = []
     for year in sorted(set(used_by_year) | {as_of.year}, reverse=True):
         used = used_by_year.get(year, ZERO)
-        limits = CONTRIBUTION_LIMITS.get(year)
-        if limits is None:  # unknown year — show the total with no bar
+        limits = limits_by_year.get(year)
+        if limits is None:  # year not configured in Setup — show the total with no bar
             rows.append({"year": year, "used": used, "limit": None,
                          "this_account": _q_amount(this_by_year.get(year, ZERO))})
             continue
         if category == "ira":
-            base, catchup = limits["ira"], limits["ira_catchup"]
+            base, catchup = limits.ira, limits.ira_catchup
         else:
-            base = limits["hsa_family" if account.hsa_coverage == HsaCoverage.FAMILY
-                          else "hsa_self"]
-            catchup = limits["hsa_catchup"]
+            base = (limits.hsa_family if account.hsa_coverage == HsaCoverage.FAMILY
+                    else limits.hsa_self)
+            catchup = limits.hsa_catchup
         eligible = bool(person and person.dob_year and (year - person.dob_year) >= catch_age)
         limit = base + (catchup if eligible else ZERO)
         pct = int(min(used / limit * 100, 100)) if limit else 0

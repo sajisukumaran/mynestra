@@ -166,6 +166,26 @@ def test_transfer_in_counts_toward_the_limit(make_tenant):
         assert row["used"] == D("4000")
 
 
+def test_limit_reads_from_the_editable_setup_table(make_tenant):
+    """The meter reads limits from the editable ContributionLimit table: a year with no row shows
+    no bar, and adding a historical year (not in the original seed) makes its bar appear — so a
+    household maintains the figures in Setup without a code change."""
+    from apps.investments.models import ContributionLimit
+
+    with schema_context(make_tenant().schema_name):
+        jane = _person(dob_year=1990)                # age 20 in 2010 → no catch-up
+        ira = _account("roth_ira", "Roth", jane)
+        _contrib(ira, 2010, "3000")
+        # 2010 is not in the seed → no bar yet.
+        assert _row(contribution_limit_status(ira, as_of=datetime.date(2010, 12, 1)),
+                    2010)["limit"] is None
+        # Add it in Setup → the bar appears against that limit.
+        ContributionLimit.objects.create(tax_year=2010, ira=D("5000"), ira_catchup=D("1000"))
+        row = _row(contribution_limit_status(ira, as_of=datetime.date(2010, 12, 1)), 2010)
+        assert row["limit"] == D("5000")
+        assert row["remaining"] == D("2000")         # 5000 − 3000
+
+
 def test_account_detail_renders_limit_meter(make_tenant, make_user, client):
     tenant, owner = _owner(make_tenant, make_user)
     with schema_context(tenant.schema_name):

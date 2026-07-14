@@ -18,6 +18,8 @@ from apps.accounts.decorators import owner_required
 from apps.contacts.models import Person
 from apps.families.models import Family
 from apps.finance.models import Currency
+from apps.investments.forms import ContributionLimitForm
+from apps.investments.models import ContributionLimit
 from apps.organizations.models import Branch, Organization
 from apps.payables.forms import PaymentTermForm
 from apps.payables.models import PaymentTerm
@@ -52,6 +54,7 @@ def setup_context(request, active, **extra):
         "nav_categories": Category.objects.count(),
         "nav_rel_types": nav_rel_types,
         "nav_payment_terms": PaymentTerm.objects.count(),
+        "nav_contribution_limits": ContributionLimit.objects.count(),
         "nav_members": Membership.objects.filter(tenant=request.tenant).count(),
         "nav_household_members": Person.objects.filter(is_household_member=True).count(),
         "nav_invites": Invitation.objects.filter(
@@ -245,6 +248,46 @@ def payment_term_delete(request, pk):
     if request.method == "POST":
         term.delete()  # hard delete: bills that reference a term PROTECT it (guarded in module 6)
     return redirect(setup_url(request, "payment-terms/"))
+
+
+# --- Contribution limits (Investments catalog: editable IRS IRA/HSA limits by tax year) ------
+# The IRA/HSA meters on investment accounts read these; a household keeps them current as the IRS
+# updates the figures (or adds historical years) — no code change. A year with no row shows no bar.
+
+
+@owner_required
+def contribution_limits(request):
+    ctx = setup_context(request, "contribution-limits", limits=ContributionLimit.objects.all())
+    return render(request, "setup/contribution_limits.html", ctx)
+
+
+@owner_required
+def contribution_limit_create(request):
+    form = ContributionLimitForm(request.POST or None, instance=ContributionLimit())
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(setup_url(request, "contribution-limits/"))
+    ctx = setup_context(request, "contribution-limits", form=form, mode="create")
+    return render(request, "setup/contribution_limit_form.html", ctx)
+
+
+@owner_required
+def contribution_limit_edit(request, pk):
+    limit = get_object_or_404(ContributionLimit, pk=pk)
+    form = ContributionLimitForm(request.POST or None, instance=limit)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        return redirect(setup_url(request, "contribution-limits/"))
+    ctx = setup_context(request, "contribution-limits", form=form, limit=limit, mode="edit")
+    return render(request, "setup/contribution_limit_form.html", ctx)
+
+
+@owner_required
+def contribution_limit_delete(request, pk):
+    limit = get_object_or_404(ContributionLimit, pk=pk)
+    if request.method == "POST":
+        limit.delete()
+    return redirect(setup_url(request, "contribution-limits/"))
 
 
 # --- Members & invitations ------------------------------------------------------------------

@@ -31,6 +31,20 @@ urlpatterns = [
     path("payment-terms/new/", views.payment_term_create, name="payment-term-create"),
     path("payment-terms/<int:pk>/edit/", views.payment_term_edit, name="payment-term-edit"),
     path("payment-terms/<int:pk>/delete/", views.payment_term_delete, name="payment-term-delete"),
+    # Contribution limits (Investments catalog: IRS IRA/HSA annual limits by tax year)
+    path("contribution-limits/", views.contribution_limits, name="contribution-limits"),
+    path(
+        "contribution-limits/new/",
+        views.contribution_limit_create, name="contribution-limit-create",
+    ),
+    path(
+        "contribution-limits/<int:pk>/edit/",
+        views.contribution_limit_edit, name="contribution-limit-edit",
+    ),
+    path(
+        "contribution-limits/<int:pk>/delete/",
+        views.contribution_limit_delete, name="contribution-limit-delete",
+    ),
     # Household members (which People belong to this household)
     path("household-members/", views.household_members, name="household-members"),
     path(

@@ -1,0 +1,53 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}Contribution limits{% endblock %}
+
+{% block setup %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" /><span class="strong">Contribution limits</span></c-breadcrumb>
+<c-page-header title="Contribution limits" subtitle="Annual IRS IRA &amp; HSA limits by tax year — the meters on IRA/HSA accounts read these. Add a year when the IRS updates the figures; a year with no row simply shows no bar.">
+  <c-slot name="actions">
+    <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}setup/contribution-limits/new/"><c-icon name="plus" size="sm" /> New year</c-button>
+  </c-slot>
+</c-page-header>
+
+<c-card flush>
+  <c-table>
+    <thead><tr>
+      <c-th>Tax year</c-th>
+      <th class="col-num">IRA</th>
+      <th class="col-num">IRA catch-up (50+)</th>
+      <th class="col-num">HSA self-only</th>
+      <th class="col-num">HSA family</th>
+      <th class="col-num">HSA catch-up (55+)</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      {% for r in limits %}
+      <tr>
+        <td class="strong">{{ r.tax_year }}</td>
+        <td class="col-num"><c-money :amount="r.ira" symbol="$" dp="0" grouping="{{ ui_number_format }}" /></td>
+        <td class="col-num"><c-money :amount="r.ira_catchup" symbol="$" dp="0" grouping="{{ ui_number_format }}" /></td>
+        <td class="col-num"><c-money :amount="r.hsa_self" symbol="$" dp="0" grouping="{{ ui_number_format }}" /></td>
+        <td class="col-num"><c-money :amount="r.hsa_family" symbol="$" dp="0" grouping="{{ ui_number_format }}" /></td>
+        <td class="col-num"><c-money :amount="r.hsa_catchup" symbol="$" dp="0" grouping="{{ ui_number_format }}" /></td>
+        <td>
+          <div class="cell-actions">
+            <c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}setup/contribution-limits/{{ r.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button>
+            <c-confirm-dialog title="Delete {{ r.tax_year }} limits?" message="The IRA/HSA meters will show no bar for {{ r.tax_year }} until you add it back.">
+              <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+              <c-slot name="confirm">
+                <form method="post" action="{{ ui_tenant_url }}setup/contribution-limits/{{ r.pk }}/delete/">{% csrf_token %}
+                  <c-button type="submit" variant="danger">Delete</c-button>
+                </form>
+              </c-slot>
+            </c-confirm-dialog>
+          </div>
+        </td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="7"><span class="subtle">No years configured — add one to show a limit bar.</span></td></tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+</c-card>
+<c-hint icon="info">Federal figures (IRA: IRS Pub 590-A; HSA: Rev. Proc. / Pub 969). Verify each year against the current IRS numbers — nothing updates these automatically.</c-hint>
+{% endblock %}

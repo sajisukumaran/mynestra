@@ -287,23 +287,9 @@ IRA_LIMIT_REGISTRATIONS = frozenset({
     Registration.TRADITIONAL_IRA, Registration.ROTH_IRA, Registration.ROLLOVER_IRA,
 })
 
-# IRS annual contribution limits by tax year. VERIFY / UPDATE ANNUALLY — IRA: Pub 590-A; HSA:
-# Rev. Proc. (Pub 969). A year absent here renders contributions with no limit bar (graceful).
-# Catch-up applies from the holder's birth year: IRA at 50+, HSA at 55+.
-CONTRIBUTION_LIMITS = {
-    2023: {"ira": Decimal("6500"), "ira_catchup": Decimal("1000"),
-           "hsa_self": Decimal("3850"), "hsa_family": Decimal("7750"),
-           "hsa_catchup": Decimal("1000")},
-    2024: {"ira": Decimal("7000"), "ira_catchup": Decimal("1000"),
-           "hsa_self": Decimal("4150"), "hsa_family": Decimal("8300"),
-           "hsa_catchup": Decimal("1000")},
-    2025: {"ira": Decimal("7000"), "ira_catchup": Decimal("1000"),
-           "hsa_self": Decimal("4300"), "hsa_family": Decimal("8550"),
-           "hsa_catchup": Decimal("1000")},
-    2026: {"ira": Decimal("7500"), "ira_catchup": Decimal("1100"),
-           "hsa_self": Decimal("4400"), "hsa_family": Decimal("8750"),
-           "hsa_catchup": Decimal("1000")},
-}
+# Catch-up eligibility ages (stable IRS rules): the extra allowance kicks in from the holder's
+# birth year at these ages. The annual dollar limits themselves live in the editable
+# `ContributionLimit` table (Setup), seeded with recent years — see below.
 IRA_CATCHUP_AGE = 50
 HSA_CATCHUP_AGE = 55
 
@@ -311,6 +297,27 @@ HSA_CATCHUP_AGE = 55
 class HsaCoverage(models.TextChoices):
     SELF_ONLY = "self_only", "Self-only"
     FAMILY = "family", "Family"
+
+
+class ContributionLimit(TimeStampedModel):
+    """IRS annual IRA/HSA contribution limits for a tax year — editable in Setup, so a household
+    keeps them current as the IRS updates them (no code change / deploy). Seeded with recent years;
+    a tax year with no row simply shows no limit bar (graceful). The base IRA figure is the shared
+    cap across a person's Traditional/Roth/Rollover IRAs; catch-up is added from age 50 (IRA) /
+    55 (HSA); the HSA figure used follows the account's self-only vs family coverage."""
+
+    tax_year = models.PositiveIntegerField(unique=True)
+    ira = _amount(default=ZERO)          # base IRA limit (shared across a person's IRAs)
+    ira_catchup = _amount(default=ZERO)  # additional IRA allowance at age 50+
+    hsa_self = _amount(default=ZERO)     # HSA limit, self-only coverage
+    hsa_family = _amount(default=ZERO)   # HSA limit, family coverage
+    hsa_catchup = _amount(default=ZERO)  # additional HSA allowance at age 55+
+
+    class Meta:
+        ordering = ["-tax_year"]
+
+    def __str__(self) -> str:
+        return f"Contribution limits {self.tax_year}"
 
 
 class InvestmentAccount(SoftDeleteModel):

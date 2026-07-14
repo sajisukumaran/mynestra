@@ -14,6 +14,7 @@ Every Setup page extends this and fills the `setup` block. Tenant links are buil
       <c-sidebar-item label="Categories" icon="tag" count="{{ nav_categories }}" href="{{ ui_tenant_url }}setup/categories/" {% if active == 'categories' %}active="true"{% endif %} />
       <c-sidebar-item label="Relationship types" icon="network" count="{{ nav_rel_types }}" href="{{ ui_tenant_url }}setup/relationship-types/" {% if active == 'rel-types' %}active="true"{% endif %} />
       <c-sidebar-item label="Payment terms" icon="calendar-days" count="{{ nav_payment_terms }}" href="{{ ui_tenant_url }}setup/payment-terms/" {% if active == 'payment-terms' %}active="true"{% endif %} />
+      <c-sidebar-item label="Contribution limits" icon="landmark" count="{{ nav_contribution_limits }}" href="{{ ui_tenant_url }}setup/contribution-limits/" {% if active == 'contribution-limits' %}active="true"{% endif %} />
       <c-sidebar-item label="Household members" icon="house" count="{{ nav_household_members }}" href="{{ ui_tenant_url }}setup/household-members/" {% if active == 'household-members' %}active="true"{% endif %} />
       <c-sidebar-item label="Members" icon="users" count="{{ nav_members }}" href="{{ ui_tenant_url }}setup/members/" {% if active == 'members' %}active="true"{% endif %} />
       <c-sidebar-item label="Appearance" icon="palette" href="{{ ui_tenant_url }}setup/appearance/" {% if active == 'appearance' %}active="true"{% endif %} />

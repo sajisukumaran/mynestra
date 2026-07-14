@@ -1,0 +1,49 @@
+{% extends "setup/base.html" %}
+{% block setup_heading %}{% if mode == 'create' %}New tax year{% else %}Edit {{ limit.tax_year }} limits{% endif %}{% endblock %}
+
+{% block setup %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}setup/">Setup</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}setup/contribution-limits/">Contribution limits</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'create' %}New{% else %}{{ limit.tax_year }}{% endif %}</span>
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New tax year{% else %}Edit {{ limit.tax_year }} limits{% endif %}" subtitle="Annual IRS IRA &amp; HSA contribution limits for a single tax year." />
+
+<c-card>
+  <form method="post">{% csrf_token %}
+    <div class="form-grid">
+      <c-field label="Tax year" required error="{{ form.tax_year.errors.0 }}">
+        <c-input type="number" name="tax_year" min="1970" max="2200" value="{{ form.tax_year.value|default:'' }}" required />
+      </c-field>
+    </div>
+
+    <span class="eyebrow">IRA</span>
+    <div class="form-grid">
+      <c-field label="IRA limit" help="Shared across a person's Traditional, Roth &amp; Rollover IRAs." error="{{ form.ira.errors.0 }}">
+        <c-input type="number" step="1" min="0" name="ira" value="{{ form.ira.value|floatformat:'-2' }}" />
+      </c-field>
+      <c-field label="IRA catch-up (age 50+)" help="Added to the IRA limit from the year the holder turns 50." error="{{ form.ira_catchup.errors.0 }}">
+        <c-input type="number" step="1" min="0" name="ira_catchup" value="{{ form.ira_catchup.value|floatformat:'-2' }}" />
+      </c-field>
+    </div>
+
+    <span class="eyebrow">HSA</span>
+    <div class="form-grid">
+      <c-field label="HSA self-only" error="{{ form.hsa_self.errors.0 }}">
+        <c-input type="number" step="1" min="0" name="hsa_self" value="{{ form.hsa_self.value|floatformat:'-2' }}" />
+      </c-field>
+      <c-field label="HSA family" error="{{ form.hsa_family.errors.0 }}">
+        <c-input type="number" step="1" min="0" name="hsa_family" value="{{ form.hsa_family.value|floatformat:'-2' }}" />
+      </c-field>
+      <c-field label="HSA catch-up (age 55+)" help="Added to the HSA limit from the year the holder turns 55." error="{{ form.hsa_catchup.errors.0 }}">
+        <c-input type="number" step="1" min="0" name="hsa_catchup" value="{{ form.hsa_catchup.value|floatformat:'-2' }}" />
+      </c-field>
+    </div>
+
+    <c-save-bar note="Contribution limits">
+      <c-button variant="ghost" href="{{ ui_tenant_url }}setup/contribution-limits/">Cancel</c-button>
+      <c-button type="submit" variant="primary">{% if mode == 'create' %}Add year{% else %}Save changes{% endif %}</c-button>
+    </c-save-bar>
+  </form>
+</c-card>
+{% endblock %}

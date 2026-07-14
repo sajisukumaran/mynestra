@@ -24,8 +24,8 @@ def _u(tenant, path=""):
 
 
 SETUP_PAGES = [
-    "", "categories/", "relationship-types/", "payment-terms/", "members/",
-    "appearance/", "localization/", "profile/", "recently-deleted/",
+    "", "categories/", "relationship-types/", "payment-terms/", "contribution-limits/",
+    "members/", "appearance/", "localization/", "profile/", "recently-deleted/",
 ]
 
 
@@ -113,6 +113,42 @@ def test_custom_payment_term_lifecycle(make_tenant, make_user, client):
     assert client.post(_u(tenant, f"payment-terms/{term.pk}/delete/")).status_code == 302
     with schema_context(tenant.schema_name):
         assert not PaymentTerm.objects.filter(pk=term.pk).exists()
+
+
+def test_contribution_limits_seeded_and_editable(make_tenant, make_user, client):
+    """The editable IRS-limits catalog is seeded (2023–2026) and an owner can add, edit and delete
+    a tax year in Setup — so limits are maintained without a code change."""
+    from apps.investments.models import ContributionLimit
+
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    with schema_context(tenant.schema_name):
+        assert ContributionLimit.objects.filter(tax_year=2026).exists()  # seeded
+    # Add a historical year (e.g. the user's 2010 contributions).
+    assert client.post(_u(tenant, "contribution-limits/new/"),
+                       {"tax_year": 2010, "ira": "5000", "ira_catchup": "1000",
+                        "hsa_self": "3050", "hsa_family": "6150",
+                        "hsa_catchup": "1000"}).status_code == 302
+    with schema_context(tenant.schema_name):
+        row = ContributionLimit.objects.get(tax_year=2010)
+        assert row.ira == 5000
+    assert client.post(_u(tenant, f"contribution-limits/{row.pk}/edit/"),
+                       {"tax_year": 2010, "ira": "5000", "ira_catchup": "1000",
+                        "hsa_self": "3050", "hsa_family": "6150",
+                        "hsa_catchup": "1000"}).status_code == 302
+    assert client.post(_u(tenant, f"contribution-limits/{row.pk}/delete/")).status_code == 302
+    with schema_context(tenant.schema_name):
+        assert not ContributionLimit.objects.filter(tax_year=2010).exists()
+
+
+def test_duplicate_contribution_limit_year_rejected(make_tenant, make_user, client):
+    """tax_year is unique — adding a year that already exists is rejected (form error, no save)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    resp = client.post(_u(tenant, "contribution-limits/new/"),
+                       {"tax_year": 2026, "ira": "7500", "ira_catchup": "1100",
+                        "hsa_self": "4400", "hsa_family": "8750", "hsa_catchup": "1000"})
+    assert resp.status_code == 200  # re-rendered with the uniqueness error, not saved
 
 
 def test_system_relationship_types_are_locked(make_tenant, make_user, client):
