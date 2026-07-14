@@ -1457,7 +1457,9 @@ _PERF_DIVIDEND = frozenset({
 class PerfRow:
     """One instrument's performance in an account: lifetime quantities/income/fees + the current
     position's cost, price and gain. `gain` = realized + unrealized (capital only); `total_return`
-    also folds in income (dividends + interest)."""
+    also folds in income (dividends + interest). `invested` is the total cost basis put in (held +
+    already disposed); `return_pct` = total_return / invested as a %, so held or fully-sold
+    positions rank best-to-worst; None when nothing was invested (income only)."""
     security: object
     qty_bought: Decimal
     qty_sold: Decimal
@@ -1474,12 +1476,22 @@ class PerfRow:
     gain: Decimal
     income: Decimal
     total_return: Decimal
+    invested: Decimal
+    return_pct: object
 
 
 _PERF_MONEY_TOTALS = (
     "cost_basis", "fees", "dividends", "interest", "amount_sold",
-    "realized", "market_value", "gain", "income", "total_return",
+    "realized", "market_value", "gain", "income", "total_return", "invested",
 )
+
+
+def _return_pct(total_return, invested):
+    """Total return as a percentage of the cost basis invested, or None when nothing was invested
+    (a pure income row) — a return on $0 is undefined rather than infinite."""
+    if invested is None or invested <= ZERO:
+        return None
+    return (total_return / invested * Decimal("100")).quantize(Decimal("0.01"))
 
 
 def security_performance(account) -> dict:
@@ -1528,22 +1540,30 @@ def security_performance(account) -> dict:
         cost = _q_amount(b["cost_basis"])
         mv = _q_amount(qty * price) if price is not None else cost
         realized = _q_amount(b["realized"])
+        amount_sold = _q_amount(b["amount_sold"])
         unrealized = _q_amount(mv - cost)
         gain = _q_amount(realized + unrealized)
         income = _q_amount(b["dividends"] + b["interest"])
+        total_return = _q_amount(gain + income)
+        # Cost basis put in = still held (cost) + already disposed (proceeds − realized gain).
+        invested = _q_amount((amount_sold - realized) + cost)
         row = PerfRow(
             security=sec, qty_bought=_q_qty(b["qty_bought"]), qty_sold=_q_qty(b["qty_sold"]),
             current_qty=qty, cost_basis=cost, fees=_q_amount(b["fees"]),
             dividends=_q_amount(b["dividends"]), interest=_q_amount(b["interest"]),
-            amount_sold=_q_amount(b["amount_sold"]), realized=realized, price=price,
+            amount_sold=amount_sold, realized=realized, price=price,
             market_value=mv, unrealized=unrealized, gain=gain, income=income,
-            total_return=_q_amount(gain + income),
+            total_return=total_return, invested=invested,
+            return_pct=_return_pct(total_return, invested),
         )
         rows.append(row)
         for k in _PERF_MONEY_TOTALS:
             totals[k] += getattr(row, k)
-    rows.sort(key=lambda r: (r.market_value, r.total_return), reverse=True)
-    return {"rows": rows, "totals": {k: _q_amount(v) for k, v in totals.items()}}
+    # Best performer first (by % return), rows with no invested basis (income only) last.
+    rows.sort(key=lambda r: (r.return_pct is not None, r.return_pct or ZERO), reverse=True)
+    money_totals = {k: _q_amount(v) for k, v in totals.items()}
+    money_totals["return_pct"] = _return_pct(money_totals["total_return"], money_totals["invested"])
+    return {"rows": rows, "totals": money_totals}
 
 
 def income_summary(account) -> dict:

@@ -16,6 +16,7 @@ Performance tabs. Wide by design — c-table scrolls horizontally.{% endcomment 
     <th class="col-num">Price</th>
     <th class="col-num">Gain</th>
     <th class="col-num">Total return</th>
+    <th class="col-num">Return %</th>
   </tr></thead>
   <tbody>
     {% for r in rows %}
@@ -37,6 +38,7 @@ Performance tabs. Wide by design — c-table scrolls horizontally.{% endcomment 
       <td class="col-num">{% if r.price %}<c-money :amount="r.price" symbol="{{ sym }}" dp="2" grouping="{{ ui_number_format }}" />{% else %}<span class="subtle">—</span>{% endif %}</td>
       <td class="col-num">{% if r.gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="r.gain" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
       <td class="col-num">{% if r.total_return >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="r.total_return" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
+      <td class="col-num tnum">{% if r.return_pct is not None %}<span class="{% if r.return_pct >= 0 %}amount-pos{% else %}amount-neg{% endif %}">{{ r.return_pct|floatformat:2 }}%</span>{% else %}<span class="subtle">—</span>{% endif %}</td>
     </tr>
     {% endfor %}
   </tbody>
@@ -51,6 +53,7 @@ Performance tabs. Wide by design — c-table scrolls horizontally.{% endcomment 
     <td></td>
     <td class="col-num strong">{% if totals.gain >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="totals.gain" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
     <td class="col-num strong">{% if totals.total_return >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="totals.total_return" symbol="{{ sym }}" dp="{{ dp }}" grouping="{{ ui_number_format }}" /></span></td>
+    <td class="col-num strong">{% if totals.return_pct is not None %}<span class="{% if totals.return_pct >= 0 %}amount-pos{% else %}amount-neg{% endif %}">{{ totals.return_pct|floatformat:2 }}%</span>{% endif %}</td>
   </tr></tfoot>
 </c-table>
 {% else %}

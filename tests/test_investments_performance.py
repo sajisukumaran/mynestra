@@ -102,6 +102,8 @@ def test_performance_row_columns(make_tenant):
         assert a.gain == D("675")           # realized 198 + unrealized 477
         assert a.income == D("30")
         assert a.total_return == D("705")   # gain 675 + income 30
+        assert a.invested == D("1005")      # (600 − 198) sold cost + 603 held
+        assert a.return_pct == D("70.15")   # 705 / 1005 × 100
 
 
 def test_fully_sold_instrument_still_appears(make_tenant):
@@ -117,6 +119,8 @@ def test_fully_sold_instrument_still_appears(make_tenant):
         assert m.realized == D("100")        # 600 − 500
         assert m.gain == D("100")            # realized only (no unrealized)
         assert m.price is None
+        assert m.invested == D("500")        # fully sold: (600 − 100) sold cost, 0 held
+        assert m.return_pct == D("20.00")    # 100 / 500 × 100 — works for a sold position
 
 
 def test_income_only_instrument_and_totals(make_tenant):
@@ -130,6 +134,8 @@ def test_income_only_instrument_and_totals(make_tenant):
         assert b.income == D("40")
         assert b.total_return == D("40")
         assert b.current_qty == D("0")
+        assert b.invested == D("0")          # never bought — nothing invested
+        assert b.return_pct is None          # return on $0 is undefined, not infinite
 
         totals = report["totals"]
         assert totals["dividends"] == D("30")
@@ -138,6 +144,8 @@ def test_income_only_instrument_and_totals(make_tenant):
         assert totals["realized"] == D("298")      # AAPL 198 + MSFT 100
         assert totals["gain"] == D("775")          # AAPL 675 + MSFT 100
         assert totals["total_return"] == D("845")  # gain 775 + income 70
+        assert totals["invested"] == D("1505")     # AAPL 1005 + MSFT 500
+        assert totals["return_pct"] == D("56.15")  # 845 / 1505 × 100
 
 
 def test_account_detail_renders_performance_tab(make_tenant, make_user, client):
@@ -149,6 +157,7 @@ def test_account_detail_renders_performance_tab(make_tenant, make_user, client):
     body = client.get(_url(tenant, f"accounts/{acct.pk}/")).content.decode()
     assert "Performance" in body
     assert "Total return" in body
+    assert "Return %" in body
     assert "AAPL" in body
 
 
@@ -162,4 +171,5 @@ def test_institution_detail_renders_performance_tab(make_tenant, make_user, clie
     body = client.get(_url(tenant, f"institutions/{org_pk}/")).content.decode()
     assert "Performance" in body
     assert "Total return" in body
+    assert "Return %" in body
     assert acct.nickname in body
