@@ -49,7 +49,8 @@ def test_create_account(make_tenant):
     tenant = make_tenant()
     with schema_context(tenant.schema_name):
         acct = create_account(
-            code="5150", name="Subscriptions", account_type=AccountType.EXPENSE,
+            # 5155: an unseeded code (5150 became the seeded Home Insurance account).
+            code="5155", name="Subscriptions", account_type=AccountType.EXPENSE,
             parent=Account.objects.get(code="5000"),
         )
         assert acct.pk and acct.is_postable and not acct.is_system
