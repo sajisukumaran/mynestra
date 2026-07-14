@@ -22,6 +22,7 @@ from apps.cards.models import (
 )
 from apps.cards.services import (
     POSTING_ACTIVITIES,
+    attach_balances,
     create_matching_leg,
     dashboard_stats,
     ensure_gl_account,
@@ -139,9 +140,10 @@ def credit_list(request):
     qs = qs.order_by(*CARD_SORTS[sort])
     total = CreditCard.objects.count()
     page = Paginator(qs, 12).get_page(request.GET.get("page"))
+    cards = attach_balances(page.object_list)  # batch — no per-row balance aggregate
     ctx = card_context(
         request, "credit",
-        page=page, cards=page.object_list, q=q, sort=sort,
+        page=page, cards=cards, q=q, sort=sort,
         sort_name_next="-nickname" if sort == "nickname" else "nickname",
         sort_added_next="-added" if sort == "added" else "added",
         total=total, base=base_currency(),

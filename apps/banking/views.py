@@ -22,6 +22,7 @@ from apps.banking.models import (
 )
 from apps.banking.services import (
     POSTING_ACTIVITIES,
+    attach_balances,
     cd_maturities,
     create_matching_leg,
     dashboard_stats,
@@ -153,10 +154,11 @@ def account_list(request):
         "cd": BankAccount.objects.filter(account_type=AccountType.CD).count(),
     }
     page = Paginator(qs, 12).get_page(request.GET.get("page"))
+    accounts = attach_balances(page.object_list)  # batch — no per-row balance aggregate
 
     ctx = bank_context(
         request, "accounts",
-        page=page, accounts=page.object_list, q=q, type=atype, sort=sort,
+        page=page, accounts=accounts, q=q, type=atype, sort=sort,
         sort_name_next="-nickname" if sort == "nickname" else "nickname",
         sort_added_next="-added" if sort == "added" else "added",
         total=total, counts=counts, base=base_currency(),

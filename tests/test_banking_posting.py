@@ -266,3 +266,32 @@ def test_signed_amount_sql_matches_property_for_every_type(make_tenant):
         annotated = {t.pk: t.sa for t in acct.transactions.annotate(sa=signed_amount_sql())}
         for t in acct.transactions.all():
             assert annotated[t.pk] == t.signed_amount, t.txn_type
+
+
+def test_attach_balances_matches_per_account_and_stays_flat(make_tenant):
+    """`attach_balances` stamps the SAME figures the per-account properties compute, in a fixed
+    number of grouped queries however many accounts there are — the batch path dashboards, list
+    pages and the launcher use instead of one subtree walk + aggregate per account."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.banking.services import attach_balances
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        a1 = _account(nickname="A1", number="111")
+        a2 = _account(nickname="A2", number="222")
+        _txn(a1, TxnType.OPENING, "1000")
+        _txn(a1, TxnType.WITHDRAWAL, "250")
+        _txn(a2, TxnType.OPENING, "500")
+
+        # Per-account slow path (fresh instances → no stamps).
+        expected = {a.pk: (a.balance, a.display_balance) for a in BankAccount.objects.all()}
+        fresh = list(BankAccount.objects.all())
+        with CaptureQueriesContext(connection) as ctx:
+            attach_balances(fresh)
+            got = {a.pk: (a.balance, a.display_balance) for a in fresh}
+        assert got == expected
+        assert expected[a1.pk][0] == D("750")
+        # gl-account load + COA tree scan + grouped base + grouped native = 4, however many rows.
+        assert len(ctx.captured_queries) <= 4

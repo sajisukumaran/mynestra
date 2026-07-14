@@ -677,6 +677,56 @@ def account_native_balance(account, *, as_of=None) -> Decimal | None:
     return raw * account.normal_sign
 
 
+def account_balances(accounts, *, as_of=None) -> dict[int, Decimal]:
+    """Natural base-currency balances for MANY accounts at once, keyed by account pk — the batch
+    twin of `account_balance` (headers roll up their subtree identically). TWO queries total (one
+    COA tree scan + one grouped aggregate) instead of a subtree walk + full aggregate per account;
+    this is what dashboards / list pages / the launcher should call inside loops."""
+    targets = list(accounts)
+    if not targets:
+        return {}
+    children: dict[int | None, list[int]] = {}
+    for pk, parent_id in Account.objects.values_list("pk", "parent_id"):
+        children.setdefault(parent_id, []).append(pk)
+    subtree: dict[int, list[int]] = {}
+    for target in targets:
+        ids = [target.pk]
+        stack = [target.pk]
+        while stack:
+            for child in children.get(stack.pop(), []):
+                ids.append(child)
+                stack.append(child)
+        subtree[target.pk] = ids
+    all_ids = {i for ids in subtree.values() for i in ids}
+    grouped = (
+        _posted_lines(as_of).filter(account_id__in=all_ids)
+        .values("account_id").annotate(d=Sum("base_debit"), c=Sum("base_credit"))
+    )
+    own = {r["account_id"]: (r["d"] or ZERO) - (r["c"] or ZERO) for r in grouped}
+    return {
+        t.pk: sum((own.get(i, ZERO) for i in subtree[t.pk]), ZERO) * t.normal_sign
+        for t in targets
+    }
+
+
+def account_native_balances(accounts) -> dict[int, Decimal]:
+    """Own-currency balances for MANY currency-tagged accounts in ONE grouped aggregate, keyed by
+    account pk — the batch twin of `account_native_balance` (accounts without a currency are
+    skipped). Missing keys mean no postings (a zero balance)."""
+    by_pk = {a.pk: a for a in accounts if a.currency_id is not None}
+    if not by_pk:
+        return {}
+    grouped = (
+        _posted_lines(None).filter(account_id__in=by_pk)
+        .values("account_id").annotate(d=Sum("debit"), c=Sum("credit"))
+    )
+    return {
+        r["account_id"]:
+            ((r["d"] or ZERO) - (r["c"] or ZERO)) * by_pk[r["account_id"]].normal_sign
+        for r in grouped
+    }
+
+
 def trial_balance(*, as_of=None) -> list[TrialBalanceRow]:
     """One row per account with posted activity; Σ debit_total == Σ credit_total (base)."""
     grouped = (

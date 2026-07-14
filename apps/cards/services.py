@@ -270,16 +270,33 @@ def register(card: CreditCard, *, page=1, per_page=REGISTER_PER_PAGE) -> dict:
     return {"rows": rows, "page_obj": page_obj, "total": page_obj.paginator.count}
 
 
+def attach_balances(cards) -> list[CreditCard]:
+    """Stamp each card's base + native balance owed from the batch finance aggregates (three
+    grouped queries TOTAL, however many cards), so `c.balance` / `c.display_balance` /
+    `c.utilization` in a loop or a template row no longer fire an aggregate per card."""
+    from apps.finance.services import account_balances, account_native_balances
+
+    cards = list(cards)
+    gl_ids = [c.gl_account_id for c in cards if c.gl_account_id]
+    gl_accounts = list(Account.objects.filter(pk__in=gl_ids))
+    base = account_balances(gl_accounts)
+    native = account_native_balances(gl_accounts)
+    for c in cards:
+        c._balance = base.get(c.gl_account_id, ZERO)
+        c._native_balance = native.get(c.gl_account_id, ZERO)
+    return cards
+
+
 def total_owed() -> Decimal:
     """Sum of all credit-card balances owed, in the base currency."""
-    return sum((c.balance for c in CreditCard.objects.all()), ZERO)
+    return sum((c.balance for c in attach_balances(CreditCard.objects.all())), ZERO)
 
 
 def dashboard_stats() -> dict:
     """Headline figures for the Cards dashboard."""
     today = datetime.date.today()
     month_start = today.replace(day=1)
-    credit_cards = list(CreditCard.objects.select_related("issuer"))
+    credit_cards = attach_balances(CreditCard.objects.select_related("issuer"))
     return {
         "credit_count": len(credit_cards),
         "debit_count": DebitCard.objects.count(),

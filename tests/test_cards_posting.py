@@ -271,3 +271,31 @@ def test_cardholder_p2o_sync(make_tenant):
         assert PersonOrgRelationship.objects.filter(
             person=person, organization=card.issuer, type__code="cardholder"
         ).exists()
+
+
+def test_attach_balances_matches_per_card_and_stays_flat(make_tenant):
+    """`attach_balances` stamps the SAME figures the per-card properties compute, in a fixed
+    number of grouped queries however many cards there are — the batch path the dashboard, list
+    page and launcher 'Owed' tile use instead of one subtree walk + aggregate per card."""
+    from django.db import connection
+    from django.test.utils import CaptureQueriesContext
+
+    from apps.cards.services import attach_balances
+
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        c1 = _card(nickname="C1", number="411111111111")
+        c2 = _card(nickname="C2", number="422222222222")
+        _txn(c1, CardTxnType.CHARGE, "300")
+        _txn(c1, CardTxnType.PAYMENT, "100", counter_external="HDFC")
+        _txn(c2, CardTxnType.CHARGE, "40")
+
+        expected = {c.pk: (c.balance, c.display_balance) for c in CreditCard.objects.all()}
+        fresh = list(CreditCard.objects.all())
+        with CaptureQueriesContext(connection) as ctx:
+            attach_balances(fresh)
+            got = {c.pk: (c.balance, c.display_balance) for c in fresh}
+        assert got == expected
+        assert expected[c1.pk][0] == D("200")
+        # gl-account load + COA tree scan + grouped base + grouped native = 4, however many rows.
+        assert len(ctx.captured_queries) <= 4

@@ -130,7 +130,11 @@ class BankAccount(SoftDeleteModel):
 
     @property
     def balance(self):
-        """Current base-currency balance, computed from posted ledger lines."""
+        """Current base-currency balance, computed from posted ledger lines. Honors a value
+        stamped by `services.attach_balances` so list/dashboard loops don't aggregate per row."""
+        stamped = getattr(self, "_balance", None)
+        if stamped is not None:
+            return stamped
         if self.gl_account_id is None:
             from apps.finance.models import ZERO
 
@@ -141,7 +145,11 @@ class BankAccount(SoftDeleteModel):
 
     @property
     def native_balance(self):
-        """Balance in the account's own currency (equals `balance` when that is the base)."""
+        """Balance in the account's own currency (equals `balance` when that is the base).
+        Honors a value stamped by `services.attach_balances`."""
+        stamped = getattr(self, "_native_balance", None)
+        if stamped is not None:
+            return stamped
         if self.gl_account_id is None:
             return None
         from apps.finance.services import account_native_balance

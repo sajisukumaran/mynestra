@@ -127,7 +127,11 @@ class CreditCard(SoftDeleteModel):
 
     @property
     def balance(self):
-        """Current balance owed, in the base currency (positive = you owe). Computed from the GL."""
+        """Current balance owed, in the base currency (positive = you owe). Computed from the GL.
+        Honors a value stamped by `services.attach_balances` so loops don't aggregate per row."""
+        stamped = getattr(self, "_balance", None)
+        if stamped is not None:
+            return stamped
         if self.gl_account_id is None:
             return ZERO
         from apps.finance.services import account_balance
@@ -136,6 +140,10 @@ class CreditCard(SoftDeleteModel):
 
     @property
     def native_balance(self):
+        """Honors a value stamped by `services.attach_balances`."""
+        stamped = getattr(self, "_native_balance", None)
+        if stamped is not None:
+            return stamped
         if self.gl_account_id is None:
             return None
         from apps.finance.services import account_native_balance

@@ -281,16 +281,33 @@ def register(account: BankAccount, *, page=1, per_page=REGISTER_PER_PAGE) -> dic
     return {"rows": rows, "page_obj": page_obj, "total": page_obj.paginator.count}
 
 
+def attach_balances(accounts) -> list[BankAccount]:
+    """Stamp each account's base + native balance from the batch finance aggregates (three grouped
+    queries TOTAL, however many accounts), so `a.balance` / `a.display_balance` in a loop or a
+    template row no longer fire a subtree walk + full aggregate per account."""
+    from apps.finance.services import account_balances, account_native_balances
+
+    accounts = list(accounts)
+    gl_ids = [a.gl_account_id for a in accounts if a.gl_account_id]
+    gl_accounts = list(Account.objects.filter(pk__in=gl_ids))
+    base = account_balances(gl_accounts)
+    native = account_native_balances(gl_accounts)
+    for a in accounts:
+        a._balance = base.get(a.gl_account_id, ZERO)
+        a._native_balance = native.get(a.gl_account_id, ZERO)
+    return accounts
+
+
 def total_balance() -> Decimal:
     """Sum of all bank-account balances, in the base currency."""
-    return sum((a.balance for a in BankAccount.objects.all()), ZERO)
+    return sum((a.balance for a in attach_balances(BankAccount.objects.all())), ZERO)
 
 
 def dashboard_stats() -> dict:
     """Headline figures for the Banking dashboard."""
     today = datetime.date.today()
     month_start = today.replace(day=1)
-    accounts = list(BankAccount.objects.select_related("bank"))
+    accounts = attach_balances(BankAccount.objects.select_related("bank"))
     return {
         "accounts_count": len(accounts),
         "banks_count": len({a.bank_id for a in accounts}),
