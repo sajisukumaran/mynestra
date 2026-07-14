@@ -286,6 +286,10 @@ class BankTransaction(SoftDeleteModel):
 
     class Meta:
         ordering = ["-date", "-id"]
+        indexes = [
+            # The register's display/window order — per-account (date, id) scans read the index.
+            models.Index(fields=["account", "date", "id"], name="banktxn_account_date_id"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=~models.Q(

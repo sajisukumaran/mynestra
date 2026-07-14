@@ -753,6 +753,11 @@ class InvestmentTransaction(SoftDeleteModel):
 
     class Meta:
         ordering = ["-date", "-id"]
+        indexes = [
+            # The register's replay/window order — lets per-account (date, id) scans read the
+            # index instead of sorting the whole register.
+            models.Index(fields=["account", "date", "id"], name="invtxn_account_date_id"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=~models.Q(
@@ -931,6 +936,15 @@ class Lot(TimeStampedModel):
 
     class Meta:
         ordering = ["acquired_date", "id"]
+        indexes = [
+            # Open-position reads (holdings, the lot engine's open_lots, batch totals) all filter
+            # open=True per account/security — a partial index keeps them off the closed tail.
+            models.Index(
+                fields=["account", "security"],
+                condition=models.Q(open=True),
+                name="lot_open_acct_security",
+            ),
+        ]
 
     def __str__(self) -> str:
         return f"{self.remaining_quantity} {self.security} @ {self.acquired_date}"

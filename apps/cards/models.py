@@ -265,6 +265,10 @@ class CreditCardTransaction(SoftDeleteModel):
 
     class Meta:
         ordering = ["-date", "-id"]
+        indexes = [
+            # The register's display/window order — per-card (date, id) scans read the index.
+            models.Index(fields=["card", "date", "id"], name="cardtxn_card_date_id"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=~models.Q(

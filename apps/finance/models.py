@@ -351,6 +351,11 @@ class JournalLine(TimeStampedModel):
 
     class Meta:
         ordering = ["id"]
+        indexes = [
+            # Balance aggregates filter account_id (+status via the entry join) — the composite
+            # keeps the join off a per-line entry lookup.
+            models.Index(fields=["account", "entry"], name="jline_account_entry"),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=(
