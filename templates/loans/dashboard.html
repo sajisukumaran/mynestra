@@ -1,0 +1,71 @@
+{% extends "loans/base.html" %}
+{% block loans_heading %}Dashboard{% endblock %}
+
+{% block loans %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Loans</span></c-breadcrumb>
+
+<c-page-header title="Loans &amp; liabilities" subtitle="A consolidated view of everything you owe.">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}loans/new/"><c-icon name="plus" /> New loan</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="banknote" tint="rose" value="" label="Total owed">
+      <c-slot name="foot"><c-money :amount="total_owed" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" class="strong" />{% if contingent_owed %} · <c-money :amount="contingent_owed" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> contingent{% endif %}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="landmark" tint="blue" value="{{ loans_count }}" label="Active loans">
+      <c-slot name="foot">across the household</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="calendar-days" tint="amber" value="" label="Est. monthly payment">
+      <c-slot name="foot"><c-money :amount="monthly_obligation" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="percent" tint="violet" value="" label="Interest paid (YTD)">
+      <c-slot name="foot"><c-money :amount="interest_ytd" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="pie-chart" title="Balance by type">
+      {% if donut_total %}
+      <c-donut :segments="donut_segments" :total="donut_total" total_label="Owed" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
+      {% else %}
+      <c-empty-state icon="pie-chart" title="No balances yet" text="Add a loan to see the breakdown by type." />
+      {% endif %}
+    </c-card>
+    <c-card icon="landmark" title="Balance by lender">
+      {% if bar_total %}
+      <c-bar-list :items="bar_items" :total="bar_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
+      {% else %}
+      <c-empty-state icon="landmark" title="No lenders yet" text="Balances grouped by who you owe show up here." />
+      {% endif %}
+    </c-card>
+  </div>
+
+  {% if due %}
+  <c-card icon="calendar-days" title="Payments due soon">
+    {% for d in due %}
+    <c-rel-row name="{{ d.loan.nickname }}" role="{{ d.loan.type_label }}{% if d.loan.lender_name %} · {{ d.loan.lender_name }}{% endif %} · due {{ d.date|date:'d M Y' }}" href="{{ ui_tenant_url }}loans/{{ d.loan.pk }}/">
+      <c-slot name="avatar"><c-avatar tint="{{ d.loan.type_tint }}" size="sm" square><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail">
+        <span class="row"><c-money :amount="d.amount" symbol="{{ d.loan.currency.symbol }}" dp="{{ d.loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" />
+        {% if d.days < 0 %}<c-badge variant="warning">Overdue</c-badge>{% elif d.days <= 7 %}<c-badge variant="warning">{{ d.days }} {{ d.days|pluralize:'day,days' }}</c-badge>{% else %}<c-badge variant="info">{{ d.days }} days</c-badge>{% endif %}</span>
+      </c-slot>
+    </c-rel-row>
+    {% endfor %}
+  </c-card>
+  {% endif %}
+
+  <c-card icon="clock" title="Recent activity">
+    {% for t in recent %}
+    <c-rel-row name="{{ t.loan.nickname }}" role="{{ t.type_label }}{% if t.memo %} · {{ t.memo }}{% endif %}" href="{{ ui_tenant_url }}loans/{{ t.loan_id }}/">
+      <c-slot name="avatar"><c-avatar tint="{{ t.loan.type_tint }}" size="sm"><c-icon name="{{ t.type_glyph }}" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><span class="{% if t.is_inflow %}amount-neg{% else %}amount-pos{% endif %}"><c-money :amount="t.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></span></c-slot>
+    </c-rel-row>
+    {% empty %}
+    <c-empty-state icon="clock" title="No activity yet" text="Payments, draws, interest and fees show up here." />
+    {% endfor %}
+  </c-card>
+</div>
+{% endblock %}

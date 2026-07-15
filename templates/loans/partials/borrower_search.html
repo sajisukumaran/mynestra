@@ -1,0 +1,13 @@
+{% comment %}htmx fragment: people for the borrower picker's "add someone else" search. Each button
+adds a borrower row via the form's Alpine add() (presentation only).{% endcomment %}
+{% for p in candidates %}
+<button type="button" class="rel-pick" data-id="{{ p.pk }}"
+        data-name="{{ p.display_name }}" data-tint="{{ p.avatar_tint }}" data-initials="{{ p.initials }}"
+        @click="add($el.dataset)">
+  <c-avatar tint="{{ p.avatar_tint }}" size="sm">{{ p.initials }}</c-avatar>
+  <div class="grow"><div class="r-name">{{ p.display_name }}</div><div class="r-role">{{ p.list_subtitle }}</div></div>
+</button>
+{% endfor %}
+{% if not candidates %}
+<div class="rel-empty">{% if q %}No matches for “{{ q }}”.{% else %}Type to search people.{% endif %}</div>
+{% endif %}

@@ -29,15 +29,17 @@ from apps.finance.services import (
     resolve_posting_account,
     reverse_entry,
 )
-from apps.loans.amortization import payoff_projection
+from apps.loans.amortization import next_payment_date, payoff_projection
 from apps.loans.models import (
     LOAN_TYPE_PARENT,
+    LOAN_TYPE_TINT,
     PERIODS_PER_YEAR,
     SPLIT_TYPES,
     Funding,
     Loan,
     LoanTransaction,
     LoanTxnType,
+    LoanType,
 )
 
 # Fixed contra accounts (resolved by stable system_key / code). Category activities are remappable
@@ -481,6 +483,114 @@ def loan_value_series(loan, *, today=None, extra_principal=ZERO) -> dict:
         "remaining_interest": projection.get("remaining_interest", ZERO),
         "current_balance": running if actual else ZERO,
     }
+
+
+def _interest_ytd() -> Decimal:
+    """Total interest booked this calendar year across all loans (payments' interest + INTEREST
+    transactions) — the dashboard's tax-relevant figure."""
+    total = ZERO
+    for txn in LoanTransaction.objects.filter(date__year=datetime.date.today().year):
+        if txn.txn_type in SPLIT_TYPES:
+            total += txn.interest
+        elif txn.txn_type == LoanTxnType.INTEREST:
+            total += txn.amount
+    return total
+
+
+def dashboard_stats() -> dict:
+    """Headline figures for the consolidated Loans dashboard. Total owed is split into the part that
+    counts toward net worth and the contingent (off net worth) part."""
+    loans = list(
+        Loan.objects.filter(is_active=True).select_related(
+            "currency", "gl_account", "lender_person", "lender_organization"
+        )
+    )
+    total = contingent = ZERO
+    for loan in loans:
+        bal = loan.balance
+        total += bal
+        if not loan.counts_toward_net_worth:
+            contingent += bal
+    return {
+        "loans_count": len(loans),
+        "total_owed": total,
+        "networth_owed": total - contingent,
+        "contingent_owed": contingent,
+        "monthly_obligation": monthly_obligation(loans),
+        "interest_ytd": _interest_ytd(),
+        "loans": loans,
+    }
+
+
+def payments_due(within_days: int = 45) -> list[dict]:
+    """The next scheduled payment for each active installment loan due within the window, soonest
+    first (past-due-but-open first). The due date is stepped from the later of the last recorded
+    payment or the first-payment date, then rolled forward to at least today."""
+    today = datetime.date.today()
+    horizon = today + datetime.timedelta(days=within_days)
+    rows = []
+    for loan in Loan.objects.filter(is_active=True).select_related(
+        "lender_person", "lender_organization", "gl_account", "currency"
+    ):
+        if not loan.is_installment or not loan.payment_amount or loan.is_paid_off:
+            continue
+        last = (
+            loan.transactions.filter(txn_type__in=list(SPLIT_TYPES))
+            .order_by("-date", "-id")
+            .first()
+        )
+        if last is not None:
+            due = next_payment_date(last.date, loan.payment_frequency, loan.payment_day)
+        elif loan.first_payment_date is not None:
+            due = loan.first_payment_date
+        else:
+            due = next_payment_date(today, loan.payment_frequency, loan.payment_day)
+        guard = 0
+        while due < today and guard < 1000:
+            due = next_payment_date(due, loan.payment_frequency, loan.payment_day)
+            guard += 1
+        if due <= horizon:
+            rows.append(
+                {
+                    "loan": loan, "date": due, "amount": loan.payment_amount,
+                    "days": (due - today).days,
+                }
+            )
+    rows.sort(key=lambda r: r["date"])
+    return rows
+
+
+def by_type_segments(loans):
+    """(c-donut segments, total) of balance owed grouped by loan_type."""
+    from apps.investments.services import Slice, donut_segments
+
+    labels = dict(LoanType.choices)
+    buckets: dict = {}
+    for loan in loans:
+        bal = loan.balance
+        if bal <= ZERO:
+            continue
+        buckets[loan.loan_type] = buckets.get(loan.loan_type, ZERO) + bal
+    slices = [
+        Slice(labels.get(lt, lt), value, LOAN_TYPE_TINT.get(lt, "slate"))
+        for lt, value in buckets.items()
+    ]
+    slices.sort(key=lambda s: s.value, reverse=True)
+    return donut_segments(slices), sum((s.value for s in slices), ZERO)
+
+
+def lender_bars(loans):
+    """(c-bar-list items, total) of balance owed grouped by lender."""
+    buckets: dict = {}
+    for loan in loans:
+        bal = loan.balance
+        if bal <= ZERO:
+            continue
+        name = loan.lender_name or "No lender"
+        bucket = buckets.setdefault(name, {"label": name, "value": ZERO, "tint": loan.lender_tint})
+        bucket["value"] += bal
+    items = sorted(buckets.values(), key=lambda i: i["value"], reverse=True)
+    return items, sum((i["value"] for i in items), ZERO)
 
 
 def loan_chart_points(actual, projected, *, min_v, max_v, start, end,

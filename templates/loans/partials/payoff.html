@@ -1,0 +1,12 @@
+{% comment %}htmx fragment: the what-if paydown projection (re-rendered for a given extra payment).
+Swapped in via outerHTML on #payoff-result.{% endcomment %}
+<div id="payoff-result" class="stack-16">
+  <c-loan-chart :geo="loan_geo" :balance="loan.balance" :payoff="payoff_date" :interest="remaining_interest"
+                symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}"
+                empty_text="No projection — add the loan's rate, term and payment." />
+  {% if payoff_date %}
+  <p class="muted">Projected payoff <span class="strong">{{ payoff_date|date:"M Y" }}</span> · remaining interest
+    <c-money :amount="remaining_interest" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" />{% if extra and interest_saved > 0 %} · with this extra you'd save
+    <c-money :amount="interest_saved" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong amount-pos" /> in interest{% endif %}</p>
+  {% endif %}
+</div>

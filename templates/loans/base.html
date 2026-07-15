@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}Loans app shell: topbar + Loans per-app sidebar. Composes the kit (no mockup).{% endcomment %}
+{% block title %}{% block loans_heading %}Loans{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Loans" subtitle="{{ ui_tenant_name }}" glyph="banknote">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}loans/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Loans" icon="banknote" count="{{ nav_loans }}" href="{{ ui_tenant_url }}loans/all/" {% if active == 'loans' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block loans %}{% endblock %}
+</c-shell>
+{% endblock %}

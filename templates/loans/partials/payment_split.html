@@ -1,0 +1,6 @@
+{% comment %}htmx fragment: the suggested interest/principal split for a payment. The Apply button
+sets the enclosing payment form's Alpine interest/principal via applySplit (pure assignment).{% endcomment %}
+<div class="rel-preview">
+  <span class="grow">Suggested — interest <b><c-money :amount="split.interest" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" /></b>, principal <b><c-money :amount="split.principal" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" /></b></span>
+  <c-button type="button" size="sm" @click="applySplit('{{ split.interest }}', '{{ split.principal }}')">Apply</c-button>
+</div>

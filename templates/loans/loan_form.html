@@ -1,0 +1,203 @@
+{% extends "loans/base.html" %}
+{% block loans_heading %}{% if mode == 'create' %}New loan{% else %}Edit loan{% endif %}{% endblock %}
+
+{% block loans %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}loans/">Loans</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}loans/{{ loan.pk }}/">{{ loan.nickname }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New loan{% else %}Edit loan{% endif %}" subtitle="Fields marked * are required." />
+
+{% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
+
+<form method="post">{% csrf_token %}
+  <div class="stack stack-20"
+       x-data="{ ltype: '{{ loan.loan_type|default:'personal' }}',
+                 installmentTypes: ['mortgage','auto','student','personal'],
+                 revolvingTypes: ['heloc','line_of_credit'],
+                 lenderKind: '{{ lender_kind }}', lenderId: '{% if lender_kind == 'person' %}{{ loan.lender_person_id|default:'' }}{% elif lender_kind == 'organization' %}{{ loan.lender_organization_id|default:'' }}{% endif %}',
+                 lenderName: '{{ lender_name|escapejs }}', lenderTint: '{{ lender_tint }}', lenderInit: '{{ lender_init }}',
+                 pickParty(d){ this.lenderKind=d.kind==='org'?'organization':'person'; this.lenderId=d.id; this.lenderName=d.name; this.lenderTint=d.tint||'slate'; this.lenderInit=d.initials||'?'; },
+                 clearParty(){ this.lenderKind=''; this.lenderId=''; } }">
+
+    <c-card title="Loan" icon="banknote">
+      <div class="form-grid">
+        <c-field label="Type" required>
+          <c-select name="loan_type" x-model="ltype">
+            {% for val, label in loan_types %}<option value="{{ val }}"{% if loan.loan_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Nickname" required error="{{ form.nickname.errors.0 }}"><div class="control">{{ form.nickname }}</div></c-field>
+        <c-field label="Currency" required>
+          <c-select name="currency">
+            {% for c in currencies %}<option value="{{ c.code }}"{% if loan.currency_id == c.code %} selected{% elif not loan.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+
+      <c-field label="Lender" help="The bank, organization or person you owe (optional for a generic liability).">
+        <div x-show="!lenderId">
+          <c-input type="search" name="lender_q" autocomplete="off" placeholder="Search organizations or people…"
+                   hx-get="{{ ui_tenant_url }}loans/lender-search/" hx-trigger="input changed delay:200ms, focus"
+                   hx-target="#lender-results" />
+          <div id="lender-results" class="rel-results"></div>
+        </div>
+        <div x-show="lenderId" x-cloak class="rel">
+          <span class="avatar a-sm" :class="'av-'+lenderTint" x-text="lenderInit"></span>
+          <div class="grow"><div class="r-name" x-text="lenderName"></div><div class="r-role" x-text="lenderKind === 'organization' ? 'Organization' : 'Person'"></div></div>
+          <c-button type="button" variant="ghost" size="sm" @click="clearParty()"><c-icon name="x" size="sm" /> Change</c-button>
+        </div>
+      </c-field>
+      <input type="hidden" name="lender_person" :value="lenderKind === 'person' ? lenderId : ''">
+      <input type="hidden" name="lender_organization" :value="lenderKind === 'organization' ? lenderId : ''">
+
+      <div class="form-grid">
+        <c-field label="Account number"><div class="control">{{ form.account_number }}</div></c-field>
+      </div>
+      <label class="row"><input type="checkbox" name="counts_toward_net_worth"{% if mode == 'create' or loan.counts_toward_net_worth %} checked{% endif %}> <span class="muted">Counts toward my net worth</span></label>
+      <c-hint icon="info">Turn this off for a co-signed or guaranteed loan that someone else pays — it stays tracked here but won't affect your net worth.</c-hint>
+      <label class="row">{{ form.is_active }} <span class="muted">Active</span></label>
+    </c-card>
+
+    {# Installment terms #}
+    <c-card title="Terms" icon="percent" x-show="installmentTypes.includes(ltype)" x-cloak>
+      <div class="form-grid">
+        <c-field label="Original principal"><div class="control"><input name="principal_original" inputmode="decimal" placeholder="0.00" value="{{ loan.principal_original|default:'' }}"></div></c-field>
+        <c-field label="APR %" help="Annual rate, e.g. 6.5"><div class="control"><input name="annual_rate" inputmode="decimal" placeholder="0.00" value="{{ loan.annual_rate|default:'' }}"></div></c-field>
+        <c-field label="Rate type">
+          <c-select name="rate_type">{% for val, label in rate_types %}<option value="{{ val }}"{% if loan.rate_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Term (months)"><div class="control"><input name="term_months" inputmode="numeric" placeholder="360" value="{{ loan.term_months|default:'' }}"></div></c-field>
+        <c-field label="Payment frequency">
+          <c-select name="payment_frequency">{% for val, label in frequencies %}<option value="{{ val }}"{% if loan.payment_frequency == val %} selected{% elif not loan.pk and val == 'monthly' %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Payment amount" help="Scheduled principal + interest"><div class="control"><input name="payment_amount" inputmode="decimal" placeholder="0.00" value="{{ loan.payment_amount|default:'' }}"></div></c-field>
+        <c-field label="Escrow / payment" help="Tax + insurance in the payment (mortgages)"><div class="control"><input name="escrow_amount" inputmode="decimal" placeholder="0.00" value="{{ loan.escrow_amount|default:'' }}"></div></c-field>
+        <c-field label="Payment day" help="Day of month due (1–31)"><div class="control"><input name="payment_day" inputmode="numeric" placeholder="1" value="{{ loan.payment_day|default:'' }}"></div></c-field>
+        <c-field label="Start date"><div class="control"><input type="date" name="start_date" value="{{ loan.start_date|date:'Y-m-d' }}"></div></c-field>
+        <c-field label="First payment date"><div class="control"><input type="date" name="first_payment_date" value="{{ loan.first_payment_date|date:'Y-m-d' }}"></div></c-field>
+      </div>
+    </c-card>
+
+    {# Revolving terms #}
+    <c-card title="Credit line" icon="percent" x-show="revolvingTypes.includes(ltype)" x-cloak>
+      <div class="form-grid">
+        <c-field label="Credit limit"><div class="control"><input name="credit_limit" inputmode="decimal" placeholder="0.00" value="{{ loan.credit_limit|default:'' }}"></div></c-field>
+        <c-field label="APR %"><div class="control"><input name="annual_rate" inputmode="decimal" placeholder="0.00" value="{{ loan.annual_rate|default:'' }}"></div></c-field>
+        <c-field label="Rate type">
+          <c-select name="rate_type">{% for val, label in rate_types %}<option value="{{ val }}"{% if loan.rate_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+      </div>
+      <c-hint icon="info">A revolving line has no fixed amortization schedule — its balance moves with draws, interest and payments.</c-hint>
+    </c-card>
+
+    {# Borrowers #}
+    <c-card title="Borrowers" icon="users">
+      <div class="stack stack-16"
+           x-data="{
+             rows: JSON.parse(document.getElementById('borrower-rows-data').textContent),
+             add(d){ if(!this.rows.some(r => String(r.id) === String(d.id))){ this.rows.push({ id: d.id, name: d.name, tint: d.tint || 'slate', initials: d.initials || '?', role: 'co_borrower' }); } if(this.$refs.borrowerQ){ this.$refs.borrowerQ.value=''; } },
+             remove(id){ this.rows = this.rows.filter(r => String(r.id) !== String(id)); }
+           }">
+        <c-field label="Household members" help="Tap to add the people on this loan (e.g. your child as the primary borrower, you as co-signer).">
+          <div class="row wrap">
+            {% for p in people %}
+            <c-button type="button" variant="ghost" size="sm" data-id="{{ p.pk }}" data-name="{{ p.display_name }}" data-tint="{{ p.avatar_tint }}" data-initials="{{ p.initials }}" @click="add($el.dataset)"><c-icon name="plus" size="sm" /> {{ p.display_name }}</c-button>
+            {% empty %}<span class="subtle">No household members yet — search below or <a href="{{ ui_tenant_url }}setup/household-members/">add household members</a>.</span>{% endfor %}
+          </div>
+        </c-field>
+
+        <template x-for="r in rows" :key="r.id">
+          <div class="rel">
+            <span class="avatar a-sm" :class="'av-'+r.tint" x-text="r.initials"></span>
+            <div class="grow"><div class="r-name" x-text="r.name"></div></div>
+            <div class="control is-select" style="max-width:180px;">
+              <select x-model="r.role">
+                {% for val, label in borrower_roles %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+            <c-button type="button" variant="ghost" size="sm" @click="remove(r.id)"><c-icon name="x" size="sm" /></c-button>
+            <input type="hidden" name="borrower_person" :value="r.id">
+            <input type="hidden" name="borrower_role" :value="r.role">
+          </div>
+        </template>
+
+        <c-field label="Add someone else" help="Search any contact (e.g. an external relative).">
+          <c-input type="search" name="borrower_q" x-ref="borrowerQ" autocomplete="off" placeholder="Search people…"
+                   hx-get="{{ ui_tenant_url }}loans/borrower-search/" hx-trigger="input changed delay:200ms" hx-target="#borrower-results" />
+          <div id="borrower-results" class="rel-results"></div>
+        </c-field>
+      </div>
+      {{ borrower_rows|json_script:"borrower-rows-data" }}
+    </c-card>
+
+    {% if mode == 'create' %}
+    <c-card title="Starting balance" icon="pin">
+      <div x-data="{ startMode: 'opening' }">
+        <div class="form-grid">
+          <c-field label="How to start" help="Record what you already owe, or disburse a brand-new loan.">
+            <div class="control is-select">
+              <select name="start_mode" x-model="startMode">
+                <option value="opening">Record the current balance owed</option>
+                <option value="disburse">Disburse a new loan</option>
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+          </c-field>
+          <c-field label="Amount"><div class="control"><input name="opening_amount" inputmode="decimal" placeholder="0.00"></div></c-field>
+          <c-field label="As of"><div class="control"><input type="date" name="opening_date" value="{% now 'Y-m-d' %}"></div></c-field>
+          <c-field label="Deposit into account" help="Optional — for a new loan disbursed to your bank." x-show="startMode === 'disburse'" x-cloak>
+            <div class="control is-select">
+              <select name="opening_account">
+                <option value="">— not tracked —</option>
+                {% for a in bank_accounts %}<option value="{{ a.pk }}">{{ a.nickname }} · {{ a.bank.display }}</option>{% endfor %}
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+          </c-field>
+        </div>
+      </div>
+    </c-card>
+    {% endif %}
+
+    {% if ui_expert %}
+    <c-card title="Accounting" icon="sliders-horizontal">
+      <div class="stack stack-16">
+        <p class="muted">Expert mode: choose which expense accounts this loan's interest / escrow / fees post to. Leave a row on <span class="strong">Default</span> to let MyNestra decide.</p>
+        <div class="form-grid">
+          {% for act in posting_activities %}
+          <c-field label="{{ act.label }}">
+            <div class="control is-select">
+              <select name="map_{{ act.key }}">
+                <option value="">Default</option>
+                {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if a.pk == act.current %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+          </c-field>
+          {% endfor %}
+        </div>
+      </div>
+    </c-card>
+    {% endif %}
+
+    <c-card title="Details" icon="calendar-days">
+      <div class="stack stack-16">
+        <div class="grid-halves">
+          <c-field label="Opened"><c-partial-date prefix="opened" day="{{ loan.opened_day|default:'' }}" month="{{ loan.opened_month|default:'' }}" year="{{ loan.opened_year|default:'' }}" /></c-field>
+          <c-field label="Closed" help="Leave blank unless it has closed."><c-partial-date prefix="closed" day="{{ loan.closed_day|default:'' }}" month="{{ loan.closed_month|default:'' }}" year="{{ loan.closed_year|default:'' }}" /></c-field>
+        </div>
+        <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea></c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if error or form.errors %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}loans/{{ loan.pk }}/{% else %}{{ ui_tenant_url }}loans/all/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create loan{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

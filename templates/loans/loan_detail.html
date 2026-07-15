@@ -1,0 +1,243 @@
+{% extends "loans/base.html" %}
+{% block loans_heading %}{{ loan.nickname }}{% endblock %}
+
+{% block loans %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}loans/">Loans</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}loans/all/">Loans</a><c-icon name="chevron-right" />
+  <span class="strong">{{ loan.nickname }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ loan.type_tint }}"><c-icon name="banknote" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ loan.nickname }}</h1>
+          <c-chip tint="{{ loan.type_tint }}">{{ loan.type_label }}</c-chip>
+          {% if loan.is_paid_off %}<c-badge variant="success">Paid off</c-badge>{% endif %}
+          {% if not loan.counts_toward_net_worth %}<c-badge>Contingent — off net worth</c-badge>{% endif %}
+          {% if not loan.is_active %}<c-badge variant="warning">Inactive</c-badge>{% endif %}
+          {% if loan.is_closed %}<c-badge variant="warning">Closed</c-badge>{% endif %}
+        </div>
+        <div class="muted">{% if loan.lender_name %}{{ loan.lender_name }}{% else %}No lender{% endif %}{% if loan.account_number %} · <span class="tnum">{{ loan.account_number }}</span>{% endif %}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><span class="strong"><c-money :amount="loan.display_balance" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span> {{ loan.currency.code }} owed</span>
+          {% if current_rate %}<span class="row"><c-icon name="percent" size="sm" class="subtle" />{{ current_rate|floatformat:'-2' }}% APR{% if loan.rate_type == 'variable' %} · variable{% endif %}</span>{% endif %}
+          {% if loan.term_months %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />{{ loan.term_months }}-month term</span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        {% if current_rate %}
+        <c-modal title="Change interest rate">
+          <c-slot name="trigger"><c-button variant="default"><c-icon name="percent" /> Rate</c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}loans/{{ loan.pk }}/rate/">{% csrf_token %}
+            <div class="stack-16">
+              <p class="muted">Record a rate change for this variable-rate loan. Payments dated on or after it use the new rate.</p>
+              <div class="form-grid">
+                <c-field label="New APR %" required><div class="control"><input name="annual_rate" inputmode="decimal" placeholder="0.00"></div></c-field>
+                <c-field label="Effective date" required><div class="control"><input type="date" name="effective_date" value="{% now 'Y-m-d' %}"></div></c-field>
+              </div>
+              <c-field label="Note"><c-input name="note" placeholder="Optional" /></c-field>
+              <div class="row"><c-button type="submit" variant="primary">Save rate change</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </div>
+          </form>
+        </c-modal>
+        {% endif %}
+        <c-confirm-dialog title="Delete {{ loan.nickname }}?" message="This moves the loan to Recently deleted. Its ledger entries stay posted.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}loans/{{ loan.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}loans/{{ loan.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {# Paydown progress + chart #}
+  <c-card icon="trending-down" title="Paydown">
+    {% if loan.paydown_pct is not None %}
+    <c-meter :value="loan.principal_paid" :max="loan.principal_original" class="stack-16">
+      <span>Paid off <span class="strong"><c-money :amount="loan.principal_paid" symbol="{{ loan.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>
+      <span>{{ loan.paydown_pct|floatformat:'0' }}% of <c-money :amount="loan.principal_original" symbol="{{ loan.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span>
+    </c-meter>
+    {% endif %}
+    <c-loan-chart :geo="loan_geo" :balance="loan.balance" :payoff="payoff_date" :interest="remaining_interest"
+                  symbol="{{ loan.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}"
+                  empty_text="Add the loan's rate, term and payment to project the payoff." />
+  </c-card>
+
+  {% if interest.rows %}
+  <c-card icon="percent" title="Interest paid">
+    <div class="row wrap">
+      {% for r in interest.rows %}
+      <c-chip tint="slate">{{ r.year }} · <c-money :amount="r.amount" symbol="{{ loan.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-chip>
+      {% endfor %}
+      <span class="ml-auto muted">Lifetime <span class="strong"><c-money :amount="interest.total" symbol="{{ loan.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>
+    </div>
+  </c-card>
+  {% endif %}
+
+  {# Tabs #}
+  <div x-data="{ tab: 'register' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'register' }" @click="tab = 'register'"><c-icon name="banknote" size="sm" /> Register {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
+      {% if schedule %}<button type="button" class="tab" :class="{ active: tab === 'schedule' }" @click="tab = 'schedule'"><c-icon name="calendar-days" size="sm" /> Schedule</button>{% endif %}
+      <button type="button" class="tab" :class="{ active: tab === 'borrowers' }" @click="tab = 'borrowers'"><c-icon name="users" size="sm" /> Borrowers {% if borrowers %}<span class="tcount tnum">{{ borrowers|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# REGISTER #}
+    <div x-show="tab === 'register'">
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Transactions</span>
+          <c-modal title="Add transaction" class="modal-wide">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add transaction</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}loans/{{ loan.pk }}/txns/new/"
+                  x-data="{ type:'payment', funding:'cash', payerKind:'', payerId:'', payerName:'', payerTint:'slate', payerInit:'?', interest:'', principal:'', escrow:'', fees:'', extra:'', applySplit(i,p){ this.interest=i; this.principal=p; }, pickParty(d){ this.payerKind=d.kind==='org'?'organization':'person'; this.payerId=d.id; this.payerName=d.name; this.payerTint=d.tint||'slate'; this.payerInit=d.initials||'?'; }, clearParty(){ this.payerKind=''; this.payerId=''; } }">{% csrf_token %}
+              <div class="stack-16">
+                {% include "loans/partials/transaction_fields.html" with suffix='new' %}
+                <div class="row"><c-button type="submit" variant="primary">Add transaction</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-modal>
+        </div>
+
+        {% if rows %}
+        <c-card flush>
+          <c-table>
+            <thead><tr>
+              <c-th>Date</c-th>
+              <c-th>Type</c-th>
+              <c-th>Details</c-th>
+              <th class="col-num">Amount</th>
+              <th class="col-num">Balance</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              {% for r in rows %}{% with t=r.txn %}
+              <tr>
+                <td class="muted tnum">{{ t.date|date:"d M Y" }}</td>
+                <td><span class="row"><c-icon name="{{ t.type_glyph }}" size="sm" class="subtle" /><c-badge>{{ t.type_label }}</c-badge></span></td>
+                <td>
+                  <div class="pc-name">{% if t.txn_type == 'payment' %}P <c-money :amount="t.principal" symbol="{{ loan.currency.symbol }}" dp="0" /> · I <c-money :amount="t.interest" symbol="{{ loan.currency.symbol }}" dp="0" />{% if t.payer %} · {{ t.payer }}{% endif %}{% elif t.payer %}{{ t.payer }}{% else %}{{ t.get_funding_source_display }}{% endif %}</div>
+                  {% if t.memo %}<div class="pc-sub">{{ t.memo }}</div>{% endif %}
+                </td>
+                <td class="col-num"><span class="{% if t.is_inflow %}amount-neg{% else %}amount-pos{% endif %}"><c-money :amount="t.amount" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></td>
+                <td class="col-num"><c-money :amount="r.balance" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td>
+                  <div class="cell-actions">
+                    <c-modal title="Edit transaction" class="modal-wide">
+                      <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                      <form method="post" action="{{ ui_tenant_url }}loans/{{ loan.pk }}/txns/{{ t.pk }}/edit/"
+                            x-data="{ type:'{{ t.txn_type }}', funding:'{{ t.funding_source }}', payerKind:'{% if t.payer_person %}person{% elif t.payer_organization %}organization{% endif %}', payerId:'{{ t.payer_person_id|default:t.payer_organization_id|default:'' }}', payerName:'{{ t.payer|default:''|escapejs }}', payerTint:'{{ t.payer.avatar_tint|default:'slate' }}', payerInit:'{{ t.payer.initials|default:'?' }}', interest:'{{ t.interest|floatformat:'-2' }}', principal:'{{ t.principal|floatformat:'-2' }}', escrow:'{{ t.escrow|floatformat:'-2' }}', fees:'{{ t.fees|floatformat:'-2' }}', extra:'{{ t.extra_principal|floatformat:'-2' }}', applySplit(i,p){ this.interest=i; this.principal=p; }, pickParty(d){ this.payerKind=d.kind==='org'?'organization':'person'; this.payerId=d.id; this.payerName=d.name; this.payerTint=d.tint||'slate'; this.payerInit=d.initials||'?'; }, clearParty(){ this.payerKind=''; this.payerId=''; } }">{% csrf_token %}
+                        <div class="stack-16">
+                          {% include "loans/partials/transaction_fields.html" with txn=t suffix=t.pk %}
+                          <div class="between">
+                            <c-button type="submit" variant="primary">Save</c-button>
+                            <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}loans/{{ loan.pk }}/txns/{{ t.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                          </div>
+                        </div>
+                      </form>
+                    </c-modal>
+                  </div>
+                </td>
+              </tr>
+              {% endwith %}{% endfor %}
+            </tbody>
+          </c-table>
+        </c-card>
+        {% else %}
+        <c-card><c-empty-state icon="banknote" title="No transactions yet" text="Record payments, draws, interest and fees to build the register." /></c-card>
+        {% endif %}
+      </div>
+    </div>
+
+    {# SCHEDULE (amortization projection + what-if) #}
+    {% if schedule %}
+    <div x-show="tab === 'schedule'" x-cloak>
+      <div class="stack stack-20">
+        <c-card icon="sparkles" title="What-if: extra per payment">
+          <form class="row wrap" hx-get="{{ ui_tenant_url }}loans/{{ loan.pk }}/payoff-projection/" hx-target="#payoff-result" hx-swap="outerHTML" hx-trigger="submit, change delay:300ms">
+            <label class="search"><c-icon name="plus" size="sm" /><input name="extra" inputmode="decimal" placeholder="Extra amount, e.g. 200"></label>
+            <c-button type="submit" size="sm">Recalculate</c-button>
+          </form>
+          <div class="stack-16" style="margin-top:12px;">
+            {% include "loans/partials/payoff.html" %}
+          </div>
+        </c-card>
+
+        <c-card flush>
+          <c-table>
+            <thead><tr><c-th>#</c-th><c-th>Date</c-th><th class="col-num">Payment</th><th class="col-num">Principal</th><th class="col-num">Interest</th><th class="col-num">Balance</th></tr></thead>
+            <tbody>
+              {% for p in schedule %}
+              <tr>
+                <td class="muted tnum">{{ p.n }}</td>
+                <td class="muted tnum">{{ p.date|date:"d M Y" }}</td>
+                <td class="col-num"><c-money :amount="p.payment" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td class="col-num"><c-money :amount="p.principal" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td class="col-num"><c-money :amount="p.interest" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td class="col-num"><c-money :amount="p.balance" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </c-table>
+        </c-card>
+      </div>
+    </div>
+    {% endif %}
+
+    {# BORROWERS + contributions #}
+    <div x-show="tab === 'borrowers'" x-cloak>
+      <div class="grid-2">
+        <c-card title="Borrowers" icon="users">
+          <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}loans/{{ loan.pk }}/edit/"><c-icon name="pencil" size="sm" /> Manage</c-button></c-slot>
+          {% for b in borrowers %}
+          <c-rel-row name="{{ b.person.display_name }}" role="{{ b.role_label }}" href="{{ ui_tenant_url }}contacts/people/{{ b.person.pk }}/">
+            <c-slot name="avatar"><c-avatar tint="{{ b.person.avatar_tint }}" size="sm">{{ b.person.initials }}</c-avatar></c-slot>
+            {% if b.role == 'primary' %}<c-slot name="tail"><c-badge variant="accent">Primary</c-badge></c-slot>{% endif %}
+          </c-rel-row>
+          {% empty %}
+          <c-empty-state icon="users" title="No borrowers yet" text="Add the people on this loan (primary borrower, co-signer, guarantor).">
+            <c-button variant="primary" href="{{ ui_tenant_url }}loans/{{ loan.pk }}/edit/"><c-icon name="pencil" /> Manage borrowers</c-button>
+          </c-empty-state>
+          {% endfor %}
+        </c-card>
+        <c-card title="Who's paying it down" icon="coins">
+          {% for c in contributions %}
+          <c-rel-row name="{{ c.label }}" role="principal paid">
+            <c-slot name="avatar"><c-avatar tint="slate" size="sm"><c-icon name="user-round" size="sm" /></c-avatar></c-slot>
+            <c-slot name="tail"><c-money :amount="c.amount" symbol="{{ loan.currency.symbol }}" dp="{{ loan.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+          </c-rel-row>
+          {% empty %}
+          <c-empty-state icon="coins" title="No payments yet" text="Once payments are recorded, you'll see who paid down the principal." />
+          {% endfor %}
+        </c-card>
+      </div>
+    </div>
+
+    {# HISTORY #}
+    <div x-show="tab === 'history'" x-cloak>
+      <c-card>
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this loan{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}<span class="subtle">No history yet.</span>{% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,100 @@
+{% comment %}Loan transaction add/edit fields. Included inside a <form> whose Alpine x-data provides:
+`type` (selected txn type), `funding` (bank|cash|external), the payer picker state
+(payerKind/payerId/payerName/payerTint/payerInit + pickParty/clearParty), the split fields
+(interest/principal/escrow/fees/extra as x-model strings) and applySplit(i,p). Needs: loan,
+picker_types, bank_accounts, tenant url. Pass `txn` (edit prefill) + a unique `suffix`.{% endcomment %}
+<div class="form-grid">
+  <c-field label="Type" required>
+    <div class="control is-select">
+      <select name="txn_type" @change="type = $event.target.value">
+        {% for val, label in picker_types %}<option value="{{ val }}"{% if txn.txn_type == val or not txn and val == 'payment' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if txn %}{{ txn.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+  <c-field label="Amount" required help="In {{ loan.currency.code }}."><div class="control"><input name="amount" id="amount-{{ suffix }}" inputmode="decimal" value="{% if txn %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div></c-field>
+</div>
+
+{# Adjustment direction #}
+<div x-show="type === 'adjustment'" x-cloak>
+  <c-field label="Direction">
+    <div class="control is-select">
+      <select name="direction">
+        <option value="increase"{% if txn.increase %} selected{% endif %}>Increase the balance owed</option>
+        <option value="decrease"{% if txn.increase == False %} selected{% endif %}>Decrease the balance owed</option>
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>
+
+{# Payment split (principal / interest / escrow / fees / extra) #}
+<div x-show="type === 'payment'" x-cloak class="stack-16">
+  <div class="between">
+    <span class="eyebrow">Payment split</span>
+    <c-button type="button" size="sm" variant="ghost"
+              hx-get="{{ ui_tenant_url }}loans/{{ loan.pk }}/payment-split/"
+              hx-target="#split-{{ suffix }}"
+              hx-include="#amount-{{ suffix }}, #escrow-{{ suffix }}, #fees-{{ suffix }}, #extra-{{ suffix }}, [name='date']"><c-icon name="sparkles" size="sm" /> Suggest split</c-button>
+  </div>
+  <div id="split-{{ suffix }}"></div>
+  <div class="form-grid">
+    <c-field label="Principal"><div class="control"><input name="principal" inputmode="decimal" x-model="principal" placeholder="0.00"></div></c-field>
+    <c-field label="Interest"><div class="control"><input name="interest" inputmode="decimal" x-model="interest" placeholder="0.00"></div></c-field>
+    <c-field label="Escrow"><div class="control"><input name="escrow" id="escrow-{{ suffix }}" inputmode="decimal" x-model="escrow" placeholder="0.00"></div></c-field>
+    <c-field label="Fees"><div class="control"><input name="fees" id="fees-{{ suffix }}" inputmode="decimal" x-model="fees" placeholder="0.00"></div></c-field>
+    <c-field label="Extra principal"><div class="control"><input name="extra_principal" id="extra-{{ suffix }}" inputmode="decimal" x-model="extra" placeholder="0.00"></div></c-field>
+  </div>
+  <c-hint icon="info">The Amount above is the total paid; the split determines how much reduces the balance (principal + extra) vs. interest/escrow/fees.</c-hint>
+</div>
+
+{# Funding — payments, extra principal, draws, disbursements #}
+<div x-show="type === 'payment' || type === 'extra_principal' || type === 'draw' || type === 'disbursement'" x-cloak class="stack-16">
+  <c-field label="Funding source">
+    <div class="control is-select">
+      <select name="funding_source" x-model="funding">
+        <option value="bank">A bank account (tracked here)</option>
+        <option value="cash">Cash on hand</option>
+        <option value="external">External / paid by someone else</option>
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <div x-show="funding === 'bank'" x-cloak>
+    <c-field label="Bank account">
+      <div class="control is-select">
+        <select name="funding_account">
+          <option value="">— choose —</option>
+          {% for a in bank_accounts %}<option value="{{ a.pk }}"{% if txn.funding_account_id == a.pk %} selected{% endif %}>{{ a.nickname }} · {{ a.bank.display }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+  </div>
+  <div x-show="funding === 'external'" x-cloak>
+    <c-field label="Paid by (optional)" help="Who made this payment — e.g. a co-borrower paying from an untracked account.">
+      <div x-show="!payerId">
+        <c-input type="search" name="payer_q" autocomplete="off" placeholder="Search people or organizations…"
+                 hx-get="{{ ui_tenant_url }}loans/lender-search/" hx-trigger="input changed delay:200ms, focus"
+                 hx-target="#payer-results-{{ suffix }}" />
+        <div id="payer-results-{{ suffix }}" class="rel-results"></div>
+      </div>
+      <div x-show="payerId" x-cloak class="rel">
+        <span class="avatar a-sm" :class="'av-'+payerTint" x-text="payerInit"></span>
+        <div class="grow"><div class="r-name" x-text="payerName"></div></div>
+        <c-button type="button" variant="ghost" size="sm" @click="clearParty()"><c-icon name="x" size="sm" /> Change</c-button>
+      </div>
+    </c-field>
+    <c-hint icon="info">Only the principal reduces your loan balance; interest isn't booked as your expense.</c-hint>
+  </div>
+  <input type="hidden" name="payer_person" :value="payerKind === 'person' ? payerId : ''">
+  <input type="hidden" name="payer_organization" :value="payerKind === 'organization' ? payerId : ''">
+</div>
+
+{# Always #}
+<c-field label="Memo"><c-input name="memo" value="{{ txn.memo|default:'' }}" placeholder="Optional note" /></c-field>
+<div class="grid-halves">
+  <c-field label="Reference"><c-input name="reference" value="{{ txn.reference|default:'' }}" placeholder="Ref / confirmation" /></c-field>
+  <label class="row"><input type="checkbox" name="cleared"{% if txn.cleared %} checked{% endif %}> <span class="muted">Cleared / reconciled</span></label>
+</div>
