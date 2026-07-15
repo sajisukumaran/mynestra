@@ -5,7 +5,7 @@ Payables module as a READ-ONLY (locked) bill.
 Mirrors the Loans module structure. An **owned** vehicle owns one postable `finance.Account` nested
 under the `1420 Vehicles` header (held at cost); a **leased** vehicle has no GL node (its payments
 are expenses, its refundable deposit an asset at `1320`). Every running cost — fuel, service,
-insurance, registration, lease payments — is a `VehicleCostEvent` that materializes a locked
+registration, lease payments — is a `VehicleCostEvent` that materializes a locked
 `payables.Bill` (and, when funded, a locked `payables.Payment`); the dealer purchase is a locked,
 capitalizing bill. A full **disposal** is a direct finance entry (sale / trade-in / total-loss /
 gift / scrap / lease-return) booking a single gain/loss to `4930`.
@@ -88,7 +88,6 @@ class CostKind(models.TextChoices):
     FUEL = "fuel", "Fuel / charging"
     SERVICE = "service", "Service"
     REPAIR = "repair", "Repair"
-    INSURANCE = "insurance", "Insurance"
     REGISTRATION = "registration", "Registration / road tax"
     INSPECTION = "inspection", "Inspection"
     EMISSIONS = "emissions", "Emissions / smog"
@@ -104,12 +103,11 @@ CAPITALIZING_KINDS = frozenset({CostKind.PURCHASE, CostKind.IMPROVEMENT})
 # Kinds that capitalize into the shared refundable-deposit asset (1320) instead of the vehicle node.
 DEPOSIT_KINDS = frozenset({CostKind.LEASE_DEPOSIT})
 # Kinds whose payment advances a renewal date (event.covers_through → the matching Vehicle field).
-# Registration + inspection compliance moved to first-class dated records (VehicleRegistration /
-# VehicleInspection) that own the next-due date; only auto insurance stays scalar/covers_through
-# here (migrated into policies by the future Insurance module).
-RENEWAL_KINDS = {
-    CostKind.INSURANCE: "insurance_expiry",
-}
+# Registration + inspection compliance are first-class dated records (VehicleRegistration /
+# VehicleInspection) that own the next-due date; auto insurance now lives in the Insurance module
+# (a first-class InsurancePolicy — the vehicle reads through to its linked policy). Nothing advances
+# a scalar renewal date on the Vehicle any more, so the map is empty (the seam is kept for clarity).
+RENEWAL_KINDS: dict = {}
 # Kinds that advance a matching ServiceSchedule.
 SERVICE_KINDS = frozenset({CostKind.SERVICE, CostKind.REPAIR})
 
@@ -119,7 +117,6 @@ COST_KIND_GLYPH = {
     CostKind.FUEL: "fuel",
     CostKind.SERVICE: "wrench",
     CostKind.REPAIR: "wrench",
-    CostKind.INSURANCE: "shield",
     CostKind.REGISTRATION: "file-text",
     CostKind.INSPECTION: "clipboard-check",
     CostKind.EMISSIONS: "leaf",  # gauge fallback if the icon set lacks "leaf"
@@ -293,15 +290,11 @@ class Vehicle(SoftDeleteModel):
         "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="+",
     )
-    insurer_organization = models.ForeignKey(
-        "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="+",
-    )
+    # Auto insurance now lives in the Insurance module (a first-class InsurancePolicy). The vehicle
+    # reads through to its linked policy via `active_insurance_policies` (a PolicyAsset GFK link) —
+    # there are no insurer / carrier / policy / expiry scalar fields here any more.
 
-    # --- policy / renewal metadata ---
-    insurance_carrier = models.CharField(max_length=120, blank=True)
-    insurance_policy_number = models.CharField(max_length=80, blank=True)
-    insurance_expiry = models.DateField(null=True, blank=True)
+    # --- registration / compliance metadata ---
     # registration_expiry / inspection_due / emissions_due / property_tax_due are DENORM CACHES the
     # service rewrites from the latest VehicleRegistration / VehicleInspection / VehiclePropertyTax
     # record (records are the single source of truth). Kept so list search + the identity header +
@@ -426,8 +419,12 @@ class Vehicle(SoftDeleteModel):
         return (when - datetime.date.today()).days if when else None
 
     @property
-    def insurance_days_left(self):
-        return self._days_until(self.insurance_expiry)
+    def active_insurance_policies(self):
+        """Active InsurancePolicy rows covering this vehicle (read-through to the Insurance
+        module via the PolicyAsset generic link). Empty when no auto policy is linked."""
+        from apps.insurance.services import policies_for_asset
+
+        return list(policies_for_asset(self))
 
     @property
     def registration_days_left(self):
@@ -529,7 +526,8 @@ class Vehicle(SoftDeleteModel):
 
 class VehicleDriver(TimeStampedModel):
     """A household member on the vehicle, with a role (mirrors LoanBorrower). The primary owner is
-    linked to the dealer ('customer' P2O); every driver is linked to the insurer ('insured')."""
+    linked to the dealer ('customer' P2O). The insurer 'insured' link is now owned by the Insurance
+    module (a policy's covered members), since auto insurance lives in InsurancePolicy."""
 
     vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="drivers")
     person = models.ForeignKey(
@@ -562,8 +560,8 @@ class VehicleDriver(TimeStampedModel):
 
 
 class VehicleCostEvent(SoftDeleteModel):
-    """A money event for a vehicle (purchase / improvement / fuel / service / insurance / ...). Its
-    GL effect lives entirely on a linked locked `payables.Bill` (and, when funded, a locked
+    """A money event for a vehicle (purchase / improvement / fuel / service / registration / …).
+    Its GL effect lives entirely on a linked locked `payables.Bill` (and, when funded, a locked
     `payables.Payment`) — this row carries none of its own journal entry. Exactly one vendor party
     is required (a vendor-less event cannot create a bill)."""
 
@@ -597,7 +595,8 @@ class VehicleCostEvent(SoftDeleteModel):
     odometer = models.PositiveIntegerField(null=True, blank=True)
     is_full_tank = models.BooleanField(default=True)
 
-    # Advances the matching renewal date on the vehicle (insurance / registration / inspection).
+    # Kept for the renewal seam; no cost kind currently advances a Vehicle renewal date (auto
+    # insurance moved to the Insurance module, which owns policy renewal dates).
     covers_through = models.DateField(null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)  # → bill.due_date (payables aging)
 

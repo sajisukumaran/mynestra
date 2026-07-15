@@ -33,6 +33,9 @@ def test_chart_of_accounts_seeded_and_locked(make_tenant):
             # Automobile (module 8).
             "vehicles", "refundable_deposits", "asset_disposal_gain_loss",
             "vehicle_insurance", "vehicle_registration", "vehicle_lease",
+            # Insurance (Plan B): per-type premium expense children under the 5500 header.
+            "health_insurance", "life_insurance", "umbrella_insurance",
+            "renters_insurance", "other_insurance",
         ]:
             assert Account.objects.filter(system_key=key).count() == 1
         # 2300 is the AP control account (renamed from "Bills Payable").
@@ -52,6 +55,12 @@ def test_chart_of_accounts_seeded_and_locked(make_tenant):
         for code in ["5140", "5150"]:
             acct = Account.objects.get(code=code)
             assert acct.type == AccountType.EXPENSE and acct.parent.code == "5100"
+        # Insurance: 5500 is now a group header with per-type children (Plan B).
+        insurance = Account.objects.get(code="5500")
+        assert insurance.is_postable is False and insurance.type == AccountType.EXPENSE
+        for code in ["5510", "5520", "5530", "5540", "5590"]:
+            acct = Account.objects.get(code=code)
+            assert acct.type == AccountType.EXPENSE and acct.parent.code == "5500"
         # Automobile: 1420 Vehicles is now a group header (per-vehicle sub-accounts nest under it).
         vehicles = Account.objects.get(code="1420")
         assert vehicles.is_postable is False and vehicles.type == AccountType.ASSET

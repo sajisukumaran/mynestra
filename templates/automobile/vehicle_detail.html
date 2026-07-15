@@ -593,11 +593,8 @@
             <c-kv-row key="Acquired">{{ vehicle.acquired.display|default:"—" }}</c-kv-row>
           </c-key-value>
         </c-card>
-        <c-card title="Policy, compliance &amp; warranty" icon="shield">
+        <c-card title="Compliance &amp; warranty" icon="shield-check">
           <c-key-value>
-            <c-kv-row key="Insurer">{% if vehicle.insurer_organization %}{{ vehicle.insurer_organization.display }}{% else %}{{ vehicle.insurance_carrier|default:"—" }}{% endif %}</c-kv-row>
-            <c-kv-row key="Policy #">{{ vehicle.insurance_policy_number|default:"—" }}</c-kv-row>
-            <c-kv-row key="Insurance expires">{% if vehicle.insurance_expiry %}{{ vehicle.insurance_expiry|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
             <c-kv-row key="Registration expires">{% if vehicle.registration_expiry %}{{ vehicle.registration_expiry|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
             <c-kv-row key="Safety inspection due">{% if vehicle.inspection_exempt %}<c-badge>Exempt</c-badge>{% elif vehicle.inspection_due %}{{ vehicle.inspection_due|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
             <c-kv-row key="Emissions due">{% if vehicle.emissions_exempt %}<c-badge>Exempt</c-badge>{% elif vehicle.emissions_due %}{{ vehicle.emissions_due|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
@@ -606,6 +603,23 @@
           </c-key-value>
         </c-card>
       </div>
+
+      {# Insurance — read-through to the Insurance module (a policy posts its own premiums there) #}
+      <c-card title="Insurance" icon="shield-check" style="margin-top:16px;">
+        <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" size="sm" /> Add policy</c-button></c-slot>
+        {% with policies=vehicle.active_insurance_policies %}
+        {% if policies %}
+        {% for p in policies %}
+        <c-rel-row name="{{ p.display }}" role="{{ p.type_label }}{% if p.insurer_name %} · {{ p.insurer_name }}{% endif %}{% if p.expiry_date %} · renews {{ p.expiry_date|date:'d M Y' }}{% endif %}" href="{{ ui_tenant_url }}insurance/policies/{{ p.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ p.type_tint }}" size="sm" square><c-icon name="shield-check" size="sm" /></c-avatar></c-slot>
+          <c-slot name="tail"><c-money :amount="p.annualized_premium" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> / yr</c-slot>
+        </c-rel-row>
+        {% endfor %}
+        {% else %}
+        <c-empty-state icon="shield-check" title="No policy linked" text="Add an auto policy in the Insurance module and link this vehicle to it." />
+        {% endif %}
+        {% endwith %}
+      </c-card>
     </div>
 
     {# DRIVERS #}

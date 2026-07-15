@@ -1,0 +1,76 @@
+{% extends "insurance/base.html" %}
+{% block ins_heading %}Policies{% endblock %}
+
+{% block ins %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}insurance/">Insurance</a><c-icon name="chevron-right" /><span class="strong">Policies</span></c-breadcrumb>
+
+<c-page-header title="Policies" subtitle="{{ total }} {{ total|pluralize:'policy,policies' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" /> New policy</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by name, plan, policy number or insurer…"></label>
+    {% if type %}<input type="hidden" name="type" value="{{ type }}">{% endif %}
+    {% if status %}<input type="hidden" name="status" value="{{ status }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}insurance/policies/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not type %} active{% endif %}" href="{% querystring type=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    {% for chip in type_chips %}
+    <a class="fchip{% if type == chip.val %} active{% endif %}" href="{% querystring type=chip.val page=None %}">{{ chip.label }} <span class="cnt tnum">{{ chip.count }}</span></a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if policies %}
+    <c-table>
+      <thead><tr>
+        <c-th>Policy</c-th>
+        <c-th>Type</c-th>
+        <c-th>Insurer</c-th>
+        <c-th sortable {% if sort == 'expiry' or sort == '-expiry' %}sorted dir="{% if sort == 'expiry' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring sort=sort_expiry_next page=None %}">Renews</a></c-th>
+        <th class="col-num">Annual premium</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for p in policies %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}insurance/policies/{{ p.pk }}/">
+              <c-avatar tint="{{ p.type_tint }}" size="sm" square><c-icon name="{{ p.type_glyph }}" size="sm" /></c-avatar>
+              <div><div class="pc-name">{{ p.display }}{% if not p.is_active %} <c-badge variant="warning">{{ p.status_label }}</c-badge>{% endif %}</div>{% if p.policy_number %}<div class="pc-sub tnum">{{ p.policy_number }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td><c-chip tint="{{ p.type_tint }}">{{ p.type_label }}</c-chip></td>
+          <td class="muted">{{ p.insurer_name|default:"—" }}</td>
+          <td class="muted tnum">{% if p.expiry_date %}{{ p.expiry_date|date:'d M Y' }}{% else %}—{% endif %}</td>
+          <td class="col-num"><c-money :amount="p.annualized_premium" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}insurance/policies/{{ p.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="shield-check"
+      title="{% if q or type or status %}No policies match{% else %}No policies yet{% endif %}"
+      text="{% if q or type or status %}Try a different search or filter.{% else %}Add a policy — auto, home, health, life and more — with premiums tracked and renewals in view.{% endif %}">
+      {% if not q and not type and not status %}<c-button variant="primary" href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" /> New policy</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

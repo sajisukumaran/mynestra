@@ -45,11 +45,8 @@ pickVendor(d), clearVendor() }. `suffix` disambiguates ids across the many modal
     <c-field label="Odometer" help="Optional — records a mileage reading."><div class="control"><input name="odometer" inputmode="numeric" placeholder="e.g. 12500" value="{% if event %}{{ event.odometer|default:'' }}{% endif %}"></div></c-field>
   </div>
 
-  {# Renewal / due dates #}
+  {# Due date #}
   <div class="form-grid">
-    <c-field label="Covers through" help="For insurance — advances the renewal date." x-show="['insurance'].includes(kind)" x-cloak>
-      <div class="control"><input type="date" name="covers_through" value="{% if event %}{{ event.covers_through|date:'Y-m-d' }}{% endif %}"></div>
-    </c-field>
     <c-field label="Due date" help="Optional — for an unpaid bill."><div class="control"><input type="date" name="due_date" value="{% if event %}{{ event.due_date|date:'Y-m-d' }}{% endif %}"></div></c-field>
   </div>
 

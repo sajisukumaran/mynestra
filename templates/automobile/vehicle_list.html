@@ -67,7 +67,7 @@
     {% else %}
     <c-empty-state icon="car"
       title="{% if q or mode %}No vehicles match{% else %}No vehicles yet{% endif %}"
-      text="{% if q or mode %}Try a different search or filter.{% else %}Add a car you own or lease — held at cost, with fuel, service and insurance tracked.{% endif %}">
+      text="{% if q or mode %}Try a different search or filter.{% else %}Add a car you own or lease — held at cost, with fuel, service and running costs tracked.{% endif %}">
       {% if not q and not mode %}<c-button variant="primary" href="{{ ui_tenant_url }}automobile/new/"><c-icon name="plus" /> New vehicle</c-button>{% endif %}
     </c-empty-state>
     {% endif %}

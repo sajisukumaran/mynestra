@@ -1,0 +1,163 @@
+{% extends "insurance/base.html" %}
+{% block ins_heading %}{% if mode == 'edit' %}Edit policy{% else %}New policy{% endif %}{% endblock %}
+
+{% block ins %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}insurance/">Insurance</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}insurance/policies/">Policies</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'edit' %}{{ policy.display }}{% else %}New policy{% endif %}</span>
+</c-breadcrumb>
+
+<c-page-header title="{% if mode == 'edit' %}Edit policy{% else %}New policy{% endif %}"
+               subtitle="A policy posts nothing itself — its premiums become locked bills." />
+
+{% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
+
+<form method="post"
+      action="{% if mode == 'edit' %}{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/edit/{% else %}{{ ui_tenant_url }}insurance/policies/new/{% endif %}"
+      x-data="{
+        ptype: '{{ policy.policy_type|default:'auto' }}',
+        insurerId: '{{ insurer.pk|default:'' }}',
+        insurerName: '{{ insurer.display|default:''|escapejs }}',
+        insurerTint: '{{ insurer.avatar_tint|default:'slate' }}',
+        insurerInit: '{{ insurer.initials|default:'?' }}',
+        pickInsurer(d){ this.insurerId=d.id; this.insurerName=d.name; this.insurerTint=d.tint||'slate'; this.insurerInit=d.initials||'?'; },
+        clearInsurer(){ this.insurerId=''; },
+        coverages: [{% for c in coverage_rows %}{ type: '{{ c.coverage_type|escapejs }}', limit: '{% if c.limit_amount %}{{ c.limit_amount|floatformat:'-2' }}{% endif %}', deductible: '{% if c.deductible_amount %}{{ c.deductible_amount|floatformat:'-2' }}{% endif %}', premium: '{% if c.premium_portion %}{{ c.premium_portion|floatformat:'-2' }}{% endif %}', note: '{{ c.note|escapejs }}' }{% if not forloop.last %},{% endif %}{% endfor %}],
+        members: [{% for m in member_rows %}{ person: '{{ m.person_id }}', role: '{{ m.role }}', percent: '{% if m.beneficiary_percent %}{{ m.beneficiary_percent|floatformat:'-2' }}{% endif %}', note: '{{ m.relationship_note|escapejs }}' }{% if not forloop.last %},{% endif %}{% endfor %}],
+        addCoverage(){ this.coverages.push({type:'',limit:'',deductible:'',premium:'',note:''}); },
+        removeCoverage(i){ this.coverages.splice(i,1); },
+        addMember(){ this.members.push({person:'',role:'insured',percent:'',note:''}); },
+        removeMember(i){ this.members.splice(i,1); }
+      }">
+  {% csrf_token %}
+  <div class="stack-20">
+
+    <c-card title="Policy" icon="shield-check">
+      <div class="form-grid">
+        <c-field label="Type" required>
+          <c-select name="policy_type" x-model="ptype">
+            {% for val, label in policy_types %}<option value="{{ val }}"{% if policy.policy_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Status" required>
+          <c-select name="status">
+            {% for val, label in statuses %}<option value="{{ val }}"{% if policy.status == val %} selected{% elif not policy.pk and val == 'active' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+        <c-field label="Currency">
+          <c-select name="currency">
+            {% for c in currencies %}<option value="{{ c.code }}"{% if policy.currency_id == c.pk %} selected{% elif not policy.currency_id and c.pk == base.pk %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Nickname" help="Optional — a friendly name."><div class="control">{{ form.nickname }}</div></c-field>
+        <c-field label="Plan name"><div class="control">{{ form.plan_name }}</div></c-field>
+        <c-field label="Policy number"><div class="control">{{ form.policy_number }}</div></c-field>
+      </div>
+    </c-card>
+
+    <c-card title="Insurer" icon="building-2">
+      <c-field label="Insurance carrier" help="Search an organization or type a new name.">
+        <div x-show="!insurerId">
+          <c-input type="search" name="insurer_q" autocomplete="off" placeholder="Search organizations…"
+                   hx-get="{{ ui_tenant_url }}insurance/insurer-search/" hx-trigger="input changed delay:200ms, focus"
+                   hx-target="#insurer-results" />
+          <div id="insurer-results" class="rel-results"></div>
+          <c-input name="insurer_organization_new_name" placeholder="…or type a new insurer name" />
+        </div>
+        <div x-show="insurerId" x-cloak class="rel">
+          <span class="avatar a-sm" :class="'av-'+insurerTint" x-text="insurerInit"></span>
+          <div class="grow"><div class="r-name" x-text="insurerName"></div><div class="r-role">Insurer</div></div>
+          <c-button type="button" variant="ghost" size="sm" @click="clearInsurer()"><c-icon name="x" size="sm" /> Change</c-button>
+        </div>
+        <input type="hidden" name="insurer_organization" :value="insurerId">
+      </c-field>
+    </c-card>
+
+    <c-card title="Term &amp; premium" icon="calendar-days">
+      <div class="form-grid">
+        <c-field label="Effective date"><div class="control"><input type="date" name="effective_date" value="{{ policy.effective_date|date:'Y-m-d' }}"></div></c-field>
+        <c-field label="Renews / expires" help="Drives the renewal reminder."><div class="control"><input type="date" name="expiry_date" value="{{ policy.expiry_date|date:'Y-m-d' }}"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Premium amount" help="Per period (below)."><div class="control"><input name="premium_amount" inputmode="decimal" placeholder="0.00" value="{% if policy.pk %}{{ policy.premium_amount|floatformat:'-2' }}{% endif %}"></div></c-field>
+        <c-field label="Frequency">
+          <c-select name="premium_frequency">
+            {% for val, label in frequencies %}<option value="{{ val }}"{% if policy.premium_frequency == val %} selected{% elif not policy.pk and val == 'annual' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </c-select>
+        </c-field>
+      </div>
+    </c-card>
+
+    <c-card title="Coverages" icon="file-text">
+      <c-slot name="actions"><c-button type="button" size="sm" @click="addCoverage()"><c-icon name="plus" size="sm" /> Add coverage</c-button></c-slot>
+      <div class="stack-12">
+        <template x-for="(c, i) in coverages" :key="i">
+          <div class="form-grid" style="align-items:end;">
+            <c-field label="Coverage"><div class="control"><input name="coverage_type" x-model="c.type" placeholder="e.g. Liability"></div></c-field>
+            <c-field label="Limit"><div class="control"><input name="coverage_limit" x-model="c.limit" inputmode="decimal" placeholder="0.00"></div></c-field>
+            <c-field label="Deductible"><div class="control"><input name="coverage_deductible" x-model="c.deductible" inputmode="decimal" placeholder="0.00"></div></c-field>
+            <c-field label="Premium part"><div class="control"><input name="coverage_premium" x-model="c.premium" inputmode="decimal" placeholder="0.00"></div></c-field>
+            <div class="row"><input type="hidden" name="coverage_note" x-model="c.note"><c-button type="button" icon_only variant="ghost" @click="removeCoverage(i)"><c-icon name="trash-2" size="sm" /></c-button></div>
+          </div>
+        </template>
+        <p class="subtle" x-show="coverages.length === 0">No coverages yet — add liability, collision, dwelling, etc.</p>
+      </div>
+    </c-card>
+
+    <c-card title="Covered people &amp; beneficiaries" icon="users">
+      <c-slot name="actions"><c-button type="button" size="sm" @click="addMember()"><c-icon name="plus" size="sm" /> Add person</c-button></c-slot>
+      <div class="stack-12">
+        <template x-for="(m, i) in members" :key="i">
+          <div class="form-grid" style="align-items:end;">
+            <c-field label="Person">
+              <div class="control is-select">
+                <select name="member_person" x-model="m.person">
+                  <option value="">—</option>
+                  {% for p in people %}<option value="{{ p.pk }}">{{ p.display_name }}</option>{% endfor %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+            <c-field label="Role">
+              <div class="control is-select">
+                <select name="member_role" x-model="m.role">
+                  {% for val, label in member_roles %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+                </select>
+                <c-icon name="chevron-down" size="sm" class="subtle" />
+              </div>
+            </c-field>
+            <c-field label="Beneficiary %" help="Life only."><div class="control"><input name="member_percent" x-model="m.percent" inputmode="decimal" placeholder="—"></div></c-field>
+            <div class="row"><input type="hidden" name="member_note" x-model="m.note"><c-button type="button" icon_only variant="ghost" @click="removeMember(i)"><c-icon name="trash-2" size="sm" /></c-button></div>
+          </div>
+        </template>
+        <p class="subtle" x-show="members.length === 0">No people yet — add the policyholder, insured, dependents or beneficiaries.</p>
+      </div>
+    </c-card>
+
+    <c-card title="Covered vehicles" icon="car" x-show="ptype === 'auto'" x-cloak>
+      {% if vehicles %}
+      <div class="stack-8">
+        {% for v in vehicles %}
+        <label class="row"><input type="checkbox" name="covered_vehicle" value="{{ v.pk }}"{% if v.pk in covered_ids %} checked{% endif %}> <span>{{ v.nickname }} <span class="subtle">· {{ v.full_name }}</span></span></label>
+        {% endfor %}
+      </div>
+      {% else %}
+      <c-empty-state icon="car" title="No vehicles" text="Add a vehicle in the Vehicles module, then link it here." />
+      {% endif %}
+    </c-card>
+
+    <c-card title="Notes" icon="file-text">
+      <c-field label="Notes"><div class="control">{{ form.notes }}</div></c-field>
+    </c-card>
+
+    <c-save-bar>
+      <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'edit' %}Save policy{% else %}Create policy{% endif %}</c-button>
+      <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/{% else %}{{ ui_tenant_url }}insurance/policies/{% endif %}">Cancel</c-button>
+    </c-save-bar>
+  </div>
+</form>
+{% endblock %}

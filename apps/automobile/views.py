@@ -65,7 +65,6 @@ from apps.automobile.services import (
     renewals_due,
     save_cost_event,
     save_inspection,
-    save_insurance_split,
     save_property_tax,
     save_registration,
     save_service_invoice,
@@ -96,7 +95,6 @@ COST_PICKER_KINDS = [
     (CostKind.FUEL, "Fuel / charging"),
     (CostKind.SERVICE, "Service"),
     (CostKind.REPAIR, "Repair"),
-    (CostKind.INSURANCE, "Insurance"),
     (CostKind.REGISTRATION, "Registration / road tax"),
     (CostKind.INSPECTION, "Inspection"),
     (CostKind.EMISSIONS, "Emissions / smog"),
@@ -384,10 +382,6 @@ def _vehicle_form(request, vehicle, mode):
                 if request.POST.get("mileage_unit") in MileageUnit.values else MileageUnit.MILES
             )
             vehicle.dealer_organization = _resolve_org(request, "dealer_organization")
-            vehicle.insurer_organization = _resolve_org(request, "insurer_organization")
-            vehicle.insurance_expiry = parse_date(
-                request.POST.get("insurance_expiry") or ""
-            ) or None
             vehicle.registration_expiry = parse_date(
                 request.POST.get("registration_expiry") or ""
             ) or None
@@ -438,7 +432,6 @@ def _vehicle_form(request, vehicle, mode):
         people=people,
         driver_rows=driver_rows,
         dealer=vehicle.dealer_organization,
-        insurer=vehicle.insurer_organization,
         bank_accounts=_bank_accounts(),
         auto_loans=_auto_loans(),
         fundings=Funding.choices,
@@ -998,40 +991,6 @@ def _open_purchase_bill(vehicle):
     if ev and ev.bill and ev.bill.status in ("open", "partially_paid"):
         return ev.bill
     return None
-
-
-# --- Multi-vehicle insurance ----------------------------------------------------------------
-
-def insurance_create(request):
-    if request.method == "POST":
-        insurer = _resolve_org(request, "insurer_organization")
-        date = parse_date(request.POST.get("date") or "") or datetime.date.today()
-        vids = request.POST.getlist("split_vehicle")
-        amounts = request.POST.getlist("split_amount")
-        throughs = request.POST.getlist("split_through")
-        rows = []
-        for i, vid in enumerate(vids):
-            amt = _decimal(amounts[i] if i < len(amounts) else "")
-            veh = Vehicle.objects.filter(pk=vid or 0).first()
-            if veh and amt and amt > 0:
-                rows.append({
-                    "vehicle": veh, "amount": amt,
-                    "covers_through": parse_date(
-                        throughs[i] if i < len(throughs) else ""
-                    ) or None,
-                })
-        if insurer and rows:
-            src = request.POST.get("funding_source") or Funding.NONE
-            save_insurance_split(
-                rows, insurer_organization=insurer, date=date,
-                reference=request.POST.get("reference", "").strip(),
-                funding_source=src if src in Funding.values else Funding.NONE,
-                funding_account=_bank_accounts().filter(
-                    pk=request.POST.get("funding_account") or 0
-                ).first(),
-                user=request.user,
-            )
-    return redirect(tenant_url(request, "automobile/"))
 
 
 # --- htmx fragments -------------------------------------------------------------------------

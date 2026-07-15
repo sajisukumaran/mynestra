@@ -142,7 +142,16 @@ CHART_OF_ACCOUNTS = [
     ("5350", "Vehicle Registration", EXPENSE, "5300", True, "vehicle_registration"),
     ("5360", "Vehicle Lease", EXPENSE, "5300", True, "vehicle_lease"),
     ("5400", "Health & Medical", EXPENSE, "5000", True, ""),
-    ("5500", "Insurance", EXPENSE, "5000", True, ""),
+    # 5500 is a group header: the Insurance module posts each policy's premiums to the child
+    # matching its policy type (auto premiums keep their own 5340 home; home/renters use 5150 /
+    # 5540). Per-type children give finer household reporting; all remappable per policy in Expert
+    # mode. Auto/home stay at 5340/5150 for continuity with the Automobile + escrow paths.
+    ("5500", "Insurance", EXPENSE, "5000", False, ""),
+    ("5510", "Health Insurance", EXPENSE, "5500", True, "health_insurance"),
+    ("5520", "Life Insurance", EXPENSE, "5500", True, "life_insurance"),
+    ("5530", "Umbrella / Liability Insurance", EXPENSE, "5500", True, "umbrella_insurance"),
+    ("5540", "Renters Insurance", EXPENSE, "5500", True, "renters_insurance"),
+    ("5590", "Other Insurance", EXPENSE, "5500", True, "other_insurance"),
     ("5600", "Education", EXPENSE, "5000", True, ""),
     ("5700", "Personal & Lifestyle", EXPENSE, "5000", True, ""),
     ("5800", "Taxes", EXPENSE, "5000", True, ""),

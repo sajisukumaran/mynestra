@@ -1,0 +1,213 @@
+{% extends "insurance/base.html" %}
+{% block ins_heading %}{{ policy.display }}{% endblock %}
+
+{% block ins %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}insurance/">Insurance</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}insurance/policies/">Policies</a><c-icon name="chevron-right" />
+  <span class="strong">{{ policy.display }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ policy.type_tint }}"><c-icon name="{{ policy.type_glyph }}" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ policy.display }}</h1>
+          <c-chip tint="{{ policy.type_tint }}">{{ policy.type_label }}</c-chip>
+          {% if policy.is_active %}<c-badge variant="success">Active</c-badge>{% else %}<c-badge variant="warning">{{ policy.status_label }}</c-badge>{% endif %}
+        </div>
+        <div class="muted">{% if policy.insurer_name %}{{ policy.insurer_name }}{% endif %}{% if policy.policy_number %} · <span class="tnum">{{ policy.policy_number }}</span>{% endif %}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><span class="strong"><c-money :amount="policy.annualized_premium" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> / year</span>
+          {% if policy.expiry_date %}<span class="row"><c-icon name="calendar-days" size="sm" class="subtle" />renews {{ policy.expiry_date|date:'d M Y' }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete {{ policy.display }}?" message="This moves the policy to Recently deleted. Its premium bills and ledger entries stay posted as history.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {% if not policy.insurer %}
+  <c-hint icon="triangle-alert">Set an insurer on this policy to record premiums (a bill needs a vendor).</c-hint>
+  {% endif %}
+
+  <div x-data="{ tab: 'overview' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="info" size="sm" /> Overview</button>
+      <button type="button" class="tab" :class="{ active: tab === 'coverages' }" @click="tab = 'coverages'"><c-icon name="file-text" size="sm" /> Coverages {% if coverages %}<span class="tcount tnum">{{ coverages|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'members' }" @click="tab = 'members'"><c-icon name="users" size="sm" /> People {% if members %}<span class="tcount tnum">{{ members|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'assets' }" @click="tab = 'assets'"><c-icon name="car" size="sm" /> Assets {% if assets %}<span class="tcount tnum">{{ assets|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'premiums' }" @click="tab = 'premiums'"><c-icon name="banknote" size="sm" /> Premiums {% if premiums %}<span class="tcount tnum">{{ premiums|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# Overview #}
+    <div x-show="tab === 'overview'" class="stack-16" style="margin-top:16px;">
+      <c-card icon="info" title="Details">
+        <c-key-value>
+          <c-kv-row key="Type">{{ policy.type_label }}</c-kv-row>
+          <c-kv-row key="Status">{{ policy.status_label }}</c-kv-row>
+          <c-kv-row key="Insurer">{{ policy.insurer_name|default:"—" }}</c-kv-row>
+          <c-kv-row key="Policy #">{{ policy.policy_number|default:"—" }}</c-kv-row>
+          <c-kv-row key="Plan">{{ policy.plan_name|default:"—" }}</c-kv-row>
+          <c-kv-row key="Effective">{% if policy.effective_date %}{{ policy.effective_date|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
+          <c-kv-row key="Renews / expires">{% if policy.expiry_date %}{{ policy.expiry_date|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
+          <c-kv-row key="Premium"><c-money :amount="policy.premium_amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /> · {{ policy.frequency_label }}</c-kv-row>
+          <c-kv-row key="Annualized"><c-money :amount="policy.annualized_premium" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-kv-row>
+        </c-key-value>
+        {% if policy.notes %}<p class="muted" style="margin-top:12px;">{{ policy.notes }}</p>{% endif %}
+      </c-card>
+    </div>
+
+    {# Coverages #}
+    <div x-show="tab === 'coverages'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if coverages %}
+        <c-table>
+          <thead><tr><c-th>Coverage</c-th><th class="col-num">Limit</th><th class="col-num">Deductible</th><th class="col-num">Premium part</th><c-th>Note</c-th></tr></thead>
+          <tbody>
+            {% for c in coverages %}
+            <tr>
+              <td class="strong">{{ c.coverage_type }}</td>
+              <td class="col-num">{% if c.limit_amount %}<c-money :amount="c.limit_amount" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+              <td class="col-num">{% if c.deductible_amount %}<c-money :amount="c.deductible_amount" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+              <td class="col-num">{% if c.premium_portion %}<c-money :amount="c.premium_portion" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+              <td class="muted">{{ c.note|default:"—" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="file-text" title="No coverages" text="Edit the policy to add coverages with limits and deductibles." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# People #}
+    <div x-show="tab === 'members'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if members %}
+        {% for m in members %}
+        <c-rel-row name="{{ m.person.display_name }}" role="{{ m.role_label }}{% if m.relationship_note %} · {{ m.relationship_note }}{% endif %}">
+          <c-slot name="avatar"><c-avatar tint="{{ m.person.avatar_tint }}" size="sm">{{ m.person.initials }}</c-avatar></c-slot>
+          <c-slot name="tail">{% if m.is_beneficiary and m.beneficiary_percent %}<c-badge variant="info">{{ m.beneficiary_percent|floatformat:'-2' }}%</c-badge>{% endif %}</c-slot>
+        </c-rel-row>
+        {% endfor %}
+        {% else %}
+        <c-empty-state icon="users" title="No people" text="Edit the policy to add covered people and beneficiaries." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Assets #}
+    <div x-show="tab === 'assets'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if assets %}
+        {% for a in assets %}
+        <c-rel-row name="{{ a.asset_label }}" role="{{ a.content_type.model|capfirst }}"{% if a.content_type.model == 'vehicle' %} href="{{ ui_tenant_url }}automobile/{{ a.object_id }}/"{% endif %}>
+          <c-slot name="avatar"><c-avatar tint="sky" size="sm" square><c-icon name="car" size="sm" /></c-avatar></c-slot>
+        </c-rel-row>
+        {% endfor %}
+        {% else %}
+        <c-empty-state icon="car" title="No covered assets" text="For an auto policy, link the covered vehicles in Edit." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Premiums #}
+    <div x-show="tab === 'premiums'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="banknote" title="Premiums">
+        {% if policy.insurer %}
+        <c-slot name="actions">
+          <c-modal title="Record a premium">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="plus" size="sm" /> Record premium</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/premiums/new/" x-data="{ funding: 'none' }">{% csrf_token %}
+              {% include "insurance/partials/premium_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save premium</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% endif %}
+        {% if premiums %}
+        <c-table>
+          <thead><tr><c-th>Date</c-th><c-th>Covers through</c-th><c-th>Status</c-th><c-th>Reference</c-th><th class="col-num">Amount</th><th></th></tr></thead>
+          <tbody>
+            {% for p in premiums %}
+            <tr>
+              <td class="tnum">{{ p.date|date:'d M Y' }}</td>
+              <td class="tnum muted">{% if p.covers_through %}{{ p.covers_through|date:'d M Y' }}{% else %}—{% endif %}</td>
+              <td>{% if p.bill %}{% if p.bill.status == 'paid' %}<c-badge variant="success">Paid</c-badge>{% elif p.bill.status == 'partially_paid' %}<c-badge variant="warning">Part-paid</c-badge>{% else %}<c-badge variant="info">Accrued</c-badge>{% endif %}{% else %}—{% endif %}</td>
+              <td class="muted">{{ p.reference|default:"—" }}</td>
+              <td class="col-num"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+              <td>
+                <div class="cell-actions">
+                  <c-modal title="Edit premium">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                    <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/premiums/{{ p.pk }}/edit/" x-data="{ funding: '{{ p.funding_source }}' }">{% csrf_token %}
+                      {% include "insurance/partials/premium_fields.html" with premium=p %}
+                      <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save changes</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+                    </form>
+                  </c-modal>
+                  <c-confirm-dialog title="Delete this premium?" message="This erases the premium and its locked bill / payment from the ledger.">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                    <c-slot name="confirm">
+                      <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/premiums/{{ p.pk }}/delete/">{% csrf_token %}
+                        <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+                      </form>
+                    </c-slot>
+                  </c-confirm-dialog>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="banknote" title="No premiums yet" text="Record a premium — it becomes a locked bill in Payables.">
+          {% if policy.insurer %}
+          <c-modal title="Record a premium">
+            <c-slot name="trigger"><c-button variant="primary"><c-icon name="plus" /> Record premium</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/premiums/new/" x-data="{ funding: 'none' }">{% csrf_token %}
+              {% include "insurance/partials/premium_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save premium</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+          {% endif %}
+        </c-empty-state>
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# History #}
+    <div x-show="tab === 'history'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if history %}
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item>
+            <span class="strong">{{ h.get_history_type_display }}</span>
+            <span class="muted">· {{ h.history_date|date:'d M Y H:i' }}{% if h.history_user %} · {{ h.history_user }}{% endif %}</span>
+          </c-tl-item>
+          {% endfor %}
+        </c-timeline>
+        {% else %}
+        <c-empty-state icon="clock" title="No history yet" />
+        {% endif %}
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

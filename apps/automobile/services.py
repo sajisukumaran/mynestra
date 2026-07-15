@@ -70,7 +70,6 @@ ACCOUNTS_PAYABLE = "accounts_payable"          # 2300
 POSTING_ACTIVITIES = [
     {"key": "fuel", "label": "Fuel / charging", "kind": "expense", "default": "5310"},
     {"key": "service", "label": "Service & repairs", "kind": "expense", "default": "5320"},
-    {"key": "insurance", "label": "Insurance", "kind": "expense", "default": "vehicle_insurance"},
     {"key": "registration", "label": "Registration & inspection", "kind": "expense",
      "default": "vehicle_registration"},
     {"key": "lease", "label": "Lease payments", "kind": "expense", "default": "vehicle_lease"},
@@ -87,7 +86,6 @@ KIND_ACTIVITY = {
     CostKind.FUEL: ("fuel", "5310"),
     CostKind.SERVICE: ("service", "5320"),
     CostKind.REPAIR: ("service", "5320"),
-    CostKind.INSURANCE: ("insurance", "vehicle_insurance"),
     CostKind.REGISTRATION: ("registration", "vehicle_registration"),
     CostKind.INSPECTION: ("registration", "vehicle_registration"),
     CostKind.EMISSIONS: ("registration", "vehicle_registration"),
@@ -97,8 +95,10 @@ KIND_ACTIVITY = {
     CostKind.OTHER: (None, "5900"),
 }
 # Running-cost kinds counted in TCO / cost-per-mile (not capitalizing, not a recoverable deposit).
+# Insurance moved to the Insurance module, so auto TCO no longer includes premiums (a read-through
+# of policy premiums into cost-per-mile is a possible future enhancement, not v1 scope).
 RUNNING_COST_KINDS = frozenset(
-    {CostKind.FUEL, CostKind.SERVICE, CostKind.REPAIR, CostKind.INSURANCE,
+    {CostKind.FUEL, CostKind.SERVICE, CostKind.REPAIR,
      CostKind.REGISTRATION, CostKind.INSPECTION, CostKind.EMISSIONS, CostKind.LEASE_PAYMENT,
      CostKind.TAX_FEE, CostKind.PROPERTY_TAX, CostKind.OTHER}
 )
@@ -956,58 +956,6 @@ def settle_financed_purchase(
     return event
 
 
-# --- Multi-vehicle insurance premium ---------------------------------------------------------
-
-@transaction.atomic
-def save_insurance_split(
-    rows, *, insurer_person=None, insurer_organization=None, date, reference="",
-    funding_source=Funding.NONE, funding_account=None, credit_card=None, cash_account=None,
-    user=None,
-):
-    """One insurance document covering several vehicles: create one locked cost event + bill per
-    (vehicle, amount, covers_through) row (same insurer vendor, shared document reference), and when
-    funded, ONE locked Payment allocated across all N bills (the events share it). `rows` is a list
-    of dicts: {vehicle, amount, covers_through}."""
-    from apps.payables.models import Payment
-    from apps.payables.services import apply_payment
-
-    events = []
-    for row in rows:
-        amount = row["amount"]
-        if not amount or amount <= ZERO:
-            continue
-        event = VehicleCostEvent.objects.create(
-            vehicle=row["vehicle"], kind=CostKind.INSURANCE, date=date, amount=amount,
-            vendor_person=insurer_person, vendor_organization=insurer_organization,
-            covers_through=row.get("covers_through"), reference=reference,
-            funding_source=Funding.NONE,  # the shared payment funds them together (below)
-        )
-        _ensure_vendor_profile(event)
-        _sync_bill(event, user=user)
-        _apply_event_side_effects(event)
-        events.append(event)
-
-    if not events:
-        return []
-
-    funded = funding_source in (Funding.BANK, Funding.CARD, Funding.CASH)
-    if funded:
-        total = sum((e.amount for e in events), ZERO)
-        pay = Payment(
-            vendor_person=insurer_person, vendor_organization=insurer_organization,
-            date=date, amount=total, funding_kind=_payment_funding(funding_source),
-            bank_account=funding_account if funding_source == Funding.BANK else None,
-            credit_card=credit_card if funding_source == Funding.CARD else None,
-            cash_account=cash_account if funding_source == Funding.CASH else None,
-            is_locked=True, source_content_type=_event_ct(),
-            source_object_id=events[0].pk,
-        )
-        pay.save()
-        apply_payment(pay, [(e.bill, e.amount) for e in events], user=user)
-        VehicleCostEvent.objects.filter(pk__in=[e.pk for e in events]).update(payment=pay)
-    return events
-
-
 # --- Disposal lifecycle ----------------------------------------------------------------------
 
 def _disposal_key(disposal: VehicleDisposal) -> str:
@@ -1215,28 +1163,23 @@ def delete_disposal(disposal: VehicleDisposal, *, user=None):
     disposal.hard_delete()
 
 
-# --- Driver ↔ party ("insured" / dealer "customer" P2O) synchronisation ----------------------
+# --- Owner ↔ dealer ("customer" P2O) synchronisation -----------------------------------------
 
 def sync_driver_p2o(vehicle: Vehicle, *, user=None) -> None:
-    """Ensure each driver has an org-level 'insured' link to the insurer, and each owner a
-    'customer' link to the dealer. Add-only; no-ops when the type isn't seeded / no org is set."""
+    """Ensure each owner has a 'customer' P2O link to the dealer. Add-only; no-ops when the type
+    isn't seeded / no dealer is set. (The driver's 'insured' link to the insurer is now owned by
+    the Insurance module's `sync_policy_p2o`, since auto insurance lives in InsurancePolicy.)"""
     from apps.automobile.models import OWNER_ROLES
     from apps.relationships.models import PersonOrgRelationship, PersonOrgRelationshipType
 
-    insured = PersonOrgRelationshipType.objects.filter(code="insured").first()
     customer = PersonOrgRelationshipType.objects.filter(code="customer").first()
-    drivers = list(vehicle.drivers.select_related("person").all())
-    if vehicle.insurer_organization_id and insured is not None:
-        for d in drivers:
+    if not (vehicle.dealer_organization_id and customer is not None):
+        return
+    for d in vehicle.drivers.select_related("person").all():
+        if d.role in OWNER_ROLES:
             PersonOrgRelationship.objects.get_or_create(
-                person=d.person, organization=vehicle.insurer_organization, type=insured
+                person=d.person, organization=vehicle.dealer_organization, type=customer
             )
-    if vehicle.dealer_organization_id and customer is not None:
-        for d in drivers:
-            if d.role in OWNER_ROLES:
-                PersonOrgRelationship.objects.get_or_create(
-                    person=d.person, organization=vehicle.dealer_organization, type=customer
-                )
 
 
 # --- Read models (pure; post nothing) --------------------------------------------------------
@@ -1313,8 +1256,9 @@ def _financing_interest(vehicle: Vehicle) -> Decimal:
 
 
 def running_cost_total(vehicle: Vehicle) -> Decimal:
-    """Lifetime running cost (fuel + service + insurance + … + service invoices), plus financing
-    interest. Service invoices are separate records from cost events → no double-count."""
+    """Lifetime running cost (fuel + service + registration + … + service invoices), plus financing
+    interest. Service invoices are separate records from cost events → no double-count. (Auto
+    insurance premiums live in the Insurance module, so they're not counted here.)"""
     total = sum(
         (e.amount for e in vehicle.cost_events.filter(kind__in=list(RUNNING_COST_KINDS))),
         ZERO,
@@ -1345,7 +1289,6 @@ def next_service_due(vehicle: Vehicle):
 
 
 RENEWAL_LABELS = [
-    ("insurance_expiry", "Insurance", "shield"),
     ("registration_expiry", "Registration", "file-text"),
     ("inspection_due", "Safety inspection", "clipboard-check"),
     ("emissions_due", "Emissions test", "leaf"),
@@ -1359,9 +1302,10 @@ RENEWAL_EXEMPT = {"inspection_due": "inspection_exempt", "emissions_due": "emiss
 
 
 def renewals_due(within_days: int = 90) -> list[dict]:
-    """Upcoming renewals across active, non-disposed vehicles (insurance / registration / safety
-    inspection / emissions / property tax / lease end / warranty), soonest first (past-due-but-open
-    first). Rows are skipped when the vehicle carries the matching exempt toggle. A pure read."""
+    """Upcoming renewals across active, non-disposed vehicles (registration / safety inspection /
+    emissions / property tax / lease end / warranty), soonest first (past-due-but-open first). Rows
+    are skipped when the vehicle carries the matching exempt toggle. A pure read. (Auto insurance
+    renewals live in the Insurance module's `policies_expiring`.)"""
     today = datetime.date.today()
     horizon = today + datetime.timedelta(days=within_days)
     rows = []
@@ -1459,7 +1403,7 @@ def cost_by_category(vehicle: Vehicle):
 
     tints = {
         CostKind.FUEL: "amber", CostKind.SERVICE: "teal", CostKind.REPAIR: "rose",
-        CostKind.INSURANCE: "sky", CostKind.REGISTRATION: "violet",
+        CostKind.REGISTRATION: "violet",
         CostKind.INSPECTION: "indigo", CostKind.EMISSIONS: "emerald",
         CostKind.LEASE_PAYMENT: "emerald", CostKind.TAX_FEE: "slate",
         CostKind.PROPERTY_TAX: "amber", CostKind.OTHER: "slate",

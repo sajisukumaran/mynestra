@@ -1,24 +1,24 @@
 from django.apps import AppConfig
 
 
-class AutomobileConfig(AppConfig):
+class InsuranceConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "apps.automobile"
-    label = "automobile"
-    verbose_name = "Vehicles"
+    name = "apps.insurance"
+    label = "insurance"
+    verbose_name = "Insurance"
 
     # Launcher module metadata (DESIGN §9). Read by apps.core.registry / the launcher.
     # (Attr is `launcher_module`, NOT `module`: AppConfig binds `.module` to the app's module.)
     launcher_module = {
-        "name": "Vehicles",
-        "description": "Cars, service & registration",
-        "glyph": "car",
-        "tint": "automobile",
-        "url": "automobile/",
-        "order": 90,
+        "name": "Insurance",
+        "description": "Policies, premiums & claims",
+        "glyph": "shield-check",
+        "tint": "insurance",
+        "url": "insurance/",
+        "order": 95,
     }
 
     def launcher_counts(self):
-        from apps.automobile.services import launcher_counts
+        from apps.insurance.services import launcher_counts
 
         return launcher_counts()

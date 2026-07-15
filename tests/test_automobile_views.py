@@ -91,7 +91,6 @@ def test_create_owned_cash_vehicle_with_purchase(make_tenant, make_user, client)
             "nickname": "New Car", "ownership_mode": "owned_cash", "currency": "USD",
             "fuel_type": "gasoline", "mileage_unit": "mi",
             "dealer_organization_new_name": "City Motors", "dealer_organization": "",
-            "insurer_organization": "", "insurer_organization_new_name": "",
             "purchase_price": "28000", "purchase_date": "2026-01-10", "initial_odometer": "12",
             "purchase_funding": "bank", "purchase_account": str(bank_id),
             "acquired_year": "2026", "acquired_month": "1", "acquired_day": "10",
@@ -136,7 +135,7 @@ def test_locked_bill_and_payment_are_readonly_in_payables(make_tenant, make_user
 
         v = _vehicle()
         bank = _bank()
-        ev = _funded_cost(v, CostKind.INSURANCE, D("900"), bank)
+        ev = _funded_cost(v, CostKind.SERVICE, D("900"), bank)
         bill_id, pay_id = ev.bill_id, ev.payment_id
     client.force_login(owner)
     # The bill edit view refuses a locked bill.

@@ -366,17 +366,20 @@ def test_fuel_economy_across_partial_fills(make_tenant):
         assert econ[0]["label"] == "mi/gal"
 
 
-def test_renewals_due_covers_all_five_date_kinds(make_tenant):
+def test_renewals_due_covers_all_date_kinds(make_tenant):
     tenant = make_tenant()
     with schema_context(tenant.schema_name):
         soon = datetime.date.today() + datetime.timedelta(days=20)
+        # Insurance moved to the Insurance module (InsurancePolicy), so it's no longer a Vehicle
+        # renewal here — the vehicle renewals feed covers registration / inspection / lease /
+        # warranty (property tax has its own cache).
         v = _vehicle(
-            insurance_expiry=soon, registration_expiry=soon, inspection_due=soon,
+            registration_expiry=soon, inspection_due=soon,
             lease_end_date=soon, warranty_expiry=soon,
         )
         rows = [r for r in renewals_due(45) if r["vehicle"].pk == v.pk]
         assert {r["label"] for r in rows} == {
-            "Insurance", "Registration", "Safety inspection", "Lease ends", "Warranty ends",
+            "Registration", "Safety inspection", "Lease ends", "Warranty ends",
         }
 
 

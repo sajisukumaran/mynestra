@@ -59,6 +59,7 @@ TENANT_APPS = [
     "apps.payables",           # Vendor bills + payments + item catalog; posts to the GL (module 6)
     "apps.loans",              # Loans & liabilities: debt register + amortization → GL (module 7)
     "apps.automobile",         # Vehicles: owned-at-cost + leased; costs → locked bills (module 8)
+    "apps.insurance",          # Insurance: policies + premiums (→ locked bills) + claims (Plan B)
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]

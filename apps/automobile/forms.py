@@ -20,7 +20,7 @@ class VehicleForm(forms.ModelForm):
         fields = [
             "nickname", "year", "make", "model_name", "trim", "body_type", "color",
             "vin", "license_plate", "plate_jurisdiction", "title_number",
-            "insurance_carrier", "insurance_policy_number", "warranty_provider", "notes",
+            "warranty_provider", "notes",
         ]
         widgets = {
             "nickname": forms.TextInput(attrs={"placeholder": "e.g. Family SUV"}),

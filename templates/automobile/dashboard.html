@@ -31,7 +31,7 @@
       {% if donut_total %}
       <c-donut :segments="donut_segments" :total="donut_total" total_label="Spent" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
       {% else %}
-      <c-empty-state icon="pie-chart" title="No costs yet" text="Record fuel, service or insurance to see the breakdown." />
+      <c-empty-state icon="pie-chart" title="No costs yet" text="Record fuel, service or registration to see the breakdown." />
       {% endif %}
     </c-card>
     <c-card icon="car" title="Cost by vehicle">
@@ -63,7 +63,7 @@
       <c-slot name="tail"><c-money :amount="e.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
     </c-rel-row>
     {% empty %}
-    <c-empty-state icon="clock" title="No activity yet" text="Fuel, service, insurance and purchases show up here." />
+    <c-empty-state icon="clock" title="No activity yet" text="Fuel, service, registration and purchases show up here." />
     {% endfor %}
   </c-card>
 </div>

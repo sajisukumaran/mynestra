@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}Insurance app shell: topbar + Insurance per-app sidebar. Composes the kit.{% endcomment %}
+{% block title %}{% block ins_heading %}Insurance{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Insurance" subtitle="{{ ui_tenant_name }}" glyph="shield-check">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}insurance/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Policies" icon="shield-check" count="{{ nav_policies }}" href="{{ ui_tenant_url }}insurance/policies/" {% if active == 'policies' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block ins %}{% endblock %}
+</c-shell>
+{% endblock %}

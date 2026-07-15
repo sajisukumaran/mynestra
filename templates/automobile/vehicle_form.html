@@ -17,11 +17,9 @@
        x-data="{ omode: '{{ vehicle.ownership_mode|default:'owned_cash' }}',
                  ownedModes: ['owned_cash','owned_financed'],
                  purchaseFunding: 'none', downSource: 'bank',
-                 vendorTarget: '',
                  dealerId: '{{ dealer.pk|default:'' }}', dealerName: '{{ dealer.display|default:''|escapejs }}', dealerTint: '{{ dealer.avatar_tint|default:'slate' }}', dealerInit: '{{ dealer.initials|default:'?' }}',
-                 insurerId: '{{ insurer.pk|default:'' }}', insurerName: '{{ insurer.display|default:''|escapejs }}', insurerTint: '{{ insurer.avatar_tint|default:'slate' }}', insurerInit: '{{ insurer.initials|default:'?' }}',
-                 pickVendor(d){ if(this.vendorTarget==='insurer'){ this.insurerId=d.id; this.insurerName=d.name; this.insurerTint=d.tint||'slate'; this.insurerInit=d.initials||'?'; } else { this.dealerId=d.id; this.dealerName=d.name; this.dealerTint=d.tint||'slate'; this.dealerInit=d.initials||'?'; } },
-                 clearDealer(){ this.dealerId=''; }, clearInsurer(){ this.insurerId=''; } }">
+                 pickVendor(d){ this.dealerId=d.id; this.dealerName=d.name; this.dealerTint=d.tint||'slate'; this.dealerInit=d.initials||'?'; },
+                 clearDealer(){ this.dealerId=''; } }">
 
     <c-card title="Vehicle" icon="car">
       <div class="form-grid">
@@ -130,42 +128,22 @@
     </c-card>
     {% endif %}
 
-    <c-card title="Dealer &amp; insurer" icon="building-2">
-      <div class="grid-halves">
-        <c-field label="Dealer" help="Where you bought it (optional).">
-          <div x-show="!dealerId">
-            <c-input type="search" name="dealer_q" autocomplete="off" placeholder="Search organizations…"
-                     @focus="vendorTarget='dealer'"
-                     hx-get="{{ ui_tenant_url }}automobile/vendor-search/" hx-trigger="input changed delay:200ms, focus"
-                     hx-target="#dealer-results" />
-            <div id="dealer-results" class="rel-results"></div>
-            <c-input name="dealer_organization_new_name" placeholder="…or type a new dealer name" />
-          </div>
-          <div x-show="dealerId" x-cloak class="rel">
-            <span class="avatar a-sm" :class="'av-'+dealerTint" x-text="dealerInit"></span>
-            <div class="grow"><div class="r-name" x-text="dealerName"></div><div class="r-role">Dealer</div></div>
-            <c-button type="button" variant="ghost" size="sm" @click="clearDealer()"><c-icon name="x" size="sm" /> Change</c-button>
-          </div>
-          <input type="hidden" name="dealer_organization" :value="dealerId">
-        </c-field>
-
-        <c-field label="Insurer" help="Your insurance company (optional).">
-          <div x-show="!insurerId">
-            <c-input type="search" name="insurer_q" autocomplete="off" placeholder="Search organizations…"
-                     @focus="vendorTarget='insurer'"
-                     hx-get="{{ ui_tenant_url }}automobile/vendor-search/" hx-trigger="input changed delay:200ms, focus"
-                     hx-target="#insurer-results" />
-            <div id="insurer-results" class="rel-results"></div>
-            <c-input name="insurer_organization_new_name" placeholder="…or type a new insurer name" />
-          </div>
-          <div x-show="insurerId" x-cloak class="rel">
-            <span class="avatar a-sm" :class="'av-'+insurerTint" x-text="insurerInit"></span>
-            <div class="grow"><div class="r-name" x-text="insurerName"></div><div class="r-role">Insurer</div></div>
-            <c-button type="button" variant="ghost" size="sm" @click="clearInsurer()"><c-icon name="x" size="sm" /> Change</c-button>
-          </div>
-          <input type="hidden" name="insurer_organization" :value="insurerId">
-        </c-field>
-      </div>
+    <c-card title="Dealer" icon="building-2">
+      <c-field label="Dealer" help="Where you bought it (optional). Add auto insurance in the Insurance module and link this vehicle to the policy.">
+        <div x-show="!dealerId">
+          <c-input type="search" name="dealer_q" autocomplete="off" placeholder="Search organizations…"
+                   hx-get="{{ ui_tenant_url }}automobile/vendor-search/" hx-trigger="input changed delay:200ms, focus"
+                   hx-target="#dealer-results" />
+          <div id="dealer-results" class="rel-results"></div>
+          <c-input name="dealer_organization_new_name" placeholder="…or type a new dealer name" />
+        </div>
+        <div x-show="dealerId" x-cloak class="rel">
+          <span class="avatar a-sm" :class="'av-'+dealerTint" x-text="dealerInit"></span>
+          <div class="grow"><div class="r-name" x-text="dealerName"></div><div class="r-role">Dealer</div></div>
+          <c-button type="button" variant="ghost" size="sm" @click="clearDealer()"><c-icon name="x" size="sm" /> Change</c-button>
+        </div>
+        <input type="hidden" name="dealer_organization" :value="dealerId">
+      </c-field>
     </c-card>
 
     {# Drivers #}
@@ -209,11 +187,8 @@
       {{ driver_rows|json_script:"driver-rows-data" }}
     </c-card>
 
-    <c-card title="Policy &amp; documents" icon="shield">
+    <c-card title="Registration &amp; warranty" icon="file-text">
       <div class="form-grid">
-        <c-field label="Insurance carrier"><div class="control">{{ form.insurance_carrier }}</div></c-field>
-        <c-field label="Policy number"><div class="control">{{ form.insurance_policy_number }}</div></c-field>
-        <c-field label="Insurance expires"><div class="control"><input type="date" name="insurance_expiry" value="{{ vehicle.insurance_expiry|date:'Y-m-d' }}"></div></c-field>
         <c-field label="Registration expires"><div class="control"><input type="date" name="registration_expiry" value="{{ vehicle.registration_expiry|date:'Y-m-d' }}"></div></c-field>
         <c-field label="Inspection due"><div class="control"><input type="date" name="inspection_due" value="{{ vehicle.inspection_due|date:'Y-m-d' }}"></div></c-field>
         <c-field label="Warranty provider"><div class="control">{{ form.warranty_provider }}</div></c-field>

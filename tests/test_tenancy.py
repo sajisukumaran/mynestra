@@ -376,3 +376,45 @@ def test_automobile_are_isolated(make_tenant):
         assert Bill.objects.count() == 0
         assert not Organization.objects.filter(name="Alpha Motors").exists()
         assert JournalEntry.objects.count() == 0
+
+
+def test_insurance_are_isolated(make_tenant):
+    """Insurance (Plan B): policies, coverages, members, covered-asset links and premiums, the
+    locked payables bills they generate, and the ledger entries must not leak across tenants."""
+    from apps.finance.models import Currency
+    from apps.insurance.models import (
+        InsurancePolicy,
+        InsurancePremium,
+        PolicyCoverage,
+        PolicyType,
+    )
+    from apps.insurance.services import save_premium
+    from apps.payables.models import Bill
+
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        usd = Currency.objects.get(code="USD")
+        policy = InsurancePolicy.objects.create(
+            policy_type=PolicyType.AUTO, currency=usd, nickname="Alpha Auto",
+            insurer_organization=Organization.objects.create(name="Alpha Insurance"),
+        )
+        PolicyCoverage.objects.create(policy=policy, coverage_type="Liability")
+        prem = InsurancePremium(
+            policy=policy, date=datetime.date(2026, 1, 5), amount=Decimal("900")
+        )
+        prem.save()
+        save_premium(prem, is_new=True)
+        assert InsurancePolicy.objects.count() == 1
+        assert InsurancePremium.objects.count() == 1
+        assert PolicyCoverage.objects.count() == 1
+        assert Bill.objects.filter(is_locked=True).count() == 1
+
+    with schema_context(b.schema_name):
+        assert InsurancePolicy.objects.count() == 0
+        assert InsurancePremium.objects.count() == 0
+        assert PolicyCoverage.objects.count() == 0
+        assert Bill.objects.count() == 0
+        assert not Organization.objects.filter(name="Alpha Insurance").exists()
+        assert JournalEntry.objects.count() == 0

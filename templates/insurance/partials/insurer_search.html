@@ -1,0 +1,17 @@
+{% comment %}htmx results: organizations matching the query — candidates to pick as the insurer.
+Each row calls pickInsurer(...) on the enclosing Alpine scope via its data-* attributes.{% endcomment %}
+{% if orgs %}
+<div class="rel-results-list">
+  {% for o in orgs %}
+  <button type="button" class="rel-result" data-id="{{ o.pk }}" data-name="{{ o.display }}"
+          data-tint="{{ o.avatar_tint }}" data-initials="{{ o.initials }}"
+          @click="pickInsurer($el.dataset)">
+    <span class="avatar a-sm av-{{ o.avatar_tint }}">{{ o.initials }}</span>
+    <span class="grow">{{ o.display }}</span>
+    <c-icon name="plus" size="sm" class="subtle" />
+  </button>
+  {% endfor %}
+</div>
+{% elif q %}
+<p class="subtle p-8">No organizations match “{{ q }}”. Type a name and it'll be created as the insurer.</p>
+{% endif %}

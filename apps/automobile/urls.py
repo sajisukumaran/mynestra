@@ -10,7 +10,6 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("all/", views.vehicle_list, name="list"),
     path("new/", views.vehicle_create, name="vehicle-create"),
-    path("insurance/new/", views.insurance_create, name="insurance-create"),
     path("<int:pk>/", views.vehicle_detail, name="vehicle-detail"),
     path("<int:pk>/edit/", views.vehicle_edit, name="vehicle-edit"),
     path("<int:pk>/delete/", views.vehicle_delete, name="vehicle-delete"),

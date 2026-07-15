@@ -1,0 +1,61 @@
+{% extends "insurance/base.html" %}
+{% block ins_heading %}Dashboard{% endblock %}
+
+{% block ins %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Insurance</span></c-breadcrumb>
+
+<c-page-header title="Insurance" subtitle="Your household's policies — premiums tracked, renewals in view.">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" /> New policy</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="shield-check" tint="teal" value="{{ active_count }}" label="Active policies">
+      <c-slot name="foot">{{ policies_count }} total</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="banknote" tint="violet" value="" label="Annual premium">
+      <c-slot name="foot"><c-money :amount="annual_premium" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /> / year</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="calendar-days" tint="amber" value="{{ renewals|length }}" label="Renewals due">
+      <c-slot name="foot">next 90 days</c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="pie-chart" title="Annual premium by type">
+      {% if bar_total %}
+      <c-bar-list :items="bar_items" :total="bar_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
+      {% else %}
+      <c-empty-state icon="pie-chart" title="No premiums yet" text="Add a policy with a premium to see the breakdown." />
+      {% endif %}
+    </c-card>
+    <c-card icon="calendar-days" title="Upcoming renewals">
+      {% if renewals %}
+      {% for r in renewals %}
+      <c-rel-row name="{{ r.policy.display }}" role="{{ r.policy.type_label }} · renews {{ r.date|date:'d M Y' }}" href="{{ ui_tenant_url }}insurance/policies/{{ r.policy.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ r.policy.type_tint }}" size="sm" square><c-icon name="{{ r.policy.type_glyph }}" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail">
+          {% if r.days < 0 %}<c-badge variant="danger">Overdue</c-badge>{% elif r.days <= 14 %}<c-badge variant="warning">{{ r.days }} {{ r.days|pluralize:'day,days' }}</c-badge>{% else %}<c-badge variant="info">{{ r.days }} days</c-badge>{% endif %}
+        </c-slot>
+      </c-rel-row>
+      {% endfor %}
+      {% else %}
+      <c-empty-state icon="calendar-days" title="Nothing due" text="Policy renewals in the next 90 days show up here." />
+      {% endif %}
+    </c-card>
+  </div>
+
+  <c-card icon="clock" title="Recent premiums">
+    {% for p in recent %}
+    <c-rel-row name="{{ p.policy.display }}" role="Premium{% if p.memo %} · {{ p.memo }}{% endif %} · {{ p.date|date:'d M Y' }}" href="{{ ui_tenant_url }}insurance/policies/{{ p.policy_id }}/">
+      <c-slot name="avatar"><c-avatar tint="{{ p.policy.type_tint }}" size="sm"><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+    </c-rel-row>
+    {% empty %}
+    <c-empty-state icon="clock" title="No premiums yet" text="Premiums you record on a policy show up here." />
+    {% endfor %}
+  </c-card>
+</div>
+{% endblock %}
