@@ -19,12 +19,15 @@
     <tbody>
       {% for p in payments %}
       <tr>
-        <td class="strong">{{ p.payment_number }}</td>
+        <td class="strong">{{ p.payment_number }}{% if p.is_locked %} <c-badge variant="lock"><c-icon name="key-round" size="sm" /> Managed</c-badge>{% endif %}</td>
         <td class="muted tnum">{{ p.date|date:"d M Y" }}</td>
         <td>{{ p.vendor_name }}</td>
         <td class="muted">{{ p.funding_label }}</td>
         <td class="col-num"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="2" grouping="{{ ui_number_format }}" /></td>
         <td>
+          {% if p.is_locked %}
+          <span class="subtle">Managed elsewhere</span>
+          {% else %}
           <div class="cell-actions">
             <c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}payables/payments/{{ p.pk }}/edit/" title="Edit"><c-icon name="pencil" size="sm" /></c-button>
             <c-confirm-dialog title="Delete {{ p.payment_number }}?" message="This erases the payment and its funding entry, and re-opens the bills it settled.">
@@ -36,6 +39,7 @@
               </c-slot>
             </c-confirm-dialog>
           </div>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}

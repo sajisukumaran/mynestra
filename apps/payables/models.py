@@ -550,6 +550,9 @@ class Payment(SoftDeleteModel):
         BANK = "bank", "Bank account"
         CARD = "card", "Credit card"
         CASH = "cash", "Cash / other"
+        # Settled by loan proceeds (a financed purchase): the payment posts a loan DISBURSEMENT
+        # that debits AP directly (no bank/card/cash leg). Used by the Automobile module.
+        LOAN = "loan", "Loan proceeds"
 
     vendor_person = models.ForeignKey(
         "contacts.Person", on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
@@ -583,10 +586,28 @@ class Payment(SoftDeleteModel):
         "cards.CreditCardTransaction", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="+",
     )
+    # LOAN funding: the loan whose proceeds settle the bill(s) + the disbursement it created.
+    loan = models.ForeignKey(
+        "loans.Loan", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    loan_txn = models.ForeignKey(
+        "loans.LoanTransaction", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
     journal_entry = models.ForeignKey(
         "finance.JournalEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     posting_version = models.PositiveIntegerField(default=1)
+
+    # Cross-module "locked payment" seam (same shape as Bill): a payment another module generated is
+    # read-only here — editing/deleting it in Payables would strand a clearing leg and silently
+    # reopen a locked bill, so the views guard it (403) and the source module owns its lifecycle.
+    is_locked = models.BooleanField(default=False)
+    source_content_type = models.ForeignKey(
+        "contenttypes.ContentType", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    source_object_id = models.PositiveBigIntegerField(null=True, blank=True)
+    source = GenericForeignKey("source_content_type", "source_object_id")
 
     history = HistoricalRecords()
 
@@ -634,6 +655,8 @@ class Payment(SoftDeleteModel):
             return self.bank_account.nickname
         if self.funding_kind == self.Funding.CARD and self.credit_card_id:
             return self.credit_card.nickname
+        if self.funding_kind == self.Funding.LOAN:
+            return self.loan.nickname if self.loan_id else "Loan proceeds"
         return "Cash / other"
 
 

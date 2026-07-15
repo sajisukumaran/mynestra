@@ -206,8 +206,19 @@ def recompute_bill_status(bill) -> None:
         bill.save(update_fields=["status", "updated_at"])
 
 
+def _automobile_sourced(bill) -> bool:
+    """True when a locked bill's source lives in the Automobile module. Its capitalized lines
+    (the vehicle node 1420.NN, an improvement, or the 1320 lease deposit) must NOT materialize an
+    AssetItem — the Vehicle is the single asset-of-record. (F5: gate on the source app label, not
+    an isinstance check — the bill's source is the cost event, not the Vehicle.)"""
+    ct = bill.source_content_type
+    return bool(bill.is_locked and ct is not None and ct.app_label == "automobile")
+
+
 def _sync_asset_items(bill) -> None:
     """Create/refresh an AssetItem per capitalized line; drop assets for un-capitalized lines."""
+    if _automobile_sourced(bill):
+        return
     kept = []
     for line in bill.lines.all():
         if not line.capitalize or line.amount <= ZERO or line.line_type not in _CATEGORY_TYPES:
@@ -268,6 +279,21 @@ def apply_payment(payment, allocations, *, user=None):
         )
         card_post(txn, user=user)
         payment.card_txn = txn
+    elif payment.funding_kind == Payment.Funding.LOAN and payment.loan_id:
+        # Financed purchase: a loan DISBURSEMENT posts Dr AP (tagged the dealer) / Cr the loan node.
+        # No cash/bank leg — the bill still flips PAID via the allocation loop below (status derives
+        # from PaymentAllocation, never the GL). (F1: settling AP outside a Payment leaves it OPEN.)
+        from apps.loans.models import Funding as LoanFunding
+        from apps.loans.models import LoanTransaction, LoanTxnType
+        from apps.loans.services import post_transaction as loan_post
+
+        loan_txn = LoanTransaction.objects.create(
+            loan=payment.loan, txn_type=LoanTxnType.DISBURSEMENT,
+            funding_source=LoanFunding.PAYABLE, amount=payment.amount, date=payment.date,
+            payer_person=payment.vendor_person, payer_organization=payment.vendor_organization,
+        )
+        loan_post(loan_txn, user=user)
+        payment.loan_txn = loan_txn
     else:
         cash = payment.cash_account or resolve_account("1110")
         entry = post_entry(
@@ -303,6 +329,10 @@ def delete_payment(payment, *, user=None):
         bank_delete(payment.bank_txn)
     elif payment.card_txn_id:
         card_delete(payment.card_txn)
+    elif payment.loan_txn_id:
+        from apps.loans.services import delete_transaction as loan_delete
+
+        loan_delete(payment.loan_txn, user=user)
     elif payment.journal_entry_id:
         payment.journal_entry.hard_delete()
     for bill in bills:
@@ -325,6 +355,11 @@ def repost_payment(payment, allocations, *, user=None):
     elif payment.card_txn_id:
         card_delete(payment.card_txn)
         payment.card_txn = None
+    elif payment.loan_txn_id:
+        from apps.loans.services import delete_transaction as loan_delete
+
+        loan_delete(payment.loan_txn, user=user)
+        payment.loan_txn = None
     elif payment.journal_entry_id:
         payment.journal_entry.hard_delete()
         payment.journal_entry = None

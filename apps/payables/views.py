@@ -491,9 +491,15 @@ def bill_detail(request, pk):
     bill = get_object_or_404(
         Bill.objects.select_related("vendor_person", "vendor_organization", "terms"), pk=pk
     )
+    # A locked bill is owned by another module; surface a back-link to its source record. The source
+    # object opts in by exposing `managed_label` / `managed_url` (a tenant-relative path) — kept
+    # module-agnostic here so any future consumer of the locked-bill seam works without edits.
+    source = bill.source if bill.is_locked else None
     ctx = pay_context(
         request, "bills",
         bill=bill, lines=bill.lines.all(), history=bill.history.all()[:40],
+        source_label=getattr(source, "managed_label", ""),
+        source_url=getattr(source, "managed_url", ""),
     )
     return render(request, "payables/bill_detail.html", ctx)
 
@@ -599,6 +605,8 @@ def payment_create(request):
 
 def payment_edit(request, pk):
     payment = get_object_or_404(Payment, pk=pk)
+    if payment.is_locked:
+        return HttpResponseForbidden("This payment is managed by another module; read-only here.")
     if request.method == "POST":
         return _save_payment(request, payment)
     person, org = payment.vendor_person, payment.vendor_organization
@@ -672,6 +680,8 @@ def payment_delete(request, pk):
     """Erase a mistaken payment: hard-remove its funding transaction / cash entry + the record;
     the bills it settled reopen."""
     payment = get_object_or_404(Payment, pk=pk)
+    if payment.is_locked:
+        return HttpResponseForbidden("This payment is managed by another module; read-only here.")
     if request.method == "POST":
         delete_payment(payment, user=request.user)
         payment.hard_delete()
