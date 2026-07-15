@@ -16,7 +16,6 @@ COMING_SOON = [
     {"name": "Health", "description": "Records, visits & medications", "glyph": "activity"},
     {"name": "Documents", "description": "Files, IDs & certificates", "glyph": "file-text"},
     {"name": "Reminders", "description": "Tasks & important dates", "glyph": "calendar-days"},
-    {"name": "Vehicles", "description": "Cars, service & insurance", "glyph": "car"},
     {"name": "Travel", "description": "Trips, bookings & documents", "glyph": "plane"},
 ]
 
