@@ -52,6 +52,7 @@ P2O_TYPES = [
     ("customer", "Customer"),
     ("account_holder", "Account Holder"),
     ("cardholder", "Cardholder"),
+    ("borrower", "Borrower"),
     ("employee", "Employee"),
     ("patient", "Patient"),
     ("student", "Student"),

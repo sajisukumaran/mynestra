@@ -240,3 +240,49 @@ def test_payables_bills_payments_and_catalog_are_isolated(make_tenant):
         assert Item.objects.count() == 0
         assert not Organization.objects.filter(name="Alpha-Only Vendor").exists()
         assert JournalEntry.objects.count() == 0
+
+
+def test_loans_are_isolated(make_tenant):
+    """Module 7 (Loan/LoanBorrower/LoanRateChange/LoanTransaction) and the ledger entries they post
+    must not leak across tenant schemas."""
+    from apps.finance.models import Currency
+    from apps.loans.models import (
+        Loan,
+        LoanBorrower,
+        LoanRateChange,
+        LoanTransaction,
+        LoanTxnType,
+    )
+    from apps.loans.services import post_transaction
+
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        lender = Organization.objects.create(name="Alpha Bank")
+        person = Person.objects.create(first_name="Alpha", last_name="Borrower")
+        loan = Loan.objects.create(
+            loan_type="mortgage", nickname="Alpha Home",
+            currency=Currency.objects.get(code="USD"),
+            lender_organization=lender, principal_original=Decimal("100000"),
+        )
+        LoanBorrower.objects.create(loan=loan, person=person, role="primary")
+        LoanRateChange.objects.create(
+            loan=loan, effective_date=datetime.date(2026, 1, 1), annual_rate=Decimal("6")
+        )
+        opening = LoanTransaction.objects.create(
+            loan=loan, txn_type=LoanTxnType.OPENING, date=datetime.date(2026, 1, 5),
+            amount=Decimal("100000"),
+        )
+        post_transaction(opening)
+        assert Loan.objects.count() == 1 and LoanBorrower.objects.count() == 1
+        assert LoanRateChange.objects.count() == 1 and LoanTransaction.objects.count() == 1
+        assert loan.balance == Decimal("100000")
+
+    with schema_context(b.schema_name):
+        assert Loan.objects.count() == 0
+        assert LoanBorrower.objects.count() == 0
+        assert LoanRateChange.objects.count() == 0
+        assert LoanTransaction.objects.count() == 0
+        assert not Organization.objects.filter(name="Alpha Bank").exists()
+        assert JournalEntry.objects.count() == 0
