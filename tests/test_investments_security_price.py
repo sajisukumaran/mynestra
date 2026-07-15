@@ -113,6 +113,26 @@ def test_mass_price_update_creates_filled_skips_blank_and_excludes_non_quotable(
         assert not SecurityPrice.objects.filter(security_id=cdid).exists()  # excluded → ignored
 
 
+def test_mass_price_update_tolerates_pasted_formatting(make_tenant, make_user, client):
+    """A price copied with a thousands-separator comma / currency symbol (e.g. "$1,234.56") is
+    stripped and stored, not silently skipped."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        usd = Currency.objects.get(code="USD")
+        a = Security.objects.create(symbol="AAA", name="Alpha", currency=usd)
+        b = Security.objects.create(symbol="BBB", name="Beta", currency=usd)
+        aid, bid = a.pk, b.pk
+    client.force_login(owner)
+    resp = client.post(_url(tenant, "securities/mass-prices/"), {
+        "as_of": "2026-01-15", "source": "",
+        f"price_{aid}": "1,234.56", f"price_{bid}": "$2,000"}, follow=True)
+    assert resp.status_code == 200
+    assert "Updated 2 prices as of 15 Jan 2026" in resp.content.decode()
+    with schema_context(tenant.schema_name):
+        assert SecurityPrice.objects.get(security_id=aid).price == D("1234.56")
+        assert SecurityPrice.objects.get(security_id=bid).price == D("2000")
+
+
 def test_mass_price_update_overwrites_existing_mark_on_that_date(make_tenant, make_user, client):
     tenant, owner = _owner(make_tenant, make_user)
     with schema_context(tenant.schema_name):

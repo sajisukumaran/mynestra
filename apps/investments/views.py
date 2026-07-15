@@ -157,8 +157,16 @@ def _expense_accounts():
 
 
 def _decimal(raw):
+    """Parse a user-entered decimal, tolerating pasted formatting: thousands-separator commas,
+    a leading currency symbol, and surrounding/embedded whitespace are stripped before parsing
+    (e.g. "$1,234.56" → 1234.56). Anything still unparseable → None."""
+    if raw is None:
+        return None
+    cleaned = "".join(ch for ch in str(raw) if not ch.isspace() and ch not in ",$£€¥")
+    if not cleaned:
+        return None
     try:
-        return Decimal((raw or "").strip())
+        return Decimal(cleaned)
     except (InvalidOperation, TypeError):
         return None
 
