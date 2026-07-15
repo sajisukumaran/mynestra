@@ -195,7 +195,28 @@ def test_net_worth_excludes_contingent_liabilities(make_tenant):
         assert account_balance("2950") == D("500")
 
 
-def test_retained_earnings_rolls_prior_years_forward(make_tenant):
+def test_vehicle_asset_node_rolls_up_and_counts_in_net_worth(make_tenant):
+    """A per-vehicle 1420.NN node (held at cost) rolls up 1420 → 1400 → Assets and lifts net worth,
+    with no special treatment (unlike the 2950 contingent-liability header)."""
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        car = Account.objects.create(
+            code="1420.01",
+            name="Vehicle — Family SUV",
+            type=AccountType.ASSET,
+            normal_side=Side.DEBIT,
+            parent=Account.objects.get(code="1420"),
+        )
+        post_entry(  # capitalize a car purchased for cash
+            date=JAN,
+            lines=[LineInput(car, debit=D("30000")), LineInput("1110", credit=D("30000"))],
+        )
+        assert account_balance(car) == D("30000")
+        assert account_balance("1420") == D("30000")  # header rolls up its child
+        assert account_balance("1400") == D("30000")  # Property & Vehicles
+        # Net worth is unchanged by moving cash into a like-valued asset (both are assets).
+        assert net_worth() == D("0")  # −30000 cash + 30000 vehicle
+
     tenant = make_tenant()
     with schema_context(tenant.schema_name):
         post_entry(

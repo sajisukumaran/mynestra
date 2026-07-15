@@ -54,9 +54,14 @@ CHART_OF_ACCOUNTS = [
     ("1230", "HSA", ASSET, "1200", False, "hsa"),
     ("1300", "Receivables", ASSET, "1000", True, ""),
     ("1310", "Prepaid Expenses", ASSET, "1000", True, ""),
+    # Refundable deposits held as an asset (e.g. a vehicle lease security deposit): recovered on
+    # lease return, or applied against a buyout. The Automobile module posts lease deposits here.
+    ("1320", "Refundable Deposits", ASSET, "1000", True, "refundable_deposits"),
     ("1400", "Property & Vehicles", ASSET, "1000", False, ""),
     ("1410", "Real Estate", ASSET, "1400", True, ""),
-    ("1420", "Vehicles", ASSET, "1400", True, ""),
+    # 1420 is a group header: the Automobile module nests one postable sub-account per owned vehicle
+    # beneath it (held at cost), so per-vehicle basis rolls up here (never posted to directly).
+    ("1420", "Vehicles", ASSET, "1400", False, "vehicles"),
     # Capitalized durable household goods (electronics/appliances/furniture): the Payables module
     # nests warranty-tracked purchases here instead of expensing them.
     ("1430", "Household Goods & Equipment", ASSET, "1400", True, "household_goods"),
@@ -112,6 +117,9 @@ CHART_OF_ACCOUNTS = [
     ("4900", "Other Income", REVENUE, "4000", True, ""),
     # Early-payment / purchase discounts taken on vendor bills (reduces the net cost of purchases).
     ("4920", "Purchase Discounts", REVENUE, "4000", True, "purchase_discounts"),
+    # Gain/loss on disposing a capitalized asset (a vehicle sale/trade-in/total-loss); REVENUE-typed
+    # so it can run negative (a loss). Mirrors 4320 Realized Capital Gain/Loss for investments.
+    ("4930", "Gain/Loss on Asset Sale", REVENUE, "4000", True, "asset_disposal_gain_loss"),
     ("4950", "Foreign Exchange Gain/Loss", REVENUE, "4000", True, "fx_gain_loss"),
     # --- Expenses ---
     ("5000", "Expenses", EXPENSE, None, False, ""),
@@ -128,6 +136,11 @@ CHART_OF_ACCOUNTS = [
     ("5310", "Fuel", EXPENSE, "5300", True, ""),
     ("5320", "Vehicle Service", EXPENSE, "5300", True, ""),
     ("5330", "Transit", EXPENSE, "5300", True, ""),
+    # Automobile module running-cost homes (auto insurance premiums, registration / road tax, and
+    # lease payments — leases are off balance sheet, so a lease payment is an expense here).
+    ("5340", "Vehicle Insurance", EXPENSE, "5300", True, "vehicle_insurance"),
+    ("5350", "Vehicle Registration", EXPENSE, "5300", True, "vehicle_registration"),
+    ("5360", "Vehicle Lease", EXPENSE, "5300", True, "vehicle_lease"),
     ("5400", "Health & Medical", EXPENSE, "5000", True, ""),
     ("5500", "Insurance", EXPENSE, "5000", True, ""),
     ("5600", "Education", EXPENSE, "5000", True, ""),
