@@ -1,0 +1,97 @@
+{% comment %}Cost-event modal fields, shared by the add + edit forms. Expects the enclosing <form>
+to provide an Alpine scope: { kind, funding, vendorId, vendorName, vendorTint, vendorInit,
+pickVendor(d), clearVendor() }. `suffix` disambiguates ids across the many modals on the page;
+`event` (optional) prefills for edit.{% endcomment %}
+<div class="stack-16">
+  <div class="form-grid">
+    <c-field label="Kind" required>
+      <c-select name="kind" x-model="kind">
+        {% for val, label in cost_kinds %}<option value="{{ val }}"{% if event and event.kind == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </c-select>
+    </c-field>
+    <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if event %}{{ event.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+    <c-field label="Amount" required><div class="control"><input name="amount" inputmode="decimal" placeholder="0.00" value="{% if event %}{{ event.amount|floatformat:'-2' }}{% endif %}"></div></c-field>
+  </div>
+
+  <c-field label="Vendor" required help="Who you paid — search an organization or type a new name.">
+    <div x-show="!vendorId">
+      <c-input type="search" name="vendor_q_{{ suffix }}" autocomplete="off" placeholder="Search organizations…"
+               hx-get="{{ ui_tenant_url }}automobile/vendor-search/" hx-trigger="input changed delay:200ms, focus"
+               hx-target="#vendor-results-{{ suffix }}" />
+      <div id="vendor-results-{{ suffix }}" class="rel-results"></div>
+      <c-input name="vendor_organization_new_name" placeholder="…or type a new vendor name" />
+    </div>
+    <div x-show="vendorId" x-cloak class="rel">
+      <span class="avatar a-sm" :class="'av-'+vendorTint" x-text="vendorInit"></span>
+      <div class="grow"><div class="r-name" x-text="vendorName"></div><div class="r-role">Organization</div></div>
+      <c-button type="button" variant="ghost" size="sm" @click="clearVendor()"><c-icon name="x" size="sm" /> Change</c-button>
+    </div>
+    <input type="hidden" name="vendor_organization" :value="vendorId">
+  </c-field>
+
+  {# Fuel / charging fields #}
+  <div class="form-grid" x-show="kind === 'fuel'" x-cloak>
+    <c-field label="Volume"><div class="control"><input name="fuel_volume" inputmode="decimal" placeholder="0.00" value="{% if event %}{{ event.fuel_volume|default:''|floatformat:'-2' }}{% endif %}"></div></c-field>
+    <c-field label="Unit">
+      <c-select name="fuel_unit">
+        <option value="">—</option>
+        {% for val, label in fuel_units %}<option value="{{ val }}"{% if event and event.fuel_unit == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </c-select>
+    </c-field>
+    <c-field label="Odometer"><div class="control"><input name="odometer" inputmode="numeric" placeholder="e.g. 12500" value="{% if event %}{{ event.odometer|default:'' }}{% endif %}"></div></c-field>
+    <c-field label="Full tank?"><label class="row"><input type="checkbox" name="is_full_tank"{% if not event or event.is_full_tank %} checked{% endif %}> <span class="muted">Filled to full</span></label></c-field>
+  </div>
+  <div class="form-grid" x-show="kind !== 'fuel'">
+    <c-field label="Odometer" help="Optional — records a mileage reading."><div class="control"><input name="odometer" inputmode="numeric" placeholder="e.g. 12500" value="{% if event %}{{ event.odometer|default:'' }}{% endif %}"></div></c-field>
+  </div>
+
+  {# Renewal / due dates #}
+  <div class="form-grid">
+    <c-field label="Covers through" help="For insurance / registration / inspection — advances the renewal date." x-show="['insurance','registration','inspection'].includes(kind)" x-cloak>
+      <div class="control"><input type="date" name="covers_through" value="{% if event %}{{ event.covers_through|date:'Y-m-d' }}{% endif %}"></div>
+    </c-field>
+    <c-field label="Due date" help="Optional — for an unpaid bill."><div class="control"><input type="date" name="due_date" value="{% if event %}{{ event.due_date|date:'Y-m-d' }}{% endif %}"></div></c-field>
+  </div>
+
+  {# Funding #}
+  <c-field label="How was it paid?">
+    <div class="control is-select">
+      <select name="funding_source" x-model="funding">
+        {% for val, label in fundings %}<option value="{{ val }}"{% if event and event.funding_source == val %} selected{% elif not event and val == 'none' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <div class="form-grid">
+    <c-field label="Bank account" x-show="funding === 'bank'" x-cloak>
+      <div class="control is-select">
+        <select name="funding_account">
+          <option value="">—</option>
+          {% for a in bank_accounts %}<option value="{{ a.pk }}"{% if event and event.funding_account_id == a.pk %} selected{% endif %}>{{ a.nickname }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    <c-field label="Credit card" x-show="funding === 'card'" x-cloak>
+      <div class="control is-select">
+        <select name="credit_card">
+          <option value="">—</option>
+          {% for c in credit_cards %}<option value="{{ c.pk }}"{% if event and event.credit_card_id == c.pk %} selected{% endif %}>{{ c.nickname }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    <c-field label="Cash account" x-show="funding === 'cash'" x-cloak>
+      <div class="control is-select">
+        <select name="cash_account">
+          <option value="">Cash on hand</option>
+          {% for a in cash_accounts %}<option value="{{ a.pk }}"{% if event and event.cash_account_id == a.pk %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+  </div>
+
+  <c-field label="Memo"><c-input name="memo" value="{% if event %}{{ event.memo }}{% endif %}" placeholder="Optional note" /></c-field>
+  <c-field label="Reference"><c-input name="reference" value="{% if event %}{{ event.reference }}{% endif %}" placeholder="Invoice / policy number" /></c-field>
+</div>

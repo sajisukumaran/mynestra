@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}Vehicles app shell: topbar + Vehicles per-app sidebar. Composes the kit.{% endcomment %}
+{% block title %}{% block auto_heading %}Vehicles{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Vehicles" subtitle="{{ ui_tenant_name }}" glyph="car">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}automobile/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Vehicles" icon="car" count="{{ nav_vehicles }}" href="{{ ui_tenant_url }}automobile/all/" {% if active == 'vehicles' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block auto %}{% endblock %}
+</c-shell>
+{% endblock %}

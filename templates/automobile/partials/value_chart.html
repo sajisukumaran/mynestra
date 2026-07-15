@@ -1,0 +1,8 @@
+{% comment %}Value-over-time chart fragment: current market value (manual valuations) vs. cost basis
+carried forward. Reuses c-line-chart with relabelled legend keys.{% endcomment %}
+<div id="value-chart">
+  <c-line-chart :geo="value_geo" :market="value_data.last_value" :invested="value_data.last_cost"
+                :gain="value_data.gain" market_label="Value" invested_label="At cost"
+                symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}"
+                empty_text="Add a value estimate to chart this vehicle over time." />
+</div>

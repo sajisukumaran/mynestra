@@ -1,0 +1,70 @@
+{% extends "automobile/base.html" %}
+{% block auto_heading %}Dashboard{% endblock %}
+
+{% block auto %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Vehicles</span></c-breadcrumb>
+
+<c-page-header title="Vehicles" subtitle="Your household's cars — held at cost, with every running cost tracked.">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}automobile/new/"><c-icon name="plus" /> New vehicle</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="car" tint="sky" value="" label="Fleet value">
+      <c-slot name="foot"><c-money :amount="fleet_value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /> at cost</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="hash" tint="blue" value="{{ vehicles_count }}" label="Vehicles">
+      <c-slot name="foot">{{ owned_count }} owned · {{ leased_count }} leased</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="calendar-days" tint="amber" value="" label="Est. monthly running cost">
+      <c-slot name="foot"><c-money :amount="monthly_running_cost" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="receipt" tint="violet" value="" label="Cost YTD">
+      <c-slot name="foot"><c-money :amount="cost_ytd" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="pie-chart" title="Cost by category">
+      {% if donut_total %}
+      <c-donut :segments="donut_segments" :total="donut_total" total_label="Spent" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
+      {% else %}
+      <c-empty-state icon="pie-chart" title="No costs yet" text="Record fuel, service or insurance to see the breakdown." />
+      {% endif %}
+    </c-card>
+    <c-card icon="car" title="Cost by vehicle">
+      {% if bar_total %}
+      <c-bar-list :items="bar_items" :total="bar_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
+      {% else %}
+      <c-empty-state icon="car" title="No costs yet" text="Spending per vehicle shows up here." />
+      {% endif %}
+    </c-card>
+  </div>
+
+  {% if renewals %}
+  <c-card icon="calendar-clock" title="Upcoming renewals &amp; service">
+    {% for r in renewals %}
+    <c-rel-row name="{{ r.vehicle.nickname }}" role="{{ r.label }} · {{ r.date|date:'d M Y' }}" href="{{ ui_tenant_url }}automobile/{{ r.vehicle.pk }}/">
+      <c-slot name="avatar"><c-avatar tint="{{ r.vehicle.type_tint }}" size="sm" square><c-icon name="{{ r.glyph }}" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail">
+        {% if r.days < 0 %}<c-badge variant="danger">Overdue</c-badge>{% elif r.days <= 14 %}<c-badge variant="warning">{{ r.days }} {{ r.days|pluralize:'day,days' }}</c-badge>{% else %}<c-badge variant="info">{{ r.days }} days</c-badge>{% endif %}
+      </c-slot>
+    </c-rel-row>
+    {% endfor %}
+  </c-card>
+  {% endif %}
+
+  <c-card icon="clock" title="Recent activity">
+    {% for e in recent %}
+    <c-rel-row name="{{ e.vehicle.nickname }}" role="{{ e.kind_label }}{% if e.memo %} · {{ e.memo }}{% endif %} · {{ e.date|date:'d M Y' }}" href="{{ ui_tenant_url }}automobile/{{ e.vehicle_id }}/">
+      <c-slot name="avatar"><c-avatar tint="{{ e.vehicle.type_tint }}" size="sm"><c-icon name="{{ e.kind_glyph }}" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><c-money :amount="e.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+    </c-rel-row>
+    {% empty %}
+    <c-empty-state icon="clock" title="No activity yet" text="Fuel, service, insurance and purchases show up here." />
+    {% endfor %}
+  </c-card>
+</div>
+{% endblock %}

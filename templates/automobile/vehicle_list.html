@@ -1,0 +1,76 @@
+{% extends "automobile/base.html" %}
+{% block auto_heading %}Vehicles{% endblock %}
+
+{% block auto %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}automobile/">Vehicles</a><c-icon name="chevron-right" /><span class="strong">All vehicles</span></c-breadcrumb>
+
+<c-page-header title="Vehicles" subtitle="{{ total }} {{ total|pluralize:'vehicle,vehicles' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}automobile/new/"><c-icon name="plus" /> New vehicle</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by nickname, make, model, VIN or plate…"></label>
+    {% if mode %}<input type="hidden" name="mode" value="{{ mode }}">{% endif %}
+    {% if sort != 'nickname' %}<input type="hidden" name="sort" value="{{ sort }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}automobile/all/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not mode %} active{% endif %}" href="{% querystring mode=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    {% for chip in mode_chips %}
+    <a class="fchip{% if mode == chip.val %} active{% endif %}" href="{% querystring mode=chip.val page=None %}">{{ chip.label }} <span class="cnt tnum">{{ chip.count }}</span></a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if vehicles %}
+    <c-table>
+      <thead><tr>
+        <c-th sortable {% if sort == 'nickname' or sort == '-nickname' %}sorted dir="{% if sort == 'nickname' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring sort=sort_name_next page=None %}">Vehicle</a></c-th>
+        <c-th>Details</c-th>
+        <c-th>Ownership</c-th>
+        <c-th>Mileage</c-th>
+        <th class="col-num">Value / cost</th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for v in vehicles %}
+        <tr>
+          <td>
+            <a class="person-cell" href="{{ ui_tenant_url }}automobile/{{ v.pk }}/">
+              <c-avatar tint="{{ v.type_tint }}" size="sm" square><c-icon name="car" size="sm" /></c-avatar>
+              <div><div class="pc-name">{{ v.nickname }}{% if not v.is_active %} <c-badge variant="warning">Disposed</c-badge>{% endif %}</div>{% if v.license_plate %}<div class="pc-sub tnum">{{ v.license_plate }}</div>{% endif %}</div>
+            </a>
+          </td>
+          <td class="muted">{{ v.full_name|default:"—" }}</td>
+          <td><c-chip tint="{{ v.type_tint }}">{{ v.ownership_label }}</c-chip></td>
+          <td class="muted tnum">{% if v.current_mileage %}{{ v.current_mileage }} {{ v.mileage_unit }}{% else %}—{% endif %}</td>
+          <td class="col-num"><c-money :amount="v.current_value" symbol="{{ v.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td><div class="cell-actions"><c-button icon_only size="sm" variant="ghost" href="{{ ui_tenant_url }}automobile/{{ v.pk }}/edit/"><c-icon name="pencil" size="sm" /></c-button></div></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="car"
+      title="{% if q or mode %}No vehicles match{% else %}No vehicles yet{% endif %}"
+      text="{% if q or mode %}Try a different search or filter.{% else %}Add a car you own or lease — held at cost, with fuel, service and insurance tracked.{% endif %}">
+      {% if not q and not mode %}<c-button variant="primary" href="{{ ui_tenant_url }}automobile/new/"><c-icon name="plus" /> New vehicle</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

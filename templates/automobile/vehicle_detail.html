@@ -1,0 +1,324 @@
+{% extends "automobile/base.html" %}
+{% block auto_heading %}{{ vehicle.nickname }}{% endblock %}
+
+{% block auto %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}automobile/">Vehicles</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}automobile/all/">Vehicles</a><c-icon name="chevron-right" />
+  <span class="strong">{{ vehicle.nickname }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ vehicle.type_tint }}"><c-icon name="car" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ vehicle.nickname }}</h1>
+          <c-chip tint="{{ vehicle.type_tint }}">{{ vehicle.ownership_label }}</c-chip>
+          <c-badge>{{ vehicle.fuel_label }}</c-badge>
+          {% if not vehicle.is_active %}<c-badge variant="warning">Disposed</c-badge>{% endif %}
+        </div>
+        <div class="muted">{{ vehicle.full_name }}{% if vehicle.license_plate %} · <span class="tnum">{{ vehicle.license_plate }}</span>{% endif %}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="car" size="sm" class="subtle" /><span class="strong"><c-money :amount="vehicle.current_value" symbol="{{ vehicle.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> value</span>
+          <span class="row"><c-icon name="receipt" size="sm" class="subtle" />cost <c-money :amount="vehicle.cost" symbol="{{ vehicle.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span>
+          {% if vehicle.current_mileage %}<span class="row"><c-icon name="gauge" size="sm" class="subtle" />{{ vehicle.current_mileage }} {{ vehicle.mileage_unit }}</span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        {% if not disposal %}
+        <c-modal title="Dispose of {{ vehicle.nickname }}">
+          <c-slot name="trigger"><c-button variant="default"><c-icon name="log-out" /> Dispose</c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/dispose/"
+                x-data="{ method: 'sale' }">{% csrf_token %}
+            <div class="stack-16">
+              <p class="muted">Record the sale, trade-in, total loss, gift, scrap or lease return. This posts the gain/loss and derecognizes the vehicle.</p>
+              <div class="form-grid">
+                <c-field label="Method" required>
+                  <c-select name="method" x-model="method">{% for val, label in disposal_methods %}<option value="{{ val }}">{{ label }}</option>{% endfor %}</c-select>
+                </c-field>
+                <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% now 'Y-m-d' %}"></div></c-field>
+                <c-field label="Proceeds / refund"><div class="control"><input name="proceeds" inputmode="decimal" placeholder="0.00"></div></c-field>
+                <c-field label="Odometer"><div class="control"><input name="odometer" inputmode="numeric"></div></c-field>
+                <c-field label="Proceeds to bank" help="Leave blank for cash.">
+                  <div class="control is-select">
+                    <select name="proceeds_account"><option value="">Cash / not banked</option>{% for a in bank_accounts %}<option value="{{ a.pk }}">{{ a.nickname }}</option>{% endfor %}</select>
+                    <c-icon name="chevron-down" size="sm" class="subtle" />
+                  </div>
+                </c-field>
+                <c-field label="Replacement vehicle" help="Trade-in only — applies the allowance to its open purchase bill." x-show="method === 'trade_in'" x-cloak>
+                  <div class="control is-select">
+                    <select name="replacement"><option value="">—</option>{% for v in nav_replacements %}{% endfor %}</select>
+                    <c-icon name="chevron-down" size="sm" class="subtle" />
+                  </div>
+                </c-field>
+              </div>
+              <c-field label="Buyer (optional)"><c-input name="buyer_organization_new_name" placeholder="Buyer / insurer name" /></c-field>
+              <c-field label="Notes"><textarea name="notes" class="control" rows="2"></textarea></c-field>
+              <div class="row"><c-button type="submit" variant="primary">Record disposal</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </div>
+          </form>
+        </c-modal>
+        {% endif %}
+        <c-confirm-dialog title="Delete {{ vehicle.nickname }}?" message="This moves the vehicle to Recently deleted. Its bills and ledger entries stay posted as history.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {# Value & depreciation #}
+  <c-card icon="trending-down" title="Value over time">
+    <c-slot name="actions">
+      <c-modal title="Add a value estimate">
+        <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add value</c-button></c-slot>
+        <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/valuation/">{% csrf_token %}
+          <div class="stack-16">
+            <p class="muted">A display-only estimate (posts nothing; net worth stays at cost).</p>
+            <div class="form-grid">
+              <c-field label="Value" required><div class="control"><input name="value" inputmode="decimal" placeholder="0.00"></div></c-field>
+              <c-field label="As of" required><div class="control"><input type="date" name="as_of" value="{% now 'Y-m-d' %}"></div></c-field>
+              <c-field label="Source"><c-input name="source" placeholder="e.g. KBB, dealer quote" /></c-field>
+            </div>
+            <div class="row"><c-button type="submit" variant="primary">Save value</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+          </div>
+        </form>
+      </c-modal>
+    </c-slot>
+    {% include "automobile/partials/value_chart.html" %}
+    <div class="ph-meta" style="margin-top:12px;">
+      {% if vehicle.depreciation %}<span class="row"><c-icon name="trending-down" size="sm" class="subtle" />Depreciation <span class="strong"><c-money :amount="vehicle.depreciation" symbol="{{ vehicle.currency.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>{% endif %}
+      {% for e in economy %}<span class="row"><c-icon name="fuel" size="sm" class="subtle" /><span class="strong">{{ e.economy }}</span> {{ e.label }}</span>{% endfor %}
+    </div>
+  </c-card>
+
+  {# Lease / warranty meters #}
+  {% if vehicle.is_leased and vehicle.lease_mileage_allowance %}
+  <c-card icon="gauge" title="Lease mileage">
+    <c-meter :value="vehicle.lease_mileage_used" :max="vehicle.lease_mileage_allowance">
+      <span>{{ vehicle.lease_mileage_used }} used</span>
+      <span>of {{ vehicle.lease_mileage_allowance }} {{ vehicle.mileage_unit }} allowance</span>
+    </c-meter>
+  </c-card>
+  {% endif %}
+
+  {# Linked loan #}
+  {% if loan_summary %}
+  <c-card icon="banknote" title="Financing">
+    <c-rel-row name="{{ loan_summary.loan.nickname }}" role="Auto loan{% if loan_summary.payoff_date %} · payoff {{ loan_summary.payoff_date|date:'M Y' }}{% endif %}" href="{{ ui_tenant_url }}loans/{{ loan_summary.loan.pk }}/">
+      <c-slot name="avatar"><c-avatar tint="amber" size="sm" square><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><span class="strong"><c-money :amount="loan_summary.balance" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> owed</c-slot>
+    </c-rel-row>
+  </c-card>
+  {% endif %}
+
+  {# Tabs #}
+  <div x-data="{ tab: 'costs' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'costs' }" @click="tab = 'costs'"><c-icon name="receipt" size="sm" /> Costs {% if rows %}<span class="tcount tnum">{{ rows|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'service' }" @click="tab = 'service'"><c-icon name="wrench" size="sm" /> Service &amp; reminders</button>
+      <button type="button" class="tab" :class="{ active: tab === 'odometer' }" @click="tab = 'odometer'"><c-icon name="gauge" size="sm" /> Odometer &amp; fuel</button>
+      <button type="button" class="tab" :class="{ active: tab === 'docs' }" @click="tab = 'docs'"><c-icon name="file-text" size="sm" /> Documents</button>
+      <button type="button" class="tab" :class="{ active: tab === 'drivers' }" @click="tab = 'drivers'"><c-icon name="users" size="sm" /> Drivers {% if drivers %}<span class="tcount tnum">{{ drivers|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# COSTS #}
+    <div x-show="tab === 'costs'">
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Cost register</span>
+          <c-modal title="Add cost" class="modal-wide">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add cost</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/costs/new/"
+                  x-data="{ kind:'fuel', funding:'none', vendorId:'', vendorName:'', vendorTint:'slate', vendorInit:'?', pickVendor(d){ this.vendorId=d.id; this.vendorName=d.name; this.vendorTint=d.tint||'slate'; this.vendorInit=d.initials||'?'; }, clearVendor(){ this.vendorId=''; } }">{% csrf_token %}
+              {% include "automobile/partials/cost_fields.html" with suffix='new' %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Add cost</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </div>
+
+        {% if rows %}
+        <c-card flush>
+          <c-table>
+            <thead><tr><c-th>Date</c-th><c-th>Kind</c-th><c-th>Vendor</c-th><c-th>Bill</c-th><th class="col-num">Amount</th><th></th></tr></thead>
+            <tbody>
+              {% for e in rows %}
+              <tr>
+                <td class="muted tnum">{{ e.date|date:"d M Y" }}</td>
+                <td><span class="row"><c-icon name="{{ e.kind_glyph }}" size="sm" class="subtle" /><c-badge>{{ e.kind_label }}</c-badge></span></td>
+                <td>{{ e.vendor_name|default:"—" }}</td>
+                <td>{% if e.bill_id %}<a href="{{ ui_tenant_url }}payables/bills/{{ e.bill_id }}/"><c-badge variant="lock"><c-icon name="key-round" size="sm" /> {{ e.bill.bill_number }}</c-badge></a>{% else %}<span class="subtle">—</span>{% endif %}</td>
+                <td class="col-num"><c-money :amount="e.amount" symbol="{{ vehicle.currency.symbol }}" dp="{{ vehicle.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+                <td>
+                  <div class="cell-actions">
+                    <c-modal title="Edit cost" class="modal-wide">
+                      <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Edit"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                      <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/costs/{{ e.pk }}/edit/"
+                            x-data="{ kind:'{{ e.kind }}', funding:'{{ e.funding_source }}', vendorId:'{{ e.vendor_organization_id|default:'' }}', vendorName:'{{ e.vendor_name|escapejs }}', vendorTint:'{{ e.vendor.avatar_tint|default:'slate' }}', vendorInit:'{{ e.vendor.initials|default:'?' }}', pickVendor(d){ this.vendorId=d.id; this.vendorName=d.name; this.vendorTint=d.tint||'slate'; this.vendorInit=d.initials||'?'; }, clearVendor(){ this.vendorId=''; } }">{% csrf_token %}
+                        {% include "automobile/partials/cost_fields.html" with suffix=e.pk event=e %}
+                        <div class="between" style="margin-top:16px;">
+                          <c-button type="submit" variant="primary">Save</c-button>
+                          <span class="row"><c-button type="submit" variant="danger" size="sm" formaction="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/costs/{{ e.pk }}/delete/">Delete</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></span>
+                        </div>
+                      </form>
+                    </c-modal>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </c-table>
+        </c-card>
+        {% else %}
+        <c-card><c-empty-state icon="receipt" title="No costs yet" text="Record fuel, service, insurance, registration and more — each becomes a locked bill." /></c-card>
+        {% endif %}
+      </div>
+    </div>
+
+    {# SERVICE #}
+    <div x-show="tab === 'service'" x-cloak>
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Service schedule</span>
+          <c-modal title="Add service item">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add item</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/service/new/">{% csrf_token %}
+              <div class="stack-16">
+                <div class="form-grid">
+                  <c-field label="Name" required><c-input name="name" placeholder="e.g. Oil change" /></c-field>
+                  <c-field label="Every (months)"><div class="control"><input name="interval_months" inputmode="numeric" placeholder="6"></div></c-field>
+                  <c-field label="Every (miles)"><div class="control"><input name="interval_miles" inputmode="numeric" placeholder="5000"></div></c-field>
+                  <c-field label="Next due date"><div class="control"><input type="date" name="next_due_date"></div></c-field>
+                  <c-field label="Next due mileage"><div class="control"><input name="next_due_mileage" inputmode="numeric"></div></c-field>
+                </div>
+                <div class="row"><c-button type="submit" variant="primary">Add item</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-modal>
+        </div>
+        <c-card flush>
+          {% for s in schedules %}
+          <c-rel-row name="{{ s.name }}" role="{% if s.interval_months %}every {{ s.interval_months }} mo{% endif %}{% if s.interval_miles %}{% if s.interval_months %} · {% endif %}every {{ s.interval_miles }} {{ vehicle.mileage_unit }}{% endif %}">
+            <c-slot name="avatar"><c-avatar tint="teal" size="sm" square><c-icon name="wrench" size="sm" /></c-avatar></c-slot>
+            <c-slot name="tail">
+              {% if s.is_overdue %}<c-badge variant="danger">Overdue</c-badge>{% elif s.due_soon %}<c-badge variant="warning">Due soon</c-badge>{% elif s.next_due_date %}<span class="muted tnum">{{ s.next_due_date|date:'d M Y' }}</span>{% endif %}
+            </c-slot>
+          </c-rel-row>
+          {% empty %}
+          <c-empty-state icon="wrench" title="No service items" text="Add oil changes, tyre rotations and inspections to get reminders." />
+          {% endfor %}
+        </c-card>
+      </div>
+    </div>
+
+    {# ODOMETER & FUEL #}
+    <div x-show="tab === 'odometer'" x-cloak>
+      <div class="stack stack-20">
+        <div class="between">
+          <span class="eyebrow">Odometer readings</span>
+          <c-modal title="Add reading">
+            <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add reading</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/odometer/">{% csrf_token %}
+              <div class="stack-16">
+                <div class="form-grid">
+                  <c-field label="Mileage" required><div class="control"><input name="mileage" inputmode="numeric"></div></c-field>
+                  <c-field label="As of" required><div class="control"><input type="date" name="as_of" value="{% now 'Y-m-d' %}"></div></c-field>
+                </div>
+                <c-field label="Note"><c-input name="note" placeholder="Optional" /></c-field>
+                <div class="row"><c-button type="submit" variant="primary">Save reading</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+              </div>
+            </form>
+          </c-modal>
+        </div>
+        {% if economy %}
+        <c-card icon="fuel" title="{% if vehicle.is_electric %}Charging economy{% else %}Fuel economy{% endif %}">
+          <div class="row wrap">
+            {% for e in economy %}<c-chip tint="amber">{{ e.economy }} {{ e.label }} · {{ e.fills }} fills</c-chip>{% endfor %}
+          </div>
+        </c-card>
+        {% endif %}
+        <c-card flush>
+          {% if readings %}
+          <c-table>
+            <thead><tr><c-th>Date</c-th><th class="col-num">Mileage</th><c-th>Source</c-th><c-th>Note</c-th></tr></thead>
+            <tbody>
+              {% for r in readings %}
+              <tr><td class="muted tnum">{{ r.as_of|date:"d M Y" }}</td><td class="col-num tnum">{{ r.mileage }}</td><td><c-badge>{{ r.get_source_display }}</c-badge></td><td class="muted">{{ r.note }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </c-table>
+          {% else %}
+          <c-empty-state icon="gauge" title="No readings yet" text="Add odometer readings, or they'll be captured from fuel and service costs." />
+          {% endif %}
+        </c-card>
+      </div>
+    </div>
+
+    {# DOCUMENTS #}
+    <div x-show="tab === 'docs'" x-cloak>
+      <div class="grid-2">
+        <c-card title="Identity" icon="file-text">
+          <c-key-value>
+            <c-kv-row key="VIN">{{ vehicle.vin|default:"—" }}</c-kv-row>
+            <c-kv-row key="Plate">{{ vehicle.license_plate|default:"—" }}{% if vehicle.plate_jurisdiction %} · {{ vehicle.plate_jurisdiction }}{% endif %}</c-kv-row>
+            <c-kv-row key="Title #">{{ vehicle.title_number|default:"—" }}</c-kv-row>
+            <c-kv-row key="Acquired">{{ vehicle.acquired.display|default:"—" }}</c-kv-row>
+          </c-key-value>
+        </c-card>
+        <c-card title="Policy &amp; warranty" icon="shield">
+          <c-key-value>
+            <c-kv-row key="Insurer">{% if vehicle.insurer_organization %}{{ vehicle.insurer_organization.display }}{% else %}{{ vehicle.insurance_carrier|default:"—" }}{% endif %}</c-kv-row>
+            <c-kv-row key="Policy #">{{ vehicle.insurance_policy_number|default:"—" }}</c-kv-row>
+            <c-kv-row key="Insurance expires">{% if vehicle.insurance_expiry %}{{ vehicle.insurance_expiry|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
+            <c-kv-row key="Registration expires">{% if vehicle.registration_expiry %}{{ vehicle.registration_expiry|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
+            <c-kv-row key="Inspection due">{% if vehicle.inspection_due %}{{ vehicle.inspection_due|date:'d M Y' }}{% else %}—{% endif %}</c-kv-row>
+            <c-kv-row key="Warranty">{% if vehicle.warranty_expiry %}{{ vehicle.warranty_expiry|date:'d M Y' }}{% endif %}{% if vehicle.warranty_miles %} · {{ vehicle.warranty_miles }} {{ vehicle.mileage_unit }}{% endif %}{% if not vehicle.warranty_expiry and not vehicle.warranty_miles %}—{% endif %}</c-kv-row>
+          </c-key-value>
+        </c-card>
+      </div>
+    </div>
+
+    {# DRIVERS #}
+    <div x-show="tab === 'drivers'" x-cloak>
+      <c-card title="Owner &amp; drivers" icon="users">
+        <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/edit/"><c-icon name="pencil" size="sm" /> Manage</c-button></c-slot>
+        {% for d in drivers %}
+        <c-rel-row name="{{ d.person.display_name }}" role="{{ d.role_label }}" href="{{ ui_tenant_url }}contacts/people/{{ d.person.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ d.person.avatar_tint }}" size="sm">{{ d.person.initials }}</c-avatar></c-slot>
+          {% if d.is_owner %}<c-slot name="tail"><c-badge variant="accent">Owner</c-badge></c-slot>{% endif %}
+        </c-rel-row>
+        {% empty %}
+        <c-empty-state icon="users" title="No drivers yet" text="Add the owner and drivers on this vehicle.">
+          <c-button variant="primary" href="{{ ui_tenant_url }}automobile/{{ vehicle.pk }}/edit/"><c-icon name="pencil" /> Manage drivers</c-button>
+        </c-empty-state>
+        {% endfor %}
+      </c-card>
+    </div>
+
+    {# HISTORY #}
+    <div x-show="tab === 'history'" x-cloak>
+      <c-card>
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item
+            variant="{% if h.history_type == '+' %}create{% else %}edit{% endif %}"
+            icon="{% if h.history_type == '+' %}plus{% elif h.history_type == '-' %}trash-2{% else %}pencil{% endif %}"
+            title="{% if h.history_type == '+' %}Created this vehicle{% elif h.history_type == '-' %}Deleted{% else %}Updated{% endif %}"
+            meta="by {{ h.history_user.get_full_name|default:'System' }} · {{ h.history_date|date:'d M Y, H:i' }}" />
+          {% empty %}<span class="subtle">No history yet.</span>{% endfor %}
+        </c-timeline>
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

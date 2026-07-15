@@ -1,0 +1,17 @@
+{% comment %}htmx results: people matching the query — candidates to add as a driver. Calls add(...)
+on the enclosing Alpine scope via data-* attributes (mirrors the loans borrower search).{% endcomment %}
+{% if candidates %}
+<div class="rel-results-list">
+  {% for p in candidates %}
+  <button type="button" class="rel-result" data-id="{{ p.pk }}" data-name="{{ p.display_name }}"
+          data-tint="{{ p.avatar_tint }}" data-initials="{{ p.initials }}"
+          @click="add($el.dataset)">
+    <span class="avatar a-sm av-{{ p.avatar_tint }}">{{ p.initials }}</span>
+    <span class="grow">{{ p.display_name }}</span>
+    <c-icon name="plus" size="sm" class="subtle" />
+  </button>
+  {% endfor %}
+</div>
+{% elif q %}
+<p class="subtle p-8">No people match “{{ q }}”.</p>
+{% endif %}
