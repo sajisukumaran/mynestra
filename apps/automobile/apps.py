@@ -19,14 +19,6 @@ class AutomobileConfig(AppConfig):
     }
 
     def launcher_counts(self):
-        # Self-contained (no services import): the service-layer read models arrive in a later
-        # commit. Two live counts — Vehicles and Fleet value at cost.
-        from apps.automobile.models import Vehicle
-        from apps.finance.models import ZERO
+        from apps.automobile.services import launcher_counts
 
-        vehicles = list(Vehicle.objects.filter(is_active=True))
-        fleet = sum((v.cost for v in vehicles), ZERO)
-        return [
-            {"n": len(vehicles), "label": "Vehicles"},
-            {"n": fleet, "label": "Fleet value"},
-        ]
+        return launcher_counts()

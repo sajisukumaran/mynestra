@@ -714,8 +714,14 @@ class VehicleDisposal(SoftDeleteModel):
 
     @property
     def gain_loss(self):
-        """Proceeds − book cost (positive = gain). Not meaningful for a lease return (no owned
-        node)."""
+        """Proceeds − book cost (positive = gain). Once posted, read from the booked 4930 line so
+        it stays correct after the vehicle node is derecognized to zero; before posting it's a live
+        estimate. Not meaningful for a lease return (no owned node → no 4930 line, returns 0)."""
+        if self.journal_entry_id is not None:
+            line = self.journal_entry.lines.filter(
+                account__system_key="asset_disposal_gain_loss"
+            ).first()
+            return (line.base_credit - line.base_debit) if line is not None else ZERO
         return self.proceeds - self.vehicle.cost
 
     @property
