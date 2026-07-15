@@ -1,0 +1,140 @@
+{% comment %}Multi-line service-invoice editor: header + a dynamic list of job blocks, each with a
+dynamic list of part rows, and a live totals footer. Posts indexed arrays (job[i][code],
+job[i][part][j][unit_price]) parsed by views._parse_service_jobs. `invoice` (optional) prefills for
+edit; `suffix` disambiguates the enclosing modal. The <form> provides no x-data — this block owns it.
+{% endcomment %}
+<div class="stack-16"
+     x-data="{
+       funding: '{{ invoice.funding_source|default:'none' }}',
+       sublet: '{% if invoice %}{{ invoice.sublet|floatformat:'-2' }}{% endif %}',
+       shop_supplies: '{% if invoice %}{{ invoice.shop_supplies|floatformat:'-2' }}{% endif %}',
+       discount: '{% if invoice %}{{ invoice.discount|floatformat:'-2' }}{% endif %}',
+       sales_tax: '{% if invoice %}{{ invoice.sales_tax|floatformat:'-2' }}{% endif %}',
+       jobs: [
+         {% if invoice %}{% for j in invoice.jobs.all %}{
+           code: '{{ j.code|escapejs }}', complaint: '{{ j.complaint|escapejs }}',
+           description: '{{ j.description|escapejs }}', technician: '{{ j.technician|escapejs }}',
+           labor_hours: '{% if j.labor_hours != None %}{{ j.labor_hours|floatformat:'-2' }}{% endif %}',
+           labor_amount: '{{ j.labor_amount|floatformat:'-2' }}',
+           parts: [ {% for p in j.parts.all %}{ part_number: '{{ p.part_number|escapejs }}', description: '{{ p.description|escapejs }}', quantity: '{{ p.quantity|floatformat:'-2' }}', unit_price: '{{ p.unit_price|floatformat:'-2' }}' },{% endfor %} ],
+         },{% endfor %}{% else %}{ code: '', complaint: '', description: '', technician: '', labor_hours: '', labor_amount: '', parts: [] }{% endif %}
+       ],
+       num(v){ return parseFloat(v) || 0; },
+       addJob(){ this.jobs.push({ code: '', complaint: '', description: '', technician: '', labor_hours: '', labor_amount: '', parts: [] }); },
+       removeJob(i){ this.jobs.splice(i, 1); },
+       addPart(j){ this.jobs[j].parts.push({ part_number: '', description: '', quantity: '1', unit_price: '' }); },
+       removePart(j, p){ this.jobs[j].parts.splice(p, 1); },
+       get partsTotal(){ return this.jobs.reduce((s, j) => s + j.parts.reduce((t, p) => t + this.num(p.quantity) * this.num(p.unit_price), 0), 0); },
+       get laborTotal(){ return this.jobs.reduce((s, j) => s + this.num(j.labor_amount), 0); },
+       get grandTotal(){ return this.laborTotal + this.partsTotal + this.num(this.sublet) + this.num(this.shop_supplies) + this.num(this.sales_tax) - this.num(this.discount); },
+       money(n){ return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+     }">
+
+  {# Header #}
+  <div class="form-grid">
+    <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if invoice %}{{ invoice.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+    <c-field label="Invoice / RO #"><div class="control"><input name="invoice_number" value="{% if invoice %}{{ invoice.invoice_number }}{% endif %}" placeholder="e.g. 325554"></div></c-field>
+    <c-field label="Category">
+      <div class="control is-select">
+        <select name="category">{% for val, label in service_categories %}<option value="{{ val }}"{% if invoice and invoice.category == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+  </div>
+  <c-field label="Shop / dealer" required help="Pick one or type a new name.">
+    <div class="control is-select">
+      <select name="vendor_organization">
+        <option value="">—</option>
+        {% for o in organizations %}<option value="{{ o.pk }}"{% if invoice and invoice.vendor_organization_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+    <c-input name="vendor_organization_new_name" placeholder="…or type a new shop name" />
+  </c-field>
+  <div class="form-grid">
+    <c-field label="Service advisor"><div class="control"><input name="service_advisor" value="{% if invoice %}{{ invoice.service_advisor }}{% endif %}"></div></c-field>
+    <c-field label="Odometer in"><div class="control"><input name="odometer_in" inputmode="numeric" value="{% if invoice %}{{ invoice.odometer_in|default:'' }}{% endif %}"></div></c-field>
+    <c-field label="Odometer out"><div class="control"><input name="odometer_out" inputmode="numeric" value="{% if invoice %}{{ invoice.odometer_out|default:'' }}{% endif %}"></div></c-field>
+  </div>
+
+  {# Jobs → parts #}
+  <div class="stack-12">
+    <span class="eyebrow">Jobs &amp; parts</span>
+    <template x-for="(job, ji) in jobs" :key="ji">
+      <c-card flush class="stack-12" style="padding:12px;">
+        <div class="between">
+          <span class="strong">Job <span x-text="ji + 1"></span></span>
+          <c-button type="button" variant="ghost" size="sm" @click="removeJob(ji)"><c-icon name="trash-2" size="sm" /> Remove job</c-button>
+        </div>
+        <div class="form-grid">
+          <c-field label="Op-code"><div class="control"><input :name="`job[${ji}][code]`" x-model="job.code" placeholder="e.g. PFL"></div></c-field>
+          <c-field label="Technician"><div class="control"><input :name="`job[${ji}][technician]`" x-model="job.technician"></div></c-field>
+          <c-field label="Labor hours"><div class="control"><input :name="`job[${ji}][labor_hours]`" x-model="job.labor_hours" inputmode="decimal"></div></c-field>
+          <c-field label="Labor charge"><div class="control"><input :name="`job[${ji}][labor_amount]`" x-model="job.labor_amount" inputmode="decimal" placeholder="0.00"></div></c-field>
+        </div>
+        <c-field label="Complaint"><div class="control"><input :name="`job[${ji}][complaint]`" x-model="job.complaint" placeholder="CUSTOMER STATES…"></div></c-field>
+        <c-field label="Work performed"><div class="control"><input :name="`job[${ji}][description]`" x-model="job.description"></div></c-field>
+
+        <div class="stack-12" style="padding-left:12px; border-left:2px solid var(--hairline, #e5e7eb);">
+          <template x-for="(part, pi) in job.parts" :key="pi">
+            <div class="form-grid" style="align-items:end;">
+              <c-field label="Part #"><div class="control"><input :name="`job[${ji}][part][${pi}][part_number]`" x-model="part.part_number"></div></c-field>
+              <c-field label="Description"><div class="control"><input :name="`job[${ji}][part][${pi}][description]`" x-model="part.description"></div></c-field>
+              <c-field label="Qty"><div class="control"><input :name="`job[${ji}][part][${pi}][quantity]`" x-model="part.quantity" inputmode="decimal"></div></c-field>
+              <c-field label="Unit price"><div class="control"><input :name="`job[${ji}][part][${pi}][unit_price]`" x-model="part.unit_price" inputmode="decimal" placeholder="0.00"></div></c-field>
+              <c-button type="button" variant="ghost" size="sm" @click="removePart(ji, pi)"><c-icon name="x" size="sm" /></c-button>
+            </div>
+          </template>
+          <c-button type="button" variant="ghost" size="sm" @click="addPart(ji)"><c-icon name="plus" size="sm" /> Add part</c-button>
+        </div>
+      </c-card>
+    </template>
+    <c-button type="button" variant="default" size="sm" @click="addJob()"><c-icon name="plus" size="sm" /> Add job</c-button>
+  </div>
+
+  {# Totals breakdown #}
+  <div class="form-grid">
+    <c-field label="Sublet"><div class="control"><input name="sublet" x-model="sublet" inputmode="decimal" placeholder="0.00"></div></c-field>
+    <c-field label="Shop supplies"><div class="control"><input name="shop_supplies" x-model="shop_supplies" inputmode="decimal" placeholder="0.00"></div></c-field>
+    <c-field label="Discount"><div class="control"><input name="discount" x-model="discount" inputmode="decimal" placeholder="0.00"></div></c-field>
+    <c-field label="Sales tax"><div class="control"><input name="sales_tax" x-model="sales_tax" inputmode="decimal" placeholder="0.00"></div></c-field>
+  </div>
+
+  <c-card flush style="padding:12px;">
+    <div class="between"><span class="muted">Labor</span><span class="tnum" x-text="money(laborTotal)"></span></div>
+    <div class="between"><span class="muted">Parts</span><span class="tnum" x-text="money(partsTotal)"></span></div>
+    <div class="between strong" style="margin-top:6px;"><span>Grand total</span><span class="tnum" x-text="money(grandTotal)"></span></div>
+    <p class="subtle" style="font-size:12px; margin-top:6px;">A $0 (all-warranty) invoice records history and advances your service schedule but creates no bill.</p>
+  </c-card>
+
+  {# Funding #}
+  <c-field label="How was it paid?">
+    <div class="control is-select">
+      <select name="funding_source" x-model="funding">
+        {% for val, label in fundings %}<option value="{{ val }}"{% if invoice and invoice.funding_source == val %} selected{% elif not invoice and val == 'none' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <div class="form-grid">
+    <c-field label="Bank account" x-show="funding === 'bank'" x-cloak>
+      <div class="control is-select">
+        <select name="funding_account"><option value="">—</option>{% for a in bank_accounts %}<option value="{{ a.pk }}"{% if invoice and invoice.funding_account_id == a.pk %} selected{% endif %}>{{ a.nickname }}</option>{% endfor %}</select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    <c-field label="Credit card" x-show="funding === 'card'" x-cloak>
+      <div class="control is-select">
+        <select name="credit_card"><option value="">—</option>{% for c in credit_cards %}<option value="{{ c.pk }}"{% if invoice and invoice.credit_card_id == c.pk %} selected{% endif %}>{{ c.nickname }}</option>{% endfor %}</select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    <c-field label="Cash account" x-show="funding === 'cash'" x-cloak>
+      <div class="control is-select">
+        <select name="cash_account"><option value="">Cash on hand</option>{% for a in cash_accounts %}<option value="{{ a.pk }}"{% if invoice and invoice.cash_account_id == a.pk %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}</select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+  </div>
+  <c-field label="Memo"><c-input name="memo" value="{% if invoice %}{{ invoice.memo }}{% endif %}" placeholder="Optional note" /></c-field>
+</div>

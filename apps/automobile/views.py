@@ -12,8 +12,17 @@ from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
 
-from apps.automobile.forms import VehicleForm
+from apps.automobile.forms import (
+    InspectionForm,
+    PropertyTaxForm,
+    RegistrationForm,
+    VehicleForm,
+)
 from apps.automobile.models import (
+    COMPLIANCE_DEFAULT_MONTHS,
+    REGISTRATION_DEFAULT_MONTHS,
+    ComplianceKind,
+    ComplianceResult,
     CostKind,
     DisposalMethod,
     DriverRole,
@@ -22,18 +31,31 @@ from apps.automobile.models import (
     Funding,
     MileageUnit,
     OwnershipMode,
+    PlateType,
+    RegistrationReason,
+    ServiceInvoiceCategory,
     ServiceSchedule,
+    TitleStatus,
     Vehicle,
     VehicleCostEvent,
     VehicleDisposal,
     VehicleDriver,
+    VehicleInspection,
+    VehiclePropertyTax,
+    VehicleRegistration,
+    VehicleServiceInvoice,
     VehicleValuation,
 )
 from apps.automobile.services import (
     POSTING_ACTIVITIES,
+    _add_months,
     cost_by_category,
     dashboard_stats,
     delete_cost_event,
+    delete_inspection,
+    delete_property_tax,
+    delete_registration,
+    delete_service_invoice,
     depreciation_series,
     ensure_gl_account,
     fuel_economy,
@@ -42,7 +64,11 @@ from apps.automobile.services import (
     register,
     renewals_due,
     save_cost_event,
+    save_inspection,
     save_insurance_split,
+    save_property_tax,
+    save_registration,
+    save_service_invoice,
     settle_financed_purchase,
     sync_driver_p2o,
 )
@@ -73,10 +99,12 @@ COST_PICKER_KINDS = [
     (CostKind.INSURANCE, "Insurance"),
     (CostKind.REGISTRATION, "Registration / road tax"),
     (CostKind.INSPECTION, "Inspection"),
+    (CostKind.EMISSIONS, "Emissions / smog"),
     (CostKind.LEASE_PAYMENT, "Lease payment"),
     (CostKind.LEASE_DEPOSIT, "Lease deposit"),
     (CostKind.IMPROVEMENT, "Improvement / upgrade"),
     (CostKind.TAX_FEE, "Tax / fee"),
+    (CostKind.PROPERTY_TAX, "Personal property tax"),
     (CostKind.OTHER, "Other"),
 ]
 
@@ -304,6 +332,27 @@ def _maybe_acquisition(request, vehicle):
         save_cost_event(event, user=request.user, is_new=True)
 
 
+def _seed_initial_registration(request, vehicle):
+    """On create only: if a plate / jurisdiction / registration expiry was entered on the vehicle
+    form, seed one INITIAL registration term (records become the source of truth thereafter)."""
+    plate = (request.POST.get("license_plate") or "").strip()
+    jurisdiction = (request.POST.get("plate_jurisdiction") or "").strip()
+    expires = parse_date(request.POST.get("registration_expiry") or "") or None
+    if not (plate or jurisdiction or expires):
+        return
+    on = datetime.date.today()
+    if vehicle.acquired.is_set and vehicle.acquired.year:
+        on = datetime.date(
+            vehicle.acquired.year, vehicle.acquired.month or 1, vehicle.acquired.day or 1
+        )
+    reg = VehicleRegistration(
+        vehicle=vehicle, jurisdiction=jurisdiction, plate_number=plate,
+        title_number=(request.POST.get("title_number") or "").strip(),
+        effective_from=on, expires_on=expires, reason=RegistrationReason.INITIAL,
+    )
+    save_registration(reg, user=request.user)  # no fee — the plate was recorded, not paid here
+
+
 def vehicle_create(request):
     return _vehicle_form(request, Vehicle(), "create")
 
@@ -345,6 +394,8 @@ def _vehicle_form(request, vehicle, mode):
             vehicle.inspection_due = parse_date(request.POST.get("inspection_due") or "") or None
             vehicle.warranty_expiry = parse_date(request.POST.get("warranty_expiry") or "") or None
             vehicle.warranty_miles = _int(request.POST.get("warranty_miles"))
+            vehicle.inspection_exempt = request.POST.get("inspection_exempt") in ("on", "1", "true")
+            vehicle.emissions_exempt = request.POST.get("emissions_exempt") in ("on", "1", "true")
             if omode == OwnershipMode.LEASED:
                 _apply_lease_terms(request, vehicle)
             from apps.relationships.services import parse_partial_dates
@@ -360,6 +411,7 @@ def _vehicle_form(request, vehicle, mode):
             sync_driver_p2o(vehicle)
             if mode == "create":
                 _maybe_acquisition(request, vehicle)
+                _seed_initial_registration(request, vehicle)
             return redirect(tenant_url(request, f"automobile/{vehicle.pk}/"))
         error = "Please complete the required fields."
 
@@ -433,6 +485,7 @@ def vehicle_detail(request, pk):
             "payoff_date": proj.get("payoff_date"),
         }
     donut, donut_total = cost_by_category(vehicle)
+    today = datetime.date.today()
     ctx = automobile_context(
         request, "vehicles",
         vehicle=vehicle, base=base_currency(),
@@ -454,6 +507,31 @@ def vehicle_detail(request, pk):
         cash_accounts=_cash_accounts(),
         fundings=Funding.choices,
         disposal=getattr(vehicle, "disposal", None),
+        # Registration / tax / compliance tab.
+        registrations=list(vehicle.registrations.select_related("lienholder_organization").all()),
+        inspections=list(vehicle.inspections.select_related("station_organization").all()),
+        property_taxes=list(vehicle.property_taxes.all()),
+        current_registration=vehicle.current_registration,
+        service_invoices=list(
+            vehicle.service_invoices.select_related(
+                "vendor_person", "vendor_organization", "bill"
+            ).prefetch_related("jobs__parts").all()
+        ),
+        plate_types=PlateType.choices,
+        title_statuses=TitleStatus.choices,
+        registration_reasons=RegistrationReason.choices,
+        compliance_kinds=ComplianceKind.choices,
+        compliance_results=ComplianceResult.choices,
+        service_categories=ServiceInvoiceCategory.choices,
+        organizations=Organization.objects.all(),
+        # Server-side next-due pre-fills (user-editable in the modals).
+        today=today,
+        reg_expires_default=_add_months(today, REGISTRATION_DEFAULT_MONTHS),
+        safety_expires_default=_add_months(today, COMPLIANCE_DEFAULT_MONTHS[ComplianceKind.SAFETY]),
+        emissions_expires_default=_add_months(
+            today, COMPLIANCE_DEFAULT_MONTHS[ComplianceKind.EMISSIONS]
+        ),
+        tax_year_default=today.year,
     )
     return render(request, "automobile/vehicle_detail.html", ctx)
 
@@ -536,6 +614,286 @@ def cost_delete(request, pk, ev):
             delete_cost_event(event, user=request.user)
         except ValueError:
             pass  # a foreign payables payment is allocated — leave it, surface via the detail page
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+# --- Registration / inspection / property-tax records ---------------------------------------
+
+def _apply_fee(request):
+    """Parse the optional fee/vendor/funding block shared by the registration + inspection record
+    modals. Returns a fee dict (amount / vendor / funding / due/ref/memo) or None when no fee was
+    entered (or no vendor was chosen — a bill needs exactly one vendor)."""
+    from types import SimpleNamespace
+
+    amount = _decimal(request.POST.get("fee_amount"))
+    if amount is None or amount <= 0:
+        return None
+    vendor = _resolve_org(request, "fee_vendor_organization")
+    if vendor is None:
+        return None
+    shim = SimpleNamespace(
+        funding_source=Funding.NONE, funding_account=None, credit_card=None, cash_account=None
+    )
+    _apply_cost_funding(request, shim)
+    return {
+        "amount": amount, "vendor_organization": vendor, "vendor_person": None,
+        "reference": request.POST.get("fee_reference", "").strip(),
+        "memo": request.POST.get("fee_memo", "").strip(),
+        "due_date": parse_date(request.POST.get("fee_due_date") or "") or None,
+        "funding_source": shim.funding_source, "funding_account": shim.funding_account,
+        "credit_card": shim.credit_card, "cash_account": shim.cash_account,
+    }
+
+
+def registration_add(request, pk):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    if request.method == "POST":
+        form = RegistrationForm(request.POST, instance=VehicleRegistration(vehicle=vehicle))
+        if form.is_valid():
+            reg = form.save(commit=False)
+            reg.vehicle = vehicle
+            reg.lienholder_organization = _resolve_org(request, "lienholder_organization")
+            if "document" in request.FILES:
+                reg.document = request.FILES["document"]
+            save_registration(reg, fee=_apply_fee(request), user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def registration_edit(request, pk, rid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    reg = get_object_or_404(VehicleRegistration, pk=rid, vehicle=vehicle)
+    if request.method == "POST":
+        form = RegistrationForm(request.POST, instance=reg)
+        if form.is_valid():
+            reg = form.save(commit=False)
+            reg.lienholder_organization = _resolve_org(request, "lienholder_organization")
+            if "document" in request.FILES:
+                reg.document = request.FILES["document"]
+            save_registration(reg, fee=_apply_fee(request), user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def registration_delete(request, pk, rid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    reg = get_object_or_404(VehicleRegistration, pk=rid, vehicle=vehicle)
+    if request.method == "POST":
+        try:
+            delete_registration(reg, user=request.user)
+        except ValueError:
+            pass  # a foreign payables payment is allocated to the fee bill — leave it
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def inspection_add(request, pk):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    if request.method == "POST":
+        form = InspectionForm(request.POST, instance=VehicleInspection(vehicle=vehicle))
+        if form.is_valid():
+            insp = form.save(commit=False)
+            insp.vehicle = vehicle
+            insp.station_organization = _resolve_org(request, "station_organization")
+            if "document" in request.FILES:
+                insp.document = request.FILES["document"]
+            save_inspection(insp, fee=_apply_fee(request), user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def inspection_edit(request, pk, iid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    insp = get_object_or_404(VehicleInspection, pk=iid, vehicle=vehicle)
+    if request.method == "POST":
+        form = InspectionForm(request.POST, instance=insp)
+        if form.is_valid():
+            insp = form.save(commit=False)
+            insp.station_organization = _resolve_org(request, "station_organization")
+            if "document" in request.FILES:
+                insp.document = request.FILES["document"]
+            save_inspection(insp, fee=_apply_fee(request), user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def inspection_delete(request, pk, iid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    insp = get_object_or_404(VehicleInspection, pk=iid, vehicle=vehicle)
+    if request.method == "POST":
+        try:
+            delete_inspection(insp, user=request.user)
+        except ValueError:
+            pass
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def _property_tax_fee(request, pt):
+    """The property-tax fee dict — the tax amount IS the bill, so a vendor (taxing authority) is
+    required. Returns None if no vendor was chosen (the view then skips posting)."""
+    from types import SimpleNamespace
+
+    vendor = _resolve_org(request, "fee_vendor_organization")
+    if vendor is None:
+        return None
+    shim = SimpleNamespace(
+        funding_source=Funding.NONE, funding_account=None, credit_card=None, cash_account=None
+    )
+    _apply_cost_funding(request, shim)
+    return {
+        "amount": pt.amount, "vendor_organization": vendor, "vendor_person": None,
+        "reference": request.POST.get("fee_reference", "").strip(),
+        "memo": request.POST.get("fee_memo", "").strip(),
+        "due_date": pt.due_date,
+        "funding_source": shim.funding_source, "funding_account": shim.funding_account,
+        "credit_card": shim.credit_card, "cash_account": shim.cash_account,
+    }
+
+
+def property_tax_add(request, pk):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    if request.method == "POST":
+        form = PropertyTaxForm(request.POST, instance=VehiclePropertyTax(vehicle=vehicle))
+        if form.is_valid():
+            pt = form.save(commit=False)
+            pt.vehicle = vehicle
+            fee = _property_tax_fee(request, pt)
+            if fee is not None:
+                if "document" in request.FILES:
+                    pt.document = request.FILES["document"]
+                save_property_tax(pt, fee=fee, user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def property_tax_edit(request, pk, tid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    pt = get_object_or_404(VehiclePropertyTax, pk=tid, vehicle=vehicle)
+    if request.method == "POST":
+        form = PropertyTaxForm(request.POST, instance=pt)
+        if form.is_valid():
+            pt = form.save(commit=False)
+            fee = _property_tax_fee(request, pt)
+            if fee is not None:
+                if "document" in request.FILES:
+                    pt.document = request.FILES["document"]
+                save_property_tax(pt, fee=fee, user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def property_tax_delete(request, pk, tid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    pt = get_object_or_404(VehiclePropertyTax, pk=tid, vehicle=vehicle)
+    if request.method == "POST":
+        try:
+            delete_property_tax(pt, user=request.user)
+        except ValueError:
+            pass
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def title_release(request, pk):
+    """Manual 'Mark title released' action — appends a clean-title registration term on payoff."""
+    from apps.automobile.services import release_title_lien
+
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    if request.method == "POST":
+        release_title_lien(vehicle, user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+# --- Service invoices (multi-line: header → jobs → parts) -----------------------------------
+
+def _parse_service_jobs(request):
+    """Parse the indexed job/part arrays (e.g. `job[0][part][2][unit_price]`) into a jobs list of
+    dicts, each with a nested `parts` list. Jobs/parts with no meaningful content are dropped."""
+    jobs = []
+    j = 0
+    while f"job[{j}][code]" in request.POST or f"job[{j}][complaint]" in request.POST \
+            or f"job[{j}][labor_amount]" in request.POST:
+        prefix = f"job[{j}]"
+        code = (request.POST.get(f"{prefix}[code]") or "").strip()
+        complaint = (request.POST.get(f"{prefix}[complaint]") or "").strip()
+        description = (request.POST.get(f"{prefix}[description]") or "").strip()
+        technician = (request.POST.get(f"{prefix}[technician]") or "").strip()
+        labor_hours = _decimal(request.POST.get(f"{prefix}[labor_hours]"))
+        labor_amount = _decimal(request.POST.get(f"{prefix}[labor_amount]")) or Decimal("0")
+        parts = []
+        p = 0
+        while f"{prefix}[part][{p}][part_number]" in request.POST \
+                or f"{prefix}[part][{p}][description]" in request.POST \
+                or f"{prefix}[part][{p}][unit_price]" in request.POST:
+            pp = f"{prefix}[part][{p}]"
+            part_number = (request.POST.get(f"{pp}[part_number]") or "").strip()
+            pdesc = (request.POST.get(f"{pp}[description]") or "").strip()
+            qty = _decimal(request.POST.get(f"{pp}[quantity]")) or Decimal("1")
+            unit_price = _decimal(request.POST.get(f"{pp}[unit_price]")) or Decimal("0")
+            if part_number or pdesc or unit_price > 0:
+                parts.append({
+                    "part_number": part_number, "description": pdesc,
+                    "quantity": qty, "unit_price": unit_price,
+                })
+            p += 1
+        if code or complaint or description or labor_amount > 0 or parts:
+            jobs.append({
+                "code": code, "complaint": complaint, "description": description,
+                "technician": technician, "labor_hours": labor_hours,
+                "labor_amount": labor_amount, "parts": parts,
+            })
+        j += 1
+    return jobs
+
+
+def _apply_service_invoice_post(request, inv):
+    """Parse the service-invoice header onto `inv` (vendor, funding, totals, meta). Returns the jobs
+    structure, or None when required header fields are missing (date + vendor)."""
+    date = parse_date(request.POST.get("date") or "")
+    vendor = _resolve_org(request, "vendor_organization")
+    if date is None or vendor is None:
+        return None
+    inv.date = date
+    inv.vendor_organization = vendor
+    inv.vendor_person = None
+    inv.invoice_number = request.POST.get("invoice_number", "").strip()
+    inv.service_advisor = request.POST.get("service_advisor", "").strip()
+    inv.odometer_in = _int(request.POST.get("odometer_in"))
+    inv.odometer_out = _int(request.POST.get("odometer_out"))
+    cat = request.POST.get("category") or ServiceInvoiceCategory.SERVICE
+    inv.category = cat if cat in ServiceInvoiceCategory.values else ServiceInvoiceCategory.SERVICE
+    inv.sublet = _decimal(request.POST.get("sublet")) or Decimal("0")
+    inv.shop_supplies = _decimal(request.POST.get("shop_supplies")) or Decimal("0")
+    inv.discount = _decimal(request.POST.get("discount")) or Decimal("0")
+    inv.sales_tax = _decimal(request.POST.get("sales_tax")) or Decimal("0")
+    inv.reference = request.POST.get("reference", "").strip()
+    inv.memo = request.POST.get("memo", "").strip()
+    if "document" in request.FILES:
+        inv.document = request.FILES["document"]
+    _apply_cost_funding(request, inv)
+    return _parse_service_jobs(request)
+
+
+def service_invoice_add(request, pk):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    if request.method == "POST":
+        inv = VehicleServiceInvoice(vehicle=vehicle)
+        jobs = _apply_service_invoice_post(request, inv)
+        if jobs is not None:
+            save_service_invoice(inv, jobs, user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def service_invoice_edit(request, pk, sid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    inv = get_object_or_404(VehicleServiceInvoice, pk=sid, vehicle=vehicle)
+    if request.method == "POST":
+        jobs = _apply_service_invoice_post(request, inv)
+        if jobs is not None:
+            save_service_invoice(inv, jobs, user=request.user)
+    return redirect(tenant_url(request, f"automobile/{pk}/"))
+
+
+def service_invoice_delete(request, pk, sid):
+    vehicle = get_object_or_404(Vehicle, pk=pk)
+    inv = get_object_or_404(VehicleServiceInvoice, pk=sid, vehicle=vehicle)
+    if request.method == "POST":
+        try:
+            delete_service_invoice(inv, user=request.user)
+        except ValueError:
+            pass
     return redirect(tenant_url(request, f"automobile/{pk}/"))
 
 

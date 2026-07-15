@@ -203,3 +203,134 @@ def test_launcher_tile_is_live(make_tenant, make_user, client):
     client.force_login(owner)
     body = client.get(f"/t/{tenant.schema_name}/").content.decode()
     assert "Vehicles" in body and "automobile/" in body  # live tile links to the app
+
+
+# --- registration / inspection / property-tax / service invoices via the client -------------
+
+def test_compliance_tab_and_record_registration(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        vid = v.pk
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/automobile/{vid}/").content.decode()
+    assert "Registration, tax &amp; compliance" in body
+    assert "Service invoices" in body
+    # Record a registration term with a bank-funded fee → a locked, paid bill.
+    resp = client.post(
+        f"/t/{tenant.schema_name}/automobile/{vid}/registrations/new/",
+        {
+            "jurisdiction": "Virginia", "plate_number": "XYZ789", "plate_type": "standard",
+            "title_status": "clean", "reason": "initial", "effective_from": "2026-01-15",
+            "expires_on": "2027-01-15",
+            "fee_amount": "80", "fee_vendor_organization_new_name": "DMV",
+            "funding_source": "none",
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import Vehicle, VehicleRegistration
+
+        reg = VehicleRegistration.objects.get(vehicle_id=vid)
+        assert reg.jurisdiction == "Virginia" and reg.plate_number == "XYZ789"
+        assert reg.fee_event is not None and reg.fee_event.bill.is_locked
+        v = Vehicle.objects.get(pk=vid)
+        assert v.license_plate == "XYZ789"  # cache updated from the record
+
+
+def test_record_inspection_and_property_tax(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        vid = v.pk
+    client.force_login(owner)
+    client.post(
+        f"/t/{tenant.schema_name}/automobile/{vid}/inspections/new/",
+        {
+            "kind": "combined", "performed_on": "2026-01-15", "result": "pass",
+            "expires_on": "2027-01-15",
+        },
+    )
+    resp = client.post(
+        f"/t/{tenant.schema_name}/automobile/{vid}/property-taxes/new/",
+        {
+            "tax_year": "2026", "jurisdiction": "Fairfax County", "amount": "450",
+            "due_date": "2026-09-05", "fee_vendor_organization_new_name": "Fairfax County",
+            "funding_source": "none",
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import Vehicle, VehicleInspection, VehiclePropertyTax
+        from apps.finance.services import account_balance
+
+        insp = VehicleInspection.objects.get(vehicle_id=vid)
+        assert insp.kind == "combined"
+        v = Vehicle.objects.get(pk=vid)
+        assert v.inspection_due == datetime.date(2027, 1, 15)
+        assert v.emissions_due == datetime.date(2027, 1, 15)  # combined advances both
+        pt = VehiclePropertyTax.objects.get(vehicle_id=vid)
+        assert pt.fee_event is not None
+        assert account_balance("property_tax_expense") == D("450")  # 5810
+
+
+def test_record_multi_line_service_invoice(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        vid = v.pk
+    client.force_login(owner)
+    resp = client.post(
+        f"/t/{tenant.schema_name}/automobile/{vid}/service-invoices/new/",
+        {
+            "date": "2026-01-15", "vendor_organization_new_name": "Priority Nissan",
+            "invoice_number": "325554", "category": "service",
+            "sublet": "0", "shop_supplies": "10", "discount": "0", "sales_tax": "15",
+            "odometer_out": "24000",
+            "job[0][code]": "PFL", "job[0][complaint]": "oil life low",
+            "job[0][labor_amount]": "60",
+            "job[0][part][0][part_number]": "OIL-5W30", "job[0][part][0][description]": "oil",
+            "job[0][part][0][quantity]": "5", "job[0][part][0][unit_price]": "8",
+            "job[1][code]": "BRK", "job[1][labor_amount]": "120",
+            "job[1][part][0][part_number]": "PAD", "job[1][part][0][quantity]": "1",
+            "job[1][part][0][unit_price]": "90",
+            "funding_source": "none",
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import VehicleServiceInvoice
+
+        inv = VehicleServiceInvoice.objects.get(vehicle_id=vid)
+        assert inv.jobs.count() == 2
+        assert inv.parts_total == D("130") and inv.labor_total == D("180")
+        # grand = 180 + 130 + 10 (shop) + 15 (tax) = 335
+        assert inv.grand_total == D("335")
+        assert inv.bill is not None and inv.bill.is_locked
+        assert inv.bill.total == D("335")
+    body = client.get(f"/t/{tenant.schema_name}/automobile/{vid}/").content.decode()
+    assert "325554" in body  # the invoice # shows in the service-invoices table
+
+
+def test_registration_document_upload_accepted(make_tenant, make_user, client):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        vid = v.pk
+    client.force_login(owner)
+    doc = SimpleUploadedFile("reg.pdf", b"%PDF-1.4 fake", content_type="application/pdf")
+    resp = client.post(
+        f"/t/{tenant.schema_name}/automobile/{vid}/registrations/new/",
+        {
+            "jurisdiction": "Ohio", "plate_type": "standard", "title_status": "clean",
+            "reason": "renewal", "effective_from": "2026-01-15", "document": doc,
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import VehicleRegistration
+
+        reg = VehicleRegistration.objects.get(vehicle_id=vid)
+        assert reg.document and reg.document.name

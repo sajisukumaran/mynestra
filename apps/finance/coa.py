@@ -146,6 +146,10 @@ CHART_OF_ACCOUNTS = [
     ("5600", "Education", EXPENSE, "5000", True, ""),
     ("5700", "Personal & Lifestyle", EXPENSE, "5000", True, ""),
     ("5800", "Taxes", EXPENSE, "5000", True, ""),
+    # A GENERIC personal/real property (ad-valorem) tax expense — deliberately NOT vehicle-specific
+    # so the future Real Estate module posts real-estate property tax here too. Distinct from the
+    # 5140 Housing escrow "Property Tax" (mortgage-escrow home tax), hence a unique system_key.
+    ("5810", "Property Tax", EXPENSE, "5000", True, "property_tax_expense"),
     ("5850", "Bank Charges", EXPENSE, "5000", True, "bank_charges"),
     ("5860", "Interest Expense", EXPENSE, "5000", True, "interest_expense"),
     # Advisory / account fees are expensed here; buy/sell commissions are capitalized into basis.

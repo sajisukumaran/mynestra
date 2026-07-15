@@ -5,24 +5,42 @@ asset-gate, disposal gain/loss, lease deposit/return, fuel economy, renewals and
 import datetime
 from decimal import Decimal
 
+import pytest
 from django_tenants.utils import schema_context
 
 from apps.automobile.models import (
+    ComplianceKind,
+    ComplianceResult,
     CostKind,
     DisposalMethod,
     Funding,
     OwnershipMode,
+    RegistrationReason,
+    ServiceSchedule,
     Vehicle,
     VehicleCostEvent,
     VehicleDisposal,
+    VehicleInspection,
+    VehiclePropertyTax,
+    VehicleRegistration,
+    VehicleServiceInvoice,
     VehicleValuation,
 )
 from apps.automobile.services import (
+    cost_by_category,
     delete_cost_event,
+    delete_registration,
+    delete_service_invoice,
     fuel_economy,
     post_disposal,
+    register,
     renewals_due,
+    running_cost_total,
     save_cost_event,
+    save_inspection,
+    save_property_tax,
+    save_registration,
+    save_service_invoice,
     settle_financed_purchase,
 )
 from apps.finance.models import JournalEntry
@@ -358,5 +376,347 @@ def test_renewals_due_covers_all_five_date_kinds(make_tenant):
         )
         rows = [r for r in renewals_due(45) if r["vehicle"].pk == v.pk]
         assert {r["label"] for r in rows} == {
-            "Insurance", "Registration", "Inspection", "Lease ends", "Warranty ends",
+            "Insurance", "Registration", "Safety inspection", "Lease ends", "Warranty ends",
         }
+
+
+# --- registration / inspection / property-tax records (module 8 follow-up) -------------------
+
+def _fee(amount, vendor, funding=Funding.NONE, account=None, due_date=None):
+    return {
+        "amount": D(amount), "vendor_organization": vendor, "vendor_person": None,
+        "funding_source": funding, "funding_account": account, "credit_card": None,
+        "cash_account": None, "due_date": due_date, "reference": "", "memo": "",
+    }
+
+
+def test_registration_fee_routes_through_payables_and_updates_caches(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        bank = _bank_account()
+        reg = VehicleRegistration(
+            vehicle=v, jurisdiction="Virginia", plate_number="ABC123",
+            effective_from=JAN, expires_on=datetime.date(2027, 1, 15),
+            reason=RegistrationReason.INITIAL,
+        )
+        save_registration(reg, fee=_fee("80", _org("DMV"), Funding.BANK, bank))
+        v.refresh_from_db()
+        assert reg.fee_event is not None
+        assert reg.fee_event.bill.is_locked and reg.fee_event.bill.status == "paid"
+        assert account_balance("vehicle_registration") == D("80")  # 5350
+        assert bank.balance == D("-80")
+        assert v.registration_expiry == datetime.date(2027, 1, 15)
+        assert v.license_plate == "ABC123" and v.plate_jurisdiction == "Virginia"
+
+
+def test_registration_history_across_move(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        reg1 = VehicleRegistration(
+            vehicle=v, jurisdiction="New York", plate_number="NY111",
+            effective_from=datetime.date(2024, 1, 1), expires_on=datetime.date(2025, 1, 1),
+            reason=RegistrationReason.INITIAL,
+        )
+        save_registration(reg1)
+        reg2 = VehicleRegistration(
+            vehicle=v, jurisdiction="Virginia", plate_number="VA222",
+            effective_from=datetime.date(2025, 6, 1), expires_on=datetime.date(2026, 6, 1),
+            reason=RegistrationReason.MOVED,
+        )
+        save_registration(reg2)
+        v.refresh_from_db()
+        assert v.registrations.count() == 2               # history intact
+        assert v.current_plate == "VA222"                 # current = latest ≤ today
+        assert v.current_plate_state == "Virginia"
+        assert v.license_plate == "VA222"                 # cache follows the move
+        assert reg2.is_current and not reg1.is_current
+
+
+def test_registration_record_only_no_fee(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.payables.models import Bill
+
+        v = _vehicle()
+        reg = VehicleRegistration(
+            vehicle=v, jurisdiction="Texas", plate_number="TX1", effective_from=JAN,
+            expires_on=datetime.date(2027, 1, 15),
+        )
+        save_registration(reg)  # no fee dict
+        assert reg.fee_event is None
+        assert Bill.objects.count() == 0
+        v.refresh_from_db()
+        assert v.registration_expiry == datetime.date(2027, 1, 15)
+
+
+def test_financed_registration_defaults_lien_and_lienholder(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import TitleStatus
+
+        loan = _auto_loan()
+        v = _vehicle(ownership_mode=OwnershipMode.OWNED_FINANCED, loan=loan)
+        reg = VehicleRegistration(
+            vehicle=v, jurisdiction="Ohio", plate_number="OH9", effective_from=JAN,
+        )
+        save_registration(reg)
+        reg.refresh_from_db()
+        assert reg.title_status == TitleStatus.LIEN
+        assert reg.lienholder_organization_id == loan.lender_organization_id
+
+
+def test_delete_registration_erases_fee_bill_and_refuses_foreign_payment(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.payables.models import Bill, Payment
+        from apps.payables.services import apply_payment
+
+        v = _vehicle()
+        dmv = _org("DMV")
+        reg = VehicleRegistration(
+            vehicle=v, jurisdiction="Virginia", plate_number="ABC123", effective_from=JAN,
+        )
+        # Unfunded fee → an accrued (open) bill; then a FOREIGN payables payment settles it.
+        save_registration(reg, fee=_fee("80", dmv, Funding.NONE))
+        bill_id = reg.fee_event.bill_id
+        foreign = Payment(
+            vendor_organization=dmv, date=JAN, amount=D("80"),
+            funding_kind=Payment.Funding.CASH,
+        )
+        foreign.save()
+        apply_payment(foreign, [(reg.fee_event.bill, D("80"))])
+        with pytest.raises(ValueError):
+            delete_registration(reg)
+        # The atomic block rolled back — the record + fee bill survive.
+        reg = VehicleRegistration.objects.get(pk=reg.pk)
+        assert reg.fee_event_id is not None
+        assert Bill.all_objects.filter(pk=bill_id).exists()
+        # After removing the foreign payment, the delete succeeds and erases the fee bill.
+        foreign.allocations.all().delete()
+        if foreign.journal_entry_id:
+            foreign.journal_entry.hard_delete()
+        foreign.hard_delete()
+        delete_registration(reg)
+        assert not Bill.all_objects.filter(pk=bill_id).exists()
+        assert not VehicleRegistration.objects.filter(pk=reg.pk).exists()
+
+
+def test_safety_inspection_advances_due_and_renewals(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        soon = datetime.date.today() + datetime.timedelta(days=20)
+        insp = VehicleInspection(
+            vehicle=v, kind=ComplianceKind.SAFETY, performed_on=JAN,
+            result=ComplianceResult.PASS, expires_on=soon,
+        )
+        save_inspection(insp)
+        v.refresh_from_db()
+        assert v.inspection_due == soon
+        labels = {r["label"] for r in renewals_due(45) if r["vehicle"].pk == v.pk}
+        assert "Safety inspection" in labels
+
+
+def test_emissions_fee_folds_to_5350_and_is_biennial(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        bank = _bank_account()
+        insp = VehicleInspection(
+            vehicle=v, kind=ComplianceKind.EMISSIONS, performed_on=JAN,
+            result=ComplianceResult.PASS, expires_on=datetime.date(2028, 1, 15),
+        )
+        save_inspection(insp, fee=_fee("30", _org("Smog Shop"), Funding.BANK, bank))
+        assert account_balance("vehicle_registration") == D("30")  # emissions folds into 5350
+        assert insp.fee_event.kind == CostKind.EMISSIONS
+        v.refresh_from_db()
+        assert v.emissions_due == datetime.date(2028, 1, 15)
+        assert v.inspection_due is None  # emissions does not satisfy the safety due date
+
+
+def test_combined_inspection_advances_both_due_dates(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        due = datetime.date(2027, 1, 15)
+        insp = VehicleInspection(
+            vehicle=v, kind=ComplianceKind.COMBINED, performed_on=JAN,
+            result=ComplianceResult.PASS, expires_on=due,
+        )
+        save_inspection(insp)
+        v.refresh_from_db()
+        assert v.inspection_due == due and v.emissions_due == due  # one sticker, both due dates
+
+
+def test_not_required_inspection_no_nag(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        insp = VehicleInspection(
+            vehicle=v, kind=ComplianceKind.SAFETY, performed_on=JAN,
+            result=ComplianceResult.NOT_REQUIRED, expires_on=None,
+        )
+        save_inspection(insp)
+        v.refresh_from_db()
+        assert v.inspection_due is None
+        assert insp.is_exempt
+
+
+def test_exempt_toggle_suppresses_renewal_row(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        soon = datetime.date.today() + datetime.timedelta(days=20)
+        v = _vehicle(
+            inspection_exempt=True, emissions_exempt=True,
+            inspection_due=soon, emissions_due=soon,
+        )
+        labels = {r["label"] for r in renewals_due(45) if r["vehicle"].pk == v.pk}
+        assert "Safety inspection" not in labels and "Emissions test" not in labels
+
+
+def _fee_pt(pt, vendor, funding=Funding.NONE, account=None):
+    return {
+        "amount": pt.amount, "vendor_organization": vendor, "vendor_person": None,
+        "funding_source": funding, "funding_account": account, "credit_card": None,
+        "cash_account": None, "due_date": pt.due_date, "reference": "", "memo": "",
+    }
+
+
+def test_property_tax_accrued_posts_to_5810_and_sets_reminder(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        pt = VehiclePropertyTax(
+            vehicle=v, tax_year=2026, jurisdiction="Fairfax County", amount=D("450"),
+            due_date=datetime.date(2026, 9, 5),
+        )
+        save_property_tax(pt, fee=_fee_pt(pt, _org("Fairfax County")))
+        assert account_balance("property_tax_expense") == D("450")  # 5810
+        assert account_balance("accounts_payable") == D("450")      # accrued (unpaid)
+        v.refresh_from_db()
+        assert v.property_tax_due == datetime.date(2026, 9, 5)
+        labels = {r["label"] for r in renewals_due(120) if r["vehicle"].pk == v.pk}
+        assert "Property tax" in labels
+
+
+def test_property_tax_funded_clears_reminder(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        bank = _bank_account()
+        pt = VehiclePropertyTax(
+            vehicle=v, tax_year=2026, jurisdiction="Fairfax County", amount=D("450"),
+            due_date=datetime.date(2026, 9, 5),
+        )
+        save_property_tax(pt, fee=_fee_pt(pt, _org("Fairfax County"), Funding.BANK, bank))
+        assert pt.fee_event.bill.status == "paid"
+        assert account_balance("accounts_payable") == ZERO
+        assert account_balance("property_tax_expense") == D("450")
+        assert bank.balance == D("-450")
+        v.refresh_from_db()
+        assert v.property_tax_due is None  # paid → reminder cleared
+
+
+# --- multi-line service invoices -------------------------------------------------------------
+
+def test_service_invoice_builds_category_bill_summing_to_grand_total(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        inv = VehicleServiceInvoice(
+            vehicle=v, date=JAN, vendor_organization=_org("Priority Nissan"),
+            invoice_number="325554", sublet=D("50"), shop_supplies=D("10"),
+            discount=D("20"), sales_tax=D("15"),
+        )
+        jobs = [
+            {"code": "PFL", "complaint": "oil life low", "labor_amount": D("60"),
+             "parts": [{"part_number": "OIL-5W30", "description": "oil",
+                        "quantity": D("5"), "unit_price": D("8")}]},
+            {"code": "BRK", "labor_amount": D("120"),
+             "parts": [{"part_number": "PAD", "quantity": D("1"), "unit_price": D("90")}]},
+        ]
+        save_service_invoice(inv, jobs)
+        # parts = 5*8 + 90 = 130; labor = 60 + 120 = 180; grand = 180+130+50+10+15-20 = 365
+        assert inv.parts_total == D("130")
+        assert inv.labor_total == D("180")
+        assert inv.grand_total == D("365")
+        assert inv.bill is not None and inv.bill.is_locked
+        assert inv.bill.total == D("365")                    # category lines sum to grand total
+        assert account_balance("5320") == D("370")           # parts+labor+sublet+shop supplies
+        assert account_balance("sales_tax_paid") == D("15")  # sales tax → the sales-tax account
+        assert account_balance("accounts_payable") == D("365")  # unpaid
+
+
+def test_service_invoice_funding_creates_locked_payment(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        bank = _bank_account()
+        inv = VehicleServiceInvoice(
+            vehicle=v, date=JAN, vendor_organization=_org("Shop"),
+            funding_source=Funding.BANK, funding_account=bank,
+        )
+        save_service_invoice(inv, [{"code": "X", "labor_amount": D("100"), "parts": []}])
+        assert inv.grand_total == D("100")
+        assert inv.bill.status == "paid"
+        assert inv.payment is not None and inv.payment.is_locked
+        assert bank.balance == D("-100")
+
+
+def test_service_invoice_advances_schedule_odometer_and_register(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        v = _vehicle()
+        sched = ServiceSchedule.objects.create(
+            vehicle=v, name="Oil change", interval_months=6, interval_miles=5000
+        )
+        inv = VehicleServiceInvoice(
+            vehicle=v, date=JAN, vendor_organization=_org("Shop"), odometer_out=12000
+        )
+        save_service_invoice(inv, [{"code": "PFL", "labor_amount": D("80"), "parts": []}])
+        sched.refresh_from_db()
+        assert sched.last_done_date == JAN
+        assert sched.next_due_mileage == 17000
+        v.refresh_from_db()
+        assert v.current_mileage == 12000                    # odometer upserted
+        rows = register(v)
+        assert any(getattr(r, "is_service_invoice", False) for r in rows)  # merged register
+        assert running_cost_total(v) == D("80")              # counted once in TCO
+        _segs, total = cost_by_category(v)
+        assert total == D("80")
+
+
+def test_zero_service_invoice_creates_no_bill(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.payables.models import Bill
+
+        v = _vehicle()
+        inv = VehicleServiceInvoice(vehicle=v, date=JAN, vendor_organization=_org("Shop"))
+        save_service_invoice(inv, [{"code": "WARRANTY", "labor_amount": D("0"), "parts": []}])
+        assert inv.grand_total == D("0")
+        assert inv.bill is None
+        assert Bill.objects.count() == 0
+        assert inv.jobs.count() == 1  # history recorded
+
+
+def test_delete_service_invoice_unwinds_bill_and_payment(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.payables.models import Bill, Payment
+
+        v = _vehicle()
+        bank = _bank_account()
+        inv = VehicleServiceInvoice(
+            vehicle=v, date=JAN, vendor_organization=_org("Shop"),
+            funding_source=Funding.BANK, funding_account=bank,
+        )
+        save_service_invoice(inv, [{"code": "X", "labor_amount": D("100"), "parts": []}])
+        bill_id, pay_id = inv.bill_id, inv.payment_id
+        delete_service_invoice(inv)
+        assert not VehicleServiceInvoice.all_objects.filter(pk=inv.pk).exists()
+        assert not Bill.all_objects.filter(pk=bill_id).exists()
+        assert not Payment.all_objects.filter(pk=pay_id).exists()
+        assert bank.balance == ZERO

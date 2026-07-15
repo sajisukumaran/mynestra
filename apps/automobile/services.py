@@ -26,14 +26,26 @@ from apps.automobile.models import (
     CAPITALIZING_KINDS,
     DEPOSIT_KINDS,
     RENEWAL_KINDS,
+    SATISFIES_EMISSIONS,
+    SATISFIES_SAFETY,
     SERVICE_KINDS,
+    ComplianceKind,
     CostKind,
     DisposalMethod,
     Funding,
     OdometerReading,
+    PlateType,
+    RegistrationReason,
+    TitleStatus,
     Vehicle,
     VehicleCostEvent,
     VehicleDisposal,
+    VehicleInspection,
+    VehiclePropertyTax,
+    VehicleRegistration,
+    VehicleServiceInvoice,
+    VehicleServiceJob,
+    VehicleServicePart,
 )
 from apps.finance.models import ZERO, Account, AccountType, JournalEntry, Side
 from apps.finance.services import (
@@ -63,10 +75,14 @@ POSTING_ACTIVITIES = [
      "default": "vehicle_registration"},
     {"key": "lease", "label": "Lease payments", "kind": "expense", "default": "vehicle_lease"},
     {"key": "tax_fee", "label": "Taxes & fees", "kind": "expense", "default": "5800"},
+    {"key": "property_tax", "label": "Personal property tax", "kind": "expense",
+     "default": "property_tax_expense"},
 ]
 
 # CostKind → (Expert activity key, Standard default account). An annual excise/property tax_fee
 # defaults to 5800 Taxes (5930 Sales Tax is the payables purchases default — the wrong home here).
+# Emissions folds into 5350 Vehicle Registration (no dedicated COA node); personal property tax
+# posts to the generic 5810 Property Tax expense (system_key `property_tax_expense`).
 KIND_ACTIVITY = {
     CostKind.FUEL: ("fuel", "5310"),
     CostKind.SERVICE: ("service", "5320"),
@@ -74,15 +90,17 @@ KIND_ACTIVITY = {
     CostKind.INSURANCE: ("insurance", "vehicle_insurance"),
     CostKind.REGISTRATION: ("registration", "vehicle_registration"),
     CostKind.INSPECTION: ("registration", "vehicle_registration"),
+    CostKind.EMISSIONS: ("registration", "vehicle_registration"),
     CostKind.LEASE_PAYMENT: ("lease", "vehicle_lease"),
     CostKind.TAX_FEE: ("tax_fee", "5800"),
+    CostKind.PROPERTY_TAX: ("property_tax", "property_tax_expense"),
     CostKind.OTHER: (None, "5900"),
 }
 # Running-cost kinds counted in TCO / cost-per-mile (not capitalizing, not a recoverable deposit).
 RUNNING_COST_KINDS = frozenset(
     {CostKind.FUEL, CostKind.SERVICE, CostKind.REPAIR, CostKind.INSURANCE,
-     CostKind.REGISTRATION, CostKind.INSPECTION, CostKind.LEASE_PAYMENT, CostKind.TAX_FEE,
-     CostKind.OTHER}
+     CostKind.REGISTRATION, CostKind.INSPECTION, CostKind.EMISSIONS, CostKind.LEASE_PAYMENT,
+     CostKind.TAX_FEE, CostKind.PROPERTY_TAX, CostKind.OTHER}
 )
 
 
@@ -345,20 +363,20 @@ def _apply_event_side_effects(event: VehicleCostEvent):
             defaults={"mileage": event.odometer, "source": source},
         )
     if event.kind in SERVICE_KINDS:
-        _advance_service_schedules(event)
+        _advance_service_schedules(vehicle, event.date, event.odometer)
     _recompute_denorms(vehicle, latest=event)
 
 
-def _advance_service_schedules(event: VehicleCostEvent):
-    """Roll each active schedule forward from a matching service/repair event (date + mileage)."""
-    for sched in event.vehicle.service_schedules.filter(is_active=True):
-        sched.last_done_date = event.date
-        if event.odometer is not None:
-            sched.last_done_mileage = event.odometer
+def _advance_service_schedules(vehicle: Vehicle, on_date: datetime.date, odometer):
+    """Roll each active schedule forward from a service/repair event or invoice (date + mileage)."""
+    for sched in vehicle.service_schedules.filter(is_active=True):
+        sched.last_done_date = on_date
+        if odometer is not None:
+            sched.last_done_mileage = odometer
         if sched.interval_months:
-            sched.next_due_date = _add_months(event.date, sched.interval_months)
-        if sched.interval_miles and event.odometer is not None:
-            sched.next_due_mileage = event.odometer + sched.interval_miles
+            sched.next_due_date = _add_months(on_date, sched.interval_months)
+        if sched.interval_miles and odometer is not None:
+            sched.next_due_mileage = odometer + sched.interval_miles
         sched.save(update_fields=[
             "last_done_date", "last_done_mileage", "next_due_date", "next_due_mileage",
             "updated_at",
@@ -424,6 +442,463 @@ def void_cost_event(event: VehicleCostEvent, *, user=None):
     _teardown_module_payments(event, user=user)
     if event.bill_id is not None:
         unpost_bill(event.bill, user=user)
+
+
+# --- Registration / inspection / property-tax records ----------------------------------------
+# Each record posts NOTHING itself; its optional/mandatory `fee_event` (a VehicleCostEvent) owns
+# the money side through the same locked-bill path. The records own the compliance next-due dates;
+# the service rewrites the denormalized Vehicle caches from the latest record.
+
+def _build_fee_event(vehicle: Vehicle, kind, date, fee: dict) -> VehicleCostEvent:
+    """Construct + save a `VehicleCostEvent` from a fee dict (amount, vendor, funding, due/ref/memo)
+    — the money side of a record. Exactly one vendor party must be present (bill requirement)."""
+    ev = VehicleCostEvent(
+        vehicle=vehicle, kind=kind, date=date, amount=fee["amount"],
+        vendor_person=fee.get("vendor_person"),
+        vendor_organization=fee.get("vendor_organization"),
+        due_date=fee.get("due_date"),
+        reference=fee.get("reference", ""),
+        memo=fee.get("memo", ""),
+        funding_source=fee.get("funding_source", Funding.NONE),
+        funding_account=fee.get("funding_account"),
+        credit_card=fee.get("credit_card"),
+        cash_account=fee.get("cash_account"),
+    )
+    ev.save()
+    return ev
+
+
+def _apply_fee_to_event(ev: VehicleCostEvent, kind, date, fee: dict):
+    ev.kind = kind
+    ev.date = date
+    ev.amount = fee["amount"]
+    ev.vendor_person = fee.get("vendor_person")
+    ev.vendor_organization = fee.get("vendor_organization")
+    ev.due_date = fee.get("due_date")
+    ev.reference = fee.get("reference", "")
+    ev.memo = fee.get("memo", "")
+    ev.funding_source = fee.get("funding_source", Funding.NONE)
+    ev.funding_account = fee.get("funding_account")
+    ev.credit_card = fee.get("credit_card")
+    ev.cash_account = fee.get("cash_account")
+    ev.save()
+
+
+def _sync_fee_event(record, kind, date, fee, *, fee_attr="fee_event", user=None):
+    """Create / update / remove a record's linked locked fee bill from a fee dict. `fee` is None (or
+    zero-amount) to record with no money movement; an existing fee is deleted in that case."""
+    has_fee = bool(fee and fee.get("amount") and fee["amount"] > ZERO)
+    ev = getattr(record, fee_attr)
+    if not has_fee:
+        if ev is not None:
+            setattr(record, fee_attr, None)
+            record.save(update_fields=[fee_attr, "updated_at"])
+            delete_cost_event(ev, user=user)  # raises on a foreign allocated payment
+        return
+    if ev is None:
+        ev = _build_fee_event(record.vehicle, kind, date, fee)
+        save_cost_event(ev, user=user, is_new=True)
+        setattr(record, fee_attr, ev)
+        record.save(update_fields=[fee_attr, "updated_at"])
+    else:
+        _apply_fee_to_event(ev, kind, date, fee)
+        save_cost_event(ev, user=user, is_new=False)
+
+
+def _sync_registration_lienholder(reg: VehicleRegistration):
+    """A financed vehicle DEFAULTS a fresh registration (still clean/no-lienholder) to LIEN + the
+    loan's lender — leaving explicit user choices untouched."""
+    vehicle = reg.vehicle
+    if (
+        vehicle.is_financed and vehicle.loan_id
+        and reg.title_status == TitleStatus.CLEAN
+        and reg.lienholder_organization_id is None
+    ):
+        lender = getattr(vehicle.loan, "lender_organization", None)
+        if lender is not None:
+            reg.title_status = TitleStatus.LIEN
+            reg.lienholder_organization = lender
+            reg.save(update_fields=["title_status", "lienholder_organization", "updated_at"])
+
+
+@transaction.atomic
+def save_registration(reg: VehicleRegistration, *, fee=None, user=None):
+    """Save a registration term, materialize its optional locked fee bill, apply the financed-title
+    default, and refresh the compliance caches."""
+    reg.save()
+    _sync_fee_event(reg, CostKind.REGISTRATION, reg.effective_from, fee, user=user)
+    _sync_registration_lienholder(reg)
+    _recompute_compliance_denorms(reg.vehicle)
+    return reg
+
+
+@transaction.atomic
+def delete_registration(reg: VehicleRegistration, *, user=None):
+    """Hard-erase a registration term (and its fee bill, refusing a foreign payment); recompute."""
+    vehicle = reg.vehicle
+    _sync_fee_event(reg, CostKind.REGISTRATION, reg.effective_from, None, user=user)
+    reg.delete()
+    _recompute_compliance_denorms(vehicle)
+
+
+@transaction.atomic
+def save_inspection(insp: VehicleInspection, *, fee=None, user=None):
+    """Save an inspection (safety / emissions / combined), materialize its optional fee bill, and
+    refresh the compliance caches. An emissions fee posts as CostKind.EMISSIONS (still folds to
+    5350); safety / combined post as CostKind.INSPECTION."""
+    insp.save()
+    kind = (
+        CostKind.EMISSIONS if insp.kind == ComplianceKind.EMISSIONS else CostKind.INSPECTION
+    )
+    _sync_fee_event(insp, kind, insp.performed_on, fee, user=user)
+    _recompute_compliance_denorms(insp.vehicle)
+    return insp
+
+
+@transaction.atomic
+def delete_inspection(insp: VehicleInspection, *, user=None):
+    vehicle = insp.vehicle
+    kind = (
+        CostKind.EMISSIONS if insp.kind == ComplianceKind.EMISSIONS else CostKind.INSPECTION
+    )
+    _sync_fee_event(insp, kind, insp.performed_on, None, user=user)
+    insp.delete()
+    _recompute_compliance_denorms(vehicle)
+
+
+@transaction.atomic
+def save_property_tax(pt: VehiclePropertyTax, *, fee=None, user=None):
+    """Save a property-tax assessment and route its amount through Payables as a locked bill (funded
+    or accrued) — the amount IS the bill, so `fee` (built from `pt.amount` + a vendor + funding) is
+    mandatory. Refreshes the property-tax reminder cache."""
+    pt.save()
+    date = pt.due_date or pt.assessed_on or datetime.date.today()
+    _sync_fee_event(pt, CostKind.PROPERTY_TAX, date, fee, user=user)
+    _recompute_property_tax_denorm(pt.vehicle)
+    return pt
+
+
+@transaction.atomic
+def delete_property_tax(pt: VehiclePropertyTax, *, user=None):
+    vehicle = pt.vehicle
+    date = pt.due_date or pt.assessed_on or datetime.date.today()
+    _sync_fee_event(pt, CostKind.PROPERTY_TAX, date, None, user=user)
+    pt.delete()
+    _recompute_property_tax_denorm(vehicle)
+
+
+def _recompute_compliance_denorms(vehicle: Vehicle):
+    """Rewrite the registration / inspection / emissions caches from the authoritative records.
+    Registration caches (plate/jurisdiction/title/expiry) derive from `current_registration`;
+    inspection_due = latest expires_on among SAFETY-satisfying records, emissions_due among
+    EMISSIONS-satisfying — so a COMBINED test advances BOTH. Only rewrites a cache once a record of
+    that type exists, so a manually-entered scalar is never wiped before the module owns it."""
+    fields = []
+
+    def set_field(attr, value):
+        if getattr(vehicle, attr) != value:
+            setattr(vehicle, attr, value)
+            fields.append(attr)
+
+    reg = vehicle.current_registration
+    if reg is not None:
+        set_field("registration_expiry", reg.expires_on)
+        set_field("license_plate", reg.plate_number or "")
+        set_field("plate_jurisdiction", reg.jurisdiction or "")
+        set_field("title_number", reg.title_number or "")
+
+    safety = (
+        vehicle.inspections.filter(kind__in=list(SATISFIES_SAFETY))
+        .order_by("-performed_on", "-id").first()
+    )
+    if safety is not None:
+        set_field("inspection_due", safety.expires_on)
+    emissions = (
+        vehicle.inspections.filter(kind__in=list(SATISFIES_EMISSIONS))
+        .order_by("-performed_on", "-id").first()
+    )
+    if emissions is not None:
+        set_field("emissions_due", emissions.expires_on)
+
+    if fields:
+        vehicle.save(update_fields=[*fields, "updated_at"])
+
+
+def _recompute_property_tax_denorm(vehicle: Vehicle):
+    """`property_tax_due` = the due date of the latest UNPAID property-tax record (else None → no
+    nag once every assessment is paid)."""
+    latest_unpaid = None
+    for pt in vehicle.property_taxes.order_by("-tax_year", "-id"):
+        if not pt.is_paid:
+            latest_unpaid = pt
+            break
+    new_due = latest_unpaid.due_date if latest_unpaid else None
+    if vehicle.property_tax_due != new_due:
+        vehicle.property_tax_due = new_due
+        vehicle.save(update_fields=["property_tax_due", "updated_at"])
+
+
+@transaction.atomic
+def release_title_lien(vehicle: Vehicle, *, on_date=None, user=None):
+    """On loan payoff, append a TITLE_CHANGE registration term with a clean title and no lienholder,
+    snapshotting the current plate / title / expiry. Manual action in v1 (auto-trigger deferred)."""
+    on_date = on_date or datetime.date.today()
+    reg = vehicle.current_registration
+    # Keep the (vehicle, effective_from) unique constraint happy if one already exists that day.
+    if vehicle.registrations.filter(effective_from=on_date).exists():
+        on_date = on_date + datetime.timedelta(days=1)
+    new = VehicleRegistration(
+        vehicle=vehicle,
+        jurisdiction=(reg.jurisdiction if reg else vehicle.plate_jurisdiction) or "",
+        plate_number=(reg.plate_number if reg else vehicle.license_plate) or "",
+        plate_type=reg.plate_type if reg else PlateType.STANDARD,
+        title_number=(reg.title_number if reg else vehicle.title_number) or "",
+        title_jurisdiction=(reg.title_jurisdiction if reg else "") or "",
+        title_status=TitleStatus.CLEAN,
+        lienholder_organization=None,
+        effective_from=on_date,
+        expires_on=(reg.expires_on if reg else vehicle.registration_expiry),
+        reason=RegistrationReason.TITLE_CHANGE,
+    )
+    new.save()
+    _recompute_compliance_denorms(vehicle)
+    return new
+
+
+# --- Rich multi-line service invoices --------------------------------------------------------
+# A VehicleServiceInvoice owns a locked, multi-line Bill (category totals only) built through the
+# same Payables primitives as _sync_bill; the job/part granularity never leaves the module. A $0
+# (all-warranty) invoice records history + advances schedules but creates no bill.
+
+def _invoice_ct():
+    from django.contrib.contenttypes.models import ContentType
+
+    return ContentType.objects.get_for_model(VehicleServiceInvoice)
+
+
+def _rewrite_jobs(inv: VehicleServiceInvoice, jobs: list[dict]):
+    """Delete + recreate the invoice's jobs and their parts from the submitted structure (like bill
+    lines are rewritten each save)."""
+    inv.jobs.all().delete()  # cascades to parts
+    for j_order, jd in enumerate(jobs or []):
+        job = VehicleServiceJob.objects.create(
+            invoice=inv, order=j_order,
+            code=(jd.get("code") or "").strip(),
+            complaint=(jd.get("complaint") or "").strip(),
+            description=(jd.get("description") or "").strip(),
+            technician=(jd.get("technician") or "").strip(),
+            labor_hours=jd.get("labor_hours"),
+            labor_amount=jd.get("labor_amount") or ZERO,
+            note=(jd.get("note") or "").strip(),
+        )
+        for p_order, pd in enumerate(jd.get("parts") or []):
+            VehicleServicePart.objects.create(
+                job=job, order=p_order,
+                part_number=(pd.get("part_number") or "").strip(),
+                description=(pd.get("description") or "").strip(),
+                quantity=pd.get("quantity") or Decimal("1"),
+                unit_price=pd.get("unit_price") or ZERO,
+            )
+
+
+def _module_service_payments(inv: VehicleServiceInvoice):
+    from apps.payables.models import Payment
+
+    return Payment.objects.filter(
+        source_content_type=_invoice_ct(), source_object_id=inv.pk
+    )
+
+
+def _teardown_service_payment(inv: VehicleServiceInvoice, *, user=None):
+    from apps.payables.services import delete_payment
+
+    for pay in list(_module_service_payments(inv)):
+        delete_payment(pay, user=user)
+        pay.hard_delete()
+    if inv.payment_id is not None:
+        inv.payment = None
+        inv.save(update_fields=["payment", "updated_at"])
+
+
+def _sync_service_bill(inv: VehicleServiceInvoice, *, user=None):
+    """Create / repost (or tear down) the locked multi-line bill: category lines (Parts, Labor,
+    Sublet, Shop supplies → the service account; Discount → a negative line via Purchase Discounts;
+    Sales tax → the payables sales-tax account) that sum to `grand_total`. A $0 invoice has no bill.
+    """
+    from apps.payables.models import Bill, BillLine
+    from apps.payables.services import delete_bill, post_bill, repost_bill
+
+    grand = inv.grand_total
+    if grand <= ZERO:
+        _teardown_service_payment(inv, user=user)
+        if inv.bill_id is not None:
+            bill = inv.bill
+            module_pks = set(_module_service_payments(inv).values_list("pk", flat=True))
+            if bill.allocations.exclude(payment_id__in=module_pks).exists():
+                raise ValueError(
+                    "A payment recorded in Payables is allocated to this bill — "
+                    "delete it there first."
+                )
+            inv.bill = None
+            inv.save(update_fields=["bill", "updated_at"])
+            delete_bill(bill, user=user)
+            bill.hard_delete()
+        return None
+
+    vehicle = inv.vehicle
+    bill = inv.bill or Bill(is_locked=True)
+    bill.vendor_person = inv.vendor_person
+    bill.vendor_organization = inv.vendor_organization
+    bill.bill_date = inv.date
+    bill.due_date = inv.date
+    bill.currency = vehicle.currency
+    bill.vendor_ref = inv.invoice_number
+    bill.notes = inv.memo
+    bill.is_locked = True
+    bill.source_content_type = _invoice_ct()
+    bill.source_object_id = inv.pk
+    bill.save()
+
+    bill.lines.all().delete()  # rewritten each save
+    service_account = resolve_posting_account(vehicle, "service", "5320")
+    order = 0
+
+    def add_line(line_type, description, amount, account):
+        nonlocal order
+        if not amount or amount <= ZERO:
+            return
+        BillLine.objects.create(
+            bill=bill, line_type=line_type, order=order, description=description,
+            account=account, quantity=Decimal("1"), unit_price=amount,
+        )
+        order += 1
+
+    add_line(BillLine.LineType.EXPENSE, f"{vehicle.nickname} — parts", inv.parts_total,
+             service_account)
+    add_line(BillLine.LineType.EXPENSE, f"{vehicle.nickname} — labor", inv.labor_total,
+             service_account)
+    add_line(BillLine.LineType.EXPENSE, "Sublet", inv.sublet, service_account)
+    add_line(BillLine.LineType.EXPENSE, "Shop supplies", inv.shop_supplies, service_account)
+    # A DISCOUNT line carries a positive base but contributes negatively to the total (BillLine.
+    # amount negates it) and credits Purchase Discounts via the payables posting path.
+    add_line(BillLine.LineType.DISCOUNT, "Discount", inv.discount, service_account)
+    # Sales tax: no explicit account → payables resolves the sales-tax account (5930).
+    add_line(BillLine.LineType.TAX, "Sales tax", inv.sales_tax, None)
+
+    if inv.bill_id is None:
+        post_bill(bill, user=user)
+        inv.bill = bill
+        inv.save(update_fields=["bill", "updated_at"])
+    else:
+        repost_bill(bill, user=user)
+    return bill
+
+
+def _new_locked_service_payment(inv: VehicleServiceInvoice):
+    from apps.payables.models import Payment
+
+    return Payment(
+        vendor_person=inv.vendor_person,
+        vendor_organization=inv.vendor_organization,
+        date=inv.date,
+        is_locked=True,
+        source_content_type=_invoice_ct(),
+        source_object_id=inv.pk,
+    )
+
+
+def _sync_service_payment(inv: VehicleServiceInvoice, *, user=None):
+    """Create / repost / remove the ONE locked funding payment for the invoice, allocated in full to
+    its bill. NONE funding (or a $0 invoice with no bill) leaves the bill accrued / absent."""
+    from apps.payables.services import apply_payment, repost_payment
+
+    bill = inv.bill
+    if not inv.is_funded or bill is None:
+        _teardown_service_payment(inv, user=user)
+        return None
+
+    total = bill.total
+    pay = inv.payment or _new_locked_service_payment(inv)
+    pay.vendor_person = inv.vendor_person
+    pay.vendor_organization = inv.vendor_organization
+    pay.date = inv.date
+    pay.amount = total
+    pay.funding_kind = _payment_funding(inv.funding_source)
+    pay.bank_account = inv.funding_account if inv.funding_source == Funding.BANK else None
+    pay.credit_card = inv.credit_card if inv.funding_source == Funding.CARD else None
+    pay.cash_account = inv.cash_account if inv.funding_source == Funding.CASH else None
+    pay.is_locked = True
+    pay.source_content_type = _invoice_ct()
+    pay.source_object_id = inv.pk
+
+    if inv.payment_id is None:
+        pay.save()
+        apply_payment(pay, [(bill, total)], user=user)
+        inv.payment = pay
+        inv.save(update_fields=["payment", "updated_at"])
+    else:
+        pay.save()
+        repost_payment(pay, [(bill, total)], user=user)
+    return pay
+
+
+def _apply_invoice_side_effects(inv: VehicleServiceInvoice):
+    """Odometer upsert (from `odometer_out`) + service-schedule advance."""
+    vehicle = inv.vehicle
+    if inv.odometer_out is not None:
+        OdometerReading.objects.update_or_create(
+            vehicle=vehicle, as_of=inv.date,
+            defaults={"mileage": inv.odometer_out, "source": OdometerReading.Source.SERVICE},
+        )
+    _advance_service_schedules(vehicle, inv.date, inv.odometer_out)
+    _recompute_denorms(vehicle)
+
+
+@transaction.atomic
+def save_service_invoice(inv: VehicleServiceInvoice, jobs: list[dict], *, user=None):
+    """Save a service invoice: rewrite its jobs/parts, build its locked bill (+ funding payment),
+    then advance the service schedules and upsert the odometer. The caller has resolved + set the
+    vendor party and funding fields on `inv`. `jobs` is a list of dicts with a nested `parts` list.
+    """
+    _ensure_service_vendor_profile(inv)
+    inv.save()
+    _rewrite_jobs(inv, jobs)
+    _sync_service_bill(inv, user=user)
+    _sync_service_payment(inv, user=user)
+    _apply_invoice_side_effects(inv)
+    return inv
+
+
+def _ensure_service_vendor_profile(inv: VehicleServiceInvoice):
+    from apps.payables.services import ensure_vendor_profile
+
+    if inv.vendor_organization_id:
+        _ensure_vendor_category(inv.vendor_organization)
+        ensure_vendor_profile(organization=inv.vendor_organization)
+    elif inv.vendor_person_id:
+        ensure_vendor_profile(person=inv.vendor_person)
+
+
+@transaction.atomic
+def delete_service_invoice(inv: VehicleServiceInvoice, *, user=None):
+    """Hard-erase a service invoice: tear down its funding payment, refuse if a FOREIGN payment is
+    allocated to the bill, erase the bill + entry, then hard-delete the invoice (jobs/parts cascade)
+    and refresh schedules."""
+    from apps.payables.services import delete_bill
+
+    bill = inv.bill
+    vehicle = inv.vehicle
+    module_pks = set(_module_service_payments(inv).values_list("pk", flat=True))
+    _teardown_service_payment(inv, user=user)
+    if bill is not None:
+        if bill.allocations.exclude(payment_id__in=module_pks).exists():
+            raise ValueError(
+                "A payment recorded in Payables is allocated to this bill — delete it there first."
+            )
+        delete_bill(bill, user=user)
+        bill.hard_delete()
+    inv.hard_delete()
+    _recompute_denorms(vehicle)
 
 
 # --- Financed purchase settlement ------------------------------------------------------------
@@ -838,11 +1313,13 @@ def _financing_interest(vehicle: Vehicle) -> Decimal:
 
 
 def running_cost_total(vehicle: Vehicle) -> Decimal:
-    """Lifetime running cost (fuel + service + insurance + …), plus financing interest."""
+    """Lifetime running cost (fuel + service + insurance + … + service invoices), plus financing
+    interest. Service invoices are separate records from cost events → no double-count."""
     total = sum(
         (e.amount for e in vehicle.cost_events.filter(kind__in=list(RUNNING_COST_KINDS))),
         ZERO,
     )
+    total += sum((inv.grand_total for inv in vehicle.service_invoices.all()), ZERO)
     return total + _financing_interest(vehicle)
 
 
@@ -870,15 +1347,21 @@ def next_service_due(vehicle: Vehicle):
 RENEWAL_LABELS = [
     ("insurance_expiry", "Insurance", "shield"),
     ("registration_expiry", "Registration", "file-text"),
-    ("inspection_due", "Inspection", "clipboard-check"),
+    ("inspection_due", "Safety inspection", "clipboard-check"),
+    ("emissions_due", "Emissions test", "leaf"),
+    ("property_tax_due", "Property tax", "landmark"),
     ("lease_end_date", "Lease ends", "calendar-days"),
     ("warranty_expiry", "Warranty ends", "shield-check"),
 ]
 
+# Renewal rows suppressed by a persistent per-vehicle exempt toggle.
+RENEWAL_EXEMPT = {"inspection_due": "inspection_exempt", "emissions_due": "emissions_exempt"}
+
 
 def renewals_due(within_days: int = 90) -> list[dict]:
-    """Upcoming renewals across active, non-disposed vehicles (insurance / registration / inspection
-    / lease end / warranty), soonest first (past-due-but-open first). A pure read."""
+    """Upcoming renewals across active, non-disposed vehicles (insurance / registration / safety
+    inspection / emissions / property tax / lease end / warranty), soonest first (past-due-but-open
+    first). Rows are skipped when the vehicle carries the matching exempt toggle. A pure read."""
     today = datetime.date.today()
     horizon = today + datetime.timedelta(days=within_days)
     rows = []
@@ -886,6 +1369,9 @@ def renewals_due(within_days: int = 90) -> list[dict]:
         if vehicle.is_disposed:
             continue
         for attr, label, glyph in RENEWAL_LABELS:
+            exempt_attr = RENEWAL_EXEMPT.get(attr)
+            if exempt_attr and getattr(vehicle, exempt_attr):
+                continue
             when = getattr(vehicle, attr)
             if when is None or when > horizon:
                 continue
@@ -946,25 +1432,37 @@ def depreciation_series(vehicle: Vehicle) -> dict:
     }
 
 
-def register(vehicle: Vehicle) -> list[VehicleCostEvent]:
-    """The vehicle's cost-event register, newest first."""
-    return list(
+def register(vehicle: Vehicle) -> list:
+    """The vehicle's cost register, newest first — a merged, date-sorted list of `VehicleCostEvent`s
+    AND `VehicleServiceInvoice`s (a shared shape: `date`, `kind_label`, `kind_glyph`, `vendor_name`,
+    `bill`, `amount`; `is_service_invoice` discriminates). An invoice is never also a cost event, so
+    there is no double-count."""
+    events = list(
         vehicle.cost_events.select_related(
             "vendor_person", "vendor_organization", "bill", "payment"
         ).order_by("-date", "-id")
     )
+    invoices = list(
+        vehicle.service_invoices.select_related(
+            "vendor_person", "vendor_organization", "bill"
+        ).order_by("-date", "-id")
+    )
+    merged = [*events, *invoices]
+    merged.sort(key=lambda r: (r.date, r.is_service_invoice, r.pk), reverse=True)
+    return merged
 
 
 def cost_by_category(vehicle: Vehicle):
-    """(c-donut segments, total) of lifetime running cost grouped by kind, + a Financing interest
-    slice for a financed vehicle."""
+    """(c-donut segments, total) of lifetime running cost grouped by kind, + a Service slice for
+    multi-line service invoices, + a Financing interest slice for a financed vehicle."""
     from apps.investments.services import Slice, donut_segments
 
     tints = {
         CostKind.FUEL: "amber", CostKind.SERVICE: "teal", CostKind.REPAIR: "rose",
         CostKind.INSURANCE: "sky", CostKind.REGISTRATION: "violet",
-        CostKind.INSPECTION: "indigo", CostKind.LEASE_PAYMENT: "emerald",
-        CostKind.TAX_FEE: "slate", CostKind.OTHER: "slate",
+        CostKind.INSPECTION: "indigo", CostKind.EMISSIONS: "emerald",
+        CostKind.LEASE_PAYMENT: "emerald", CostKind.TAX_FEE: "slate",
+        CostKind.PROPERTY_TAX: "amber", CostKind.OTHER: "slate",
     }
     labels = dict(CostKind.choices)
     buckets: dict = {}
@@ -974,6 +1472,9 @@ def cost_by_category(vehicle: Vehicle):
         Slice(labels.get(k, k), v, tints.get(k, "slate"))
         for k, v in buckets.items() if v > ZERO
     ]
+    invoice_total = sum((inv.grand_total for inv in vehicle.service_invoices.all()), ZERO)
+    if invoice_total > ZERO:
+        slices.append(Slice("Service", invoice_total, "teal"))
     interest = _financing_interest(vehicle)
     if interest > ZERO:
         slices.append(Slice("Financing interest", interest, "rose"))
@@ -995,6 +1496,9 @@ def monthly_running_cost(vehicles=None) -> Decimal:
             )),
             ZERO,
         )
+        spent += sum(
+            (inv.grand_total for inv in vehicle.service_invoices.filter(date__gte=since)), ZERO
+        )
         total += spent / 12
     return total.quantize(Decimal("0.01"))
 
@@ -1014,6 +1518,10 @@ def _cost_ytd(vehicles) -> Decimal:
             (e.amount for e in vehicle.cost_events.filter(
                 kind__in=list(RUNNING_COST_KINDS), date__gte=year_start
             )),
+            ZERO,
+        )
+        total += sum(
+            (inv.grand_total for inv in vehicle.service_invoices.filter(date__gte=year_start)),
             ZERO,
         )
     return total

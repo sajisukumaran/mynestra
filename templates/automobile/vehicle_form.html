@@ -220,6 +220,11 @@
         <c-field label="Warranty expires"><div class="control"><input type="date" name="warranty_expiry" value="{{ vehicle.warranty_expiry|date:'Y-m-d' }}"></div></c-field>
         <c-field label="Warranty miles"><div class="control"><input name="warranty_miles" inputmode="numeric" placeholder="e.g. 60000" value="{{ vehicle.warranty_miles|default:'' }}"></div></c-field>
       </div>
+      <div class="row wrap" style="margin-top:12px;">
+        <label class="row"><input type="checkbox" name="inspection_exempt"{% if vehicle.inspection_exempt %} checked{% endif %}> <span class="muted">Safety inspection not required (EV / new / classic)</span></label>
+        <label class="row"><input type="checkbox" name="emissions_exempt"{% if vehicle.emissions_exempt %} checked{% endif %}> <span class="muted">Emissions test not required</span></label>
+      </div>
+      <p class="subtle" style="font-size:12px; margin-top:8px;">Plate, title and expiry become a registration term you manage under <span class="strong">Registration, tax &amp; compliance</span> after creating the vehicle.</p>
     </c-card>
 
     {% if expert %}

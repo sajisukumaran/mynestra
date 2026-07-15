@@ -289,10 +289,29 @@ def test_loans_are_isolated(make_tenant):
 
 
 def test_automobile_are_isolated(make_tenant):
-    """Module 8 (Vehicle/VehicleDriver/VehicleCostEvent/VehicleDisposal), the locked payables bill
-    it generates, and the ledger entries must not leak across tenant schemas."""
-    from apps.automobile.models import CostKind, Funding, OwnershipMode, Vehicle, VehicleCostEvent
-    from apps.automobile.services import save_cost_event
+    """Module 8 (Vehicle/VehicleDriver/VehicleCostEvent/VehicleDisposal + the follow-up
+    registration / inspection / property-tax / service-invoice records), the locked payables bills
+    they generate, and the ledger entries must not leak across tenant schemas."""
+    from apps.automobile.models import (
+        ComplianceKind,
+        ComplianceResult,
+        CostKind,
+        Funding,
+        OwnershipMode,
+        Vehicle,
+        VehicleCostEvent,
+        VehicleInspection,
+        VehiclePropertyTax,
+        VehicleRegistration,
+        VehicleServiceInvoice,
+    )
+    from apps.automobile.services import (
+        save_cost_event,
+        save_inspection,
+        save_property_tax,
+        save_registration,
+        save_service_invoice,
+    )
     from apps.finance.models import Currency
     from apps.payables.models import Bill
 
@@ -312,14 +331,48 @@ def test_automobile_are_isolated(make_tenant):
         )
         event.save()
         save_cost_event(event, is_new=True)
+        reg = VehicleRegistration(
+            vehicle=vehicle, jurisdiction="Virginia", plate_number="A1",
+            effective_from=datetime.date(2026, 1, 5), expires_on=datetime.date(2027, 1, 5),
+        )
+        save_registration(reg)
+        insp = VehicleInspection(
+            vehicle=vehicle, kind=ComplianceKind.SAFETY, performed_on=datetime.date(2026, 1, 5),
+            result=ComplianceResult.PASS, expires_on=datetime.date(2027, 1, 5),
+        )
+        save_inspection(insp)
+        pt = VehiclePropertyTax(
+            vehicle=vehicle, tax_year=2026, jurisdiction="Fairfax", amount=Decimal("450"),
+            due_date=datetime.date(2026, 9, 1),
+        )
+        save_property_tax(pt, fee={
+            "amount": Decimal("450"), "vendor_organization": Organization.objects.create(
+                name="Fairfax County"
+            ), "vendor_person": None, "funding_source": Funding.NONE, "funding_account": None,
+            "credit_card": None, "cash_account": None, "due_date": pt.due_date,
+            "reference": "", "memo": "",
+        })
+        inv = VehicleServiceInvoice(
+            vehicle=vehicle, date=datetime.date(2026, 1, 6),
+            vendor_organization=Organization.objects.create(name="Alpha Service"),
+        )
+        save_service_invoice(inv, [{"code": "PFL", "labor_amount": Decimal("80"), "parts": []}])
         assert Vehicle.objects.count() == 1
-        assert VehicleCostEvent.objects.count() == 1
-        assert Bill.objects.filter(is_locked=True).count() == 1
+        assert VehicleCostEvent.objects.count() == 2          # purchase + property-tax fee
+        assert VehicleRegistration.objects.count() == 1
+        assert VehicleInspection.objects.count() == 1
+        assert VehiclePropertyTax.objects.count() == 1
+        assert VehicleServiceInvoice.objects.count() == 1
+        assert Bill.objects.filter(is_locked=True).count() == 3  # purchase + property-tax + service
         assert vehicle.cost == Decimal("30000")
 
     with schema_context(b.schema_name):
         assert Vehicle.objects.count() == 0
         assert VehicleCostEvent.objects.count() == 0
+        assert VehicleRegistration.objects.count() == 0
+        assert VehicleInspection.objects.count() == 0
+        assert VehiclePropertyTax.objects.count() == 0
+        assert VehicleServiceInvoice.objects.count() == 0
         assert Bill.objects.count() == 0
         assert not Organization.objects.filter(name="Alpha Motors").exists()
         assert JournalEntry.objects.count() == 0

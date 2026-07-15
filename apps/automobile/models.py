@@ -17,6 +17,7 @@ in v1. Soft-deletable + audited like every tenant model (§5).
 """
 
 import datetime
+from decimal import Decimal
 
 from django.db import models
 from simple_history.models import HistoricalRecords
@@ -90,9 +91,11 @@ class CostKind(models.TextChoices):
     INSURANCE = "insurance", "Insurance"
     REGISTRATION = "registration", "Registration / road tax"
     INSPECTION = "inspection", "Inspection"
+    EMISSIONS = "emissions", "Emissions / smog"
     LEASE_PAYMENT = "lease_payment", "Lease payment"
     LEASE_DEPOSIT = "lease_deposit", "Lease deposit"
     TAX_FEE = "tax_fee", "Tax / fee"
+    PROPERTY_TAX = "property_tax", "Personal property tax"
     OTHER = "other", "Other"
 
 
@@ -101,10 +104,11 @@ CAPITALIZING_KINDS = frozenset({CostKind.PURCHASE, CostKind.IMPROVEMENT})
 # Kinds that capitalize into the shared refundable-deposit asset (1320) instead of the vehicle node.
 DEPOSIT_KINDS = frozenset({CostKind.LEASE_DEPOSIT})
 # Kinds whose payment advances a renewal date (event.covers_through → the matching Vehicle field).
+# Registration + inspection compliance moved to first-class dated records (VehicleRegistration /
+# VehicleInspection) that own the next-due date; only auto insurance stays scalar/covers_through
+# here (migrated into policies by the future Insurance module).
 RENEWAL_KINDS = {
     CostKind.INSURANCE: "insurance_expiry",
-    CostKind.REGISTRATION: "registration_expiry",
-    CostKind.INSPECTION: "inspection_due",
 }
 # Kinds that advance a matching ServiceSchedule.
 SERVICE_KINDS = frozenset({CostKind.SERVICE, CostKind.REPAIR})
@@ -118,11 +122,84 @@ COST_KIND_GLYPH = {
     CostKind.INSURANCE: "shield",
     CostKind.REGISTRATION: "file-text",
     CostKind.INSPECTION: "clipboard-check",
+    CostKind.EMISSIONS: "leaf",  # gauge fallback if the icon set lacks "leaf"
     CostKind.LEASE_PAYMENT: "calendar-days",
     CostKind.LEASE_DEPOSIT: "piggy-bank",
     CostKind.TAX_FEE: "receipt",
+    CostKind.PROPERTY_TAX: "landmark",
     CostKind.OTHER: "circle",
 }
+
+
+# --- Registration / compliance vocabularies (module 8 follow-up) -----------------------------
+
+class PlateType(models.TextChoices):
+    STANDARD = "standard", "Standard"
+    VANITY = "vanity", "Vanity / personalised"
+    SPECIALTY = "specialty", "Specialty"
+    TEMPORARY = "temporary", "Temporary"
+    DISABLED = "disabled", "Disabled"
+    DEALER = "dealer", "Dealer"
+
+
+class TitleStatus(models.TextChoices):
+    CLEAN = "clean", "Clean"
+    LIEN = "lien", "Lien (financed)"
+    SALVAGE = "salvage", "Salvage"
+    REBUILT = "rebuilt", "Rebuilt"
+
+
+class RegistrationReason(models.TextChoices):
+    INITIAL = "initial", "Initial registration"
+    RENEWAL = "renewal", "Renewal"
+    MOVED = "moved", "Moved jurisdiction"
+    PLATE_CHANGE = "plate_change", "Plate change"
+    TITLE_CHANGE = "title_change", "Title change"
+    REPLACEMENT = "replacement", "Replacement"
+
+
+class ComplianceKind(models.TextChoices):
+    SAFETY = "safety", "Mechanical / safety inspection"       # annual
+    EMISSIONS = "emissions", "Emissions test"                 # biennial
+    COMBINED = "combined", "Safety + emissions"               # one sticker, both
+
+
+class ComplianceResult(models.TextChoices):
+    PASS = "pass", "Pass"
+    FAIL = "fail", "Fail"
+    CONDITIONAL = "conditional", "Conditional / advisory"
+    NOT_REQUIRED = "not_required", "Not required / exempt"
+
+
+# Pre-fill months for a record's next-due (expires_on stays user-editable).
+COMPLIANCE_DEFAULT_MONTHS = {
+    ComplianceKind.SAFETY: 12,
+    ComplianceKind.EMISSIONS: 24,
+    ComplianceKind.COMBINED: 12,
+}
+REGISTRATION_DEFAULT_MONTHS = 12
+
+# A COMBINED test satisfies BOTH the mechanical and emissions next-due dates.
+SATISFIES_SAFETY = frozenset({ComplianceKind.SAFETY, ComplianceKind.COMBINED})
+SATISFIES_EMISSIONS = frozenset({ComplianceKind.EMISSIONS, ComplianceKind.COMBINED})
+
+# Tint per compliance kind / result (donuts, badges — all .tint-*/variants in app.css).
+COMPLIANCE_KIND_GLYPH = {
+    ComplianceKind.SAFETY: "clipboard-check",
+    ComplianceKind.EMISSIONS: "leaf",
+    ComplianceKind.COMBINED: "shield-check",
+}
+COMPLIANCE_RESULT_TINT = {
+    ComplianceResult.PASS: "emerald",
+    ComplianceResult.FAIL: "rose",
+    ComplianceResult.CONDITIONAL: "amber",
+    ComplianceResult.NOT_REQUIRED: "slate",
+}
+
+
+class ServiceInvoiceCategory(models.TextChoices):
+    SERVICE = "service", "Service"
+    REPAIR = "repair", "Repair"
 
 
 class FuelUnit(models.TextChoices):
@@ -225,8 +302,18 @@ class Vehicle(SoftDeleteModel):
     insurance_carrier = models.CharField(max_length=120, blank=True)
     insurance_policy_number = models.CharField(max_length=80, blank=True)
     insurance_expiry = models.DateField(null=True, blank=True)
+    # registration_expiry / inspection_due / emissions_due / property_tax_due are DENORM CACHES the
+    # service rewrites from the latest VehicleRegistration / VehicleInspection / VehiclePropertyTax
+    # record (records are the single source of truth). Kept so list search + the identity header +
+    # the generic dashboard renewals loop keep working.
     registration_expiry = models.DateField(null=True, blank=True)
     inspection_due = models.DateField(null=True, blank=True)
+    emissions_due = models.DateField(null=True, blank=True)
+    property_tax_due = models.DateField(null=True, blank=True)
+    # Persistent per-vehicle "compliance never required" (EV/new/classic) — suppresses reminders.
+    # Composes with a one-off ComplianceResult.NOT_REQUIRED record (expires_on=None → no nag).
+    inspection_exempt = models.BooleanField(default=False)
+    emissions_exempt = models.BooleanField(default=False)
     warranty_provider = models.CharField(max_length=120, blank=True)
     warranty_expiry = models.DateField(null=True, blank=True)
     warranty_miles = models.PositiveIntegerField(null=True, blank=True)
@@ -351,8 +438,63 @@ class Vehicle(SoftDeleteModel):
         return self._days_until(self.inspection_due)
 
     @property
+    def emissions_days_left(self):
+        return self._days_until(self.emissions_due)
+
+    @property
+    def property_tax_days_left(self):
+        return self._days_until(self.property_tax_due)
+
+    @property
     def warranty_days_left(self):
         return self._days_until(self.warranty_expiry)
+
+    # --- registration / compliance (records are the single source of truth) ---
+    @property
+    def current_registration(self):
+        """The registration term in effect today — the latest with `effective_from ≤ today`
+        (à la Loan.current_rate). None when the vehicle has no registration on/before today."""
+        return (
+            self.registrations.filter(effective_from__lte=datetime.date.today())
+            .order_by("-effective_from", "-id")
+            .first()
+        )
+
+    @property
+    def current_plate(self) -> str:
+        reg = self.current_registration
+        return (reg.plate_number if reg else self.license_plate) or ""
+
+    @property
+    def current_plate_state(self) -> str:
+        reg = self.current_registration
+        return (reg.jurisdiction if reg else self.plate_jurisdiction) or ""
+
+    @property
+    def current_title_status(self):
+        reg = self.current_registration
+        return reg.title_status if reg else None
+
+    @property
+    def current_title_status_label(self) -> str:
+        reg = self.current_registration
+        return reg.title_status_label if reg else ""
+
+    @property
+    def lienholder(self):
+        reg = self.current_registration
+        return reg.lienholder if reg else None
+
+    def latest_inspection(self, kind=None):
+        """The most-recent inspection (optionally filtered to a single ComplianceKind)."""
+        qs = self.inspections.all()
+        if kind is not None:
+            qs = qs.filter(kind=kind)
+        return qs.order_by("-performed_on", "-id").first()
+
+    @property
+    def latest_property_tax(self):
+        return self.property_taxes.order_by("-tax_year", "-id").first()
 
     @property
     def lease_days_left(self):
@@ -495,6 +637,10 @@ class VehicleCostEvent(SoftDeleteModel):
 
     def __str__(self) -> str:
         return f"{self.get_kind_display()} {self.amount} on {self.date}"
+
+    # Discriminator for the merged cost register (a service invoice is the other member — see
+    # services.register). A plain cost event is never a service invoice.
+    is_service_invoice = False
 
     @property
     def kind_label(self) -> str:
@@ -727,3 +873,410 @@ class VehicleDisposal(SoftDeleteModel):
     @property
     def buyer(self):
         return self.buyer_person or self.buyer_organization
+
+
+# --- Registration / inspection / property-tax records ----------------------------------------
+# Dated event logs (TimeStampedModel, no HistoricalRecords/soft-delete): the row-set IS the
+# history ("current = latest ≤ today"), mirroring VehicleValuation / LoanRateChange. Each posts
+# NOTHING to the GL itself — its optional `fee_event` (a SoftDeleteModel) owns the money side, so
+# the audit trail lives on the locked bill.
+
+
+class VehicleRegistration(TimeStampedModel):
+    """One registration term for a vehicle — it *is* the plate / title / jurisdiction history
+    because each row snapshots them. Registration expiry drives the next-due reminder."""
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="registrations")
+    jurisdiction = models.CharField(max_length=40)  # state/province, free text
+    plate_number = models.CharField(max_length=20, blank=True)
+    plate_type = models.CharField(
+        max_length=12, choices=PlateType.choices, default=PlateType.STANDARD
+    )
+    title_number = models.CharField(max_length=60, blank=True)
+    title_jurisdiction = models.CharField(max_length=40, blank=True)
+    title_status = models.CharField(
+        max_length=10, choices=TitleStatus.choices, default=TitleStatus.CLEAN
+    )
+    # The lender holding the title while the vehicle is financed (a plain vendor org).
+    lienholder_organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    effective_from = models.DateField()
+    expires_on = models.DateField(null=True, blank=True)  # authoritative registration next-due
+    reason = models.CharField(
+        max_length=14, choices=RegistrationReason.choices, default=RegistrationReason.RENEWAL
+    )
+    fee_event = models.OneToOneField(
+        VehicleCostEvent, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="registration",
+    )
+    document = models.FileField(upload_to="vehicle_docs/", null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-effective_from", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["vehicle", "effective_from"], name="vehicleregistration_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.jurisdiction} {self.plate_number} from {self.effective_from}"
+
+    @property
+    def is_expired(self) -> bool:
+        return bool(self.expires_on and self.expires_on < datetime.date.today())
+
+    @property
+    def days_left(self):
+        return (self.expires_on - datetime.date.today()).days if self.expires_on else None
+
+    @property
+    def is_current(self) -> bool:
+        current = self.vehicle.current_registration
+        return current is not None and current.pk == self.pk
+
+    @property
+    def reason_label(self) -> str:
+        return self.get_reason_display()
+
+    @property
+    def plate_type_label(self) -> str:
+        return self.get_plate_type_display()
+
+    @property
+    def title_status_label(self) -> str:
+        return self.get_title_status_display()
+
+    @property
+    def lienholder(self):
+        return self.lienholder_organization
+
+
+class VehicleInspection(TimeStampedModel):
+    """A safety / emissions / combined inspection event. A COMBINED test satisfies both the
+    mechanical and emissions next-due dates. `expires_on` is the authoritative next-due."""
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="inspections")
+    kind = models.CharField(
+        max_length=10, choices=ComplianceKind.choices, default=ComplianceKind.SAFETY
+    )
+    performed_on = models.DateField()
+    result = models.CharField(
+        max_length=12, choices=ComplianceResult.choices, default=ComplianceResult.PASS
+    )
+    expires_on = models.DateField(null=True, blank=True)  # authoritative next-due
+    station_organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    certificate_number = models.CharField(max_length=60, blank=True)
+    odometer = models.PositiveIntegerField(null=True, blank=True)
+    fee_event = models.OneToOneField(
+        VehicleCostEvent, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="inspection",
+    )
+    document = models.FileField(upload_to="vehicle_docs/", null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-performed_on", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["vehicle", "kind", "performed_on"], name="vehicleinspection_unique"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.get_kind_display()} on {self.performed_on}"
+
+    @property
+    def is_expired(self) -> bool:
+        return bool(self.expires_on and self.expires_on < datetime.date.today())
+
+    @property
+    def days_left(self):
+        return (self.expires_on - datetime.date.today()).days if self.expires_on else None
+
+    @property
+    def passed(self) -> bool:
+        return self.result in (ComplianceResult.PASS, ComplianceResult.CONDITIONAL)
+
+    @property
+    def is_exempt(self) -> bool:
+        return self.result == ComplianceResult.NOT_REQUIRED
+
+    @property
+    def kind_label(self) -> str:
+        return self.get_kind_display()
+
+    @property
+    def result_label(self) -> str:
+        return self.get_result_display()
+
+    @property
+    def result_tint(self) -> str:
+        return COMPLIANCE_RESULT_TINT.get(self.result, "slate")
+
+    @property
+    def glyph(self) -> str:
+        return COMPLIANCE_KIND_GLYPH.get(self.kind, "clipboard-check")
+
+
+class VehiclePropertyTax(TimeStampedModel):
+    """A personal-property (ad-valorem) tax assessment for one tax year — the annual county/city
+    tax several US states levy on a vehicle by assessed value. The `amount` IS the bill: it always
+    routes through Payables (funded or accrued), unlike optional compliance fees."""
+
+    vehicle = models.ForeignKey(Vehicle, on_delete=models.CASCADE, related_name="property_taxes")
+    tax_year = models.PositiveSmallIntegerField()
+    jurisdiction = models.CharField(max_length=60)  # taxing county / city
+    assessed_value = _money(null=True, blank=True)
+    rate = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)
+    amount = _money()  # the tax due → the bill total (> 0)
+    assessed_on = models.DateField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True)  # → bill.due_date + reminder
+    fee_event = models.OneToOneField(
+        VehicleCostEvent, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="property_tax",
+    )
+    document = models.FileField(upload_to="vehicle_docs/", null=True, blank=True)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-tax_year", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["vehicle", "tax_year"], name="vehiclepropertytax_unique"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="vehiclepropertytax_amount_positive"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_year} property tax — {self.vehicle_id}"
+
+    @property
+    def is_paid(self) -> bool:
+        """True once the fee bill is fully paid (clears the reminder)."""
+        ev = self.fee_event
+        return bool(ev and ev.bill_id and ev.bill.status == "paid")
+
+    @property
+    def days_to_due(self):
+        return (self.due_date - datetime.date.today()).days if self.due_date else None
+
+    @property
+    def is_overdue(self) -> bool:
+        return bool(self.due_date and not self.is_paid and self.due_date < datetime.date.today())
+
+
+# --- Rich multi-line service invoices (header → jobs → parts) --------------------------------
+# A first-class financial document that owns a locked, multi-line bill (only category totals flow
+# to the AP bill; the op-code/parts granularity stays in the Auto module). Coexists with the
+# single-line Service/Repair VehicleCostEvent.
+
+
+class VehicleServiceInvoice(SoftDeleteModel):
+    """A shop / dealer service invoice (repair-order): a header + several jobs, each with parts,
+    plus a totals box. Materializes a locked multi-line `payables.Bill` (and an optional locked
+    Payment) whose category lines sum to the grand total. A $0 (all-warranty) invoice records
+    history + advances schedules but creates NO bill."""
+
+    vehicle = models.ForeignKey(
+        Vehicle, on_delete=models.CASCADE, related_name="service_invoices"
+    )
+    date = models.DateField()
+
+    # Vendor: a Person OR an Organization (exactly one — the bill's vendor / the shop).
+    vendor_person = models.ForeignKey(
+        "contacts.Person", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    vendor_organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+
+    invoice_number = models.CharField(max_length=40, blank=True)  # RO / invoice # → bill.vendor_ref
+    service_advisor = models.CharField(max_length=80, blank=True)
+    odometer_in = models.PositiveIntegerField(null=True, blank=True)
+    odometer_out = models.PositiveIntegerField(null=True, blank=True)
+    category = models.CharField(
+        max_length=8, choices=ServiceInvoiceCategory.choices,
+        default=ServiceInvoiceCategory.SERVICE,
+    )
+
+    # Totals-breakdown header amounts (jobs carry labor; parts carry parts).
+    sublet = _money(default=ZERO)
+    shop_supplies = _money(default=ZERO)
+    discount = _money(default=ZERO)
+    sales_tax = _money(default=ZERO)
+
+    bill = models.OneToOneField(
+        "payables.Bill", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="service_invoice",
+    )
+    payment = models.ForeignKey(
+        "payables.Payment", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    # Funding hint (drives the optional locked payment) — same shape as VehicleCostEvent.
+    funding_source = models.CharField(
+        max_length=8, choices=Funding.choices, default=Funding.NONE
+    )
+    funding_account = models.ForeignKey(
+        "banking.BankAccount", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    credit_card = models.ForeignKey(
+        "cards.CreditCard", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    cash_account = models.ForeignKey(
+        "finance.Account", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    document = models.FileField(upload_to="vehicle_docs/", null=True, blank=True)
+    reference = models.CharField(max_length=80, blank=True)
+    memo = models.CharField(max_length=255, blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(vendor_person__isnull=False, vendor_organization__isnull=True)
+                    | models.Q(vendor_person__isnull=True, vendor_organization__isnull=False)
+                ),
+                name="serviceinvoice_one_vendor",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Service invoice {self.invoice_number or self.pk} — {self.vehicle_id}"
+
+    # Discriminator for the merged cost register (see services.register).
+    is_service_invoice = True
+
+    @property
+    def kind_label(self) -> str:
+        return "Service invoice"
+
+    @property
+    def kind_glyph(self) -> str:
+        return "wrench"
+
+    @property
+    def category_label(self) -> str:
+        return self.get_category_display()
+
+    @property
+    def vendor(self):
+        return self.vendor_person or self.vendor_organization
+
+    @property
+    def vendor_kind(self) -> str:
+        return "person" if self.vendor_person_id else "organization"
+
+    @property
+    def vendor_name(self) -> str:
+        party = self.vendor
+        if party is None:
+            return ""
+        for attr in ("display_name", "full_name", "name"):
+            val = getattr(party, attr, "")
+            if val:
+                return val
+        return str(party)
+
+    @property
+    def is_funded(self) -> bool:
+        return self.funding_source in (Funding.BANK, Funding.CARD, Funding.CASH)
+
+    # Derived totals.
+    @property
+    def parts_total(self):
+        return sum(
+            (p.amount for job in self.jobs.all() for p in job.parts.all()), ZERO
+        )
+
+    @property
+    def labor_total(self):
+        return sum((job.labor_amount for job in self.jobs.all()), ZERO)
+
+    @property
+    def grand_total(self):
+        return (
+            self.labor_total + self.parts_total + (self.sublet or ZERO)
+            + (self.shop_supplies or ZERO) + (self.sales_tax or ZERO) - (self.discount or ZERO)
+        )
+
+    @property
+    def amount(self):
+        """Alias used by the merged cost register (shared shape with VehicleCostEvent.amount)."""
+        return self.grand_total
+
+    # Payables locked-bill/payment back-link hooks (module-agnostic there), like VehicleCostEvent.
+    @property
+    def managed_label(self) -> str:
+        return f"Vehicle · {self.vehicle.nickname}"
+
+    @property
+    def managed_url(self) -> str:
+        return f"automobile/{self.vehicle_id}/"
+
+
+class VehicleServiceJob(TimeStampedModel):
+    """A job / complaint line on a service invoice (invoice line A/B/C), rewritten on each save
+    (like bill lines). Carries the op-code, the customer complaint, the technician and the labor
+    charge; its parts hang beneath it."""
+
+    invoice = models.ForeignKey(
+        VehicleServiceInvoice, on_delete=models.CASCADE, related_name="jobs"
+    )
+    order = models.PositiveIntegerField(default=0)
+    code = models.CharField(max_length=40, blank=True)  # op-code (MPI / PFL / BSFLUSH)
+    complaint = models.CharField(max_length=200, blank=True)  # "CUSTOMER STATES …"
+    description = models.CharField(max_length=255, blank=True)  # op-code description
+    technician = models.CharField(max_length=40, blank=True)
+    labor_hours = models.DecimalField(
+        max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS, null=True, blank=True
+    )
+    labor_amount = _money(default=ZERO)
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:
+        return self.code or self.complaint or f"Job {self.pk}"
+
+    @property
+    def parts_amount(self):
+        return sum((p.amount for p in self.parts.all()), ZERO)
+
+
+class VehicleServicePart(TimeStampedModel):
+    """A part consumed by a service job (part # / qty / unit price)."""
+
+    job = models.ForeignKey(VehicleServiceJob, on_delete=models.CASCADE, related_name="parts")
+    order = models.PositiveIntegerField(default=0)
+    part_number = models.CharField(max_length=60, blank=True)
+    description = models.CharField(max_length=160, blank=True)
+    quantity = models.DecimalField(
+        max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS, default=Decimal("1")
+    )
+    unit_price = _money(default=ZERO)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:
+        return self.part_number or self.description or f"Part {self.pk}"
+
+    @property
+    def amount(self):
+        return (self.quantity or ZERO) * (self.unit_price or ZERO)
