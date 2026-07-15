@@ -141,6 +141,10 @@ class Funding(models.TextChoices):
     BANK = "bank", "Bank account"
     CASH = "cash", "Cash on hand"
     EXTERNAL = "external", "External / another party"
+    # A disbursement whose proceeds settle a vendor bill (Accounts Payable) rather than landing in a
+    # tracked account — used by the Automobile module's financed-purchase settlement (a Payables
+    # Payment posts the loan disbursement: Dr AP tagged the dealer / Cr the loan node).
+    PAYABLE = "payable", "Payable (dealer bill)"
 
 
 def _money(**kw):

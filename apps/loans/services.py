@@ -50,6 +50,7 @@ FEE_EXPENSE = "bank_charges"               # 5850
 TRANSFER_CLEARING = "transfer_clearing"    # 1150
 OPENING_EQUITY = "opening_balance_equity"  # 3100
 CASH_ON_HAND = "1110"
+ACCOUNTS_PAYABLE = "accounts_payable"      # 2300
 CONTINGENT_HEADER = "2950"                 # Contingent Liabilities (off net worth)
 
 # Category activities the Expert-mode Accounting tab can remap, per loan.
@@ -215,6 +216,10 @@ def _lines_for(txn: LoanTransaction) -> list[LineInput]:
             debit_leg = line(TRANSFER_CLEARING, debit=amount)
         elif txn.funding_source == Funding.CASH:
             debit_leg = line(_cash_account(txn), debit=amount)
+        elif txn.funding_source == Funding.PAYABLE:
+            # Proceeds settle a vendor bill: debit AP tagged with the payer (the dealer), so the
+            # dealer bill nets to zero. No bank/cash leg (create_matching_leg guards on BANK).
+            debit_leg = line(resolve_account(ACCOUNTS_PAYABLE), debit=amount, **payer)
         else:
             debit_leg = line(OPENING_EQUITY, debit=amount)
         return [debit_leg, line(gl, credit=amount, **lender)]
