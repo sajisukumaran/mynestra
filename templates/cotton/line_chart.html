@@ -1,4 +1,5 @@
 <c-vars geo="" market="" invested="" gain="" symbol="" dp="0" grouping="thousands"
+        market_label="Market" invested_label="Invested"
         empty_text="Not enough history yet" class="" />
 {% comment %}Server-rendered SVG value-over-time chart. `geo` = services.line_chart_points(...):
 precomputed polyline point strings, a closed gain-band path, gridline/axis ticks and a viewBox.
@@ -9,9 +10,9 @@ the card width. Colours: market = --accent, invested = --text-subtle, gain band 
 <div class="chart{% if class %} {{ class }}{% endif %}" {{ attrs }}>
   {% if geo.points|length > 1 %}
   <div class="chart-legend">
-    <span class="chart-key"><span class="chart-dot chart-dot-market"></span>Market
+    <span class="chart-key"><span class="chart-dot chart-dot-market"></span>{{ market_label }}
       <b><c-money :amount="market" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></b></span>
-    <span class="chart-key"><span class="chart-dot chart-dot-invested"></span>Invested
+    <span class="chart-key"><span class="chart-dot chart-dot-invested"></span>{{ invested_label }}
       <b><c-money :amount="invested" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></b></span>
     <span class="chart-key ml-auto {% if gain >= 0 %}amount-pos{% else %}amount-neg{% endif %}">
       <c-money :amount="gain" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></span>

@@ -225,6 +225,10 @@
           <c-line-chart :geo="line_geo" :market="line_market" :invested="line_invested" :gain="line_gain" symbol="$" dp="0" />
         </div>
         <div>
+          <p class="muted stack-8">Same chart, relabelled (market_label / invested_label) — the Automobile module reads it as "Value" vs. "At cost".</p>
+          <c-line-chart :geo="line_geo" :market="line_market" :invested="line_invested" :gain="line_gain" market_label="Value" invested_label="At cost" symbol="$" dp="0" />
+        </div>
+        <div>
           <p class="muted stack-8">Loan paydown (c-loan-chart) — balance to date (solid) + projected payoff (dashed) with a "today" marker; server-rendered SVG, accent-stroked, no JS.</p>
           <c-loan-chart :geo="loan_geo" :balance="loan_balance" :payoff="loan_payoff" :interest="loan_interest" symbol="$" dp="0" />
         </div>
