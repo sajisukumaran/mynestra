@@ -58,7 +58,9 @@ CHART_OF_ACCOUNTS = [
     # lease return, or applied against a buyout. The Automobile module posts lease deposits here.
     ("1320", "Refundable Deposits", ASSET, "1000", True, "refundable_deposits"),
     ("1400", "Property & Vehicles", ASSET, "1000", False, ""),
-    ("1410", "Real Estate", ASSET, "1400", True, ""),
+    # 1410 is a group header: the Real Estate module nests one postable sub-account per owned
+    # property beneath it (held at cost), so per-property basis rolls up here (never posted to).
+    ("1410", "Real Estate", ASSET, "1400", False, "real_estate"),
     # 1420 is a group header: the Automobile module nests one postable sub-account per owned vehicle
     # beneath it (held at cost), so per-vehicle basis rolls up here (never posted to directly).
     ("1420", "Vehicles", ASSET, "1400", False, "vehicles"),
@@ -131,6 +133,8 @@ CHART_OF_ACCOUNTS = [
     # both remappable per-loan in Expert mode.
     ("5140", "Property Tax", EXPENSE, "5100", True, "property_tax"),
     ("5150", "Home Insurance", EXPENSE, "5100", True, "home_insurance"),
+    # HOA / condo association dues — a distinct recurring real-estate cost (Real Estate module).
+    ("5160", "HOA & Condo Fees", EXPENSE, "5100", True, "hoa_fees"),
     ("5200", "Food & Groceries", EXPENSE, "5000", True, ""),
     ("5300", "Transportation", EXPENSE, "5000", False, ""),
     ("5310", "Fuel", EXPENSE, "5300", True, ""),

@@ -1,0 +1,178 @@
+{% extends "realestate/base.html" %}
+{% block re_heading %}{% if mode == 'create' %}New property{% else %}Edit property{% endif %}{% endblock %}
+
+{% block re %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}realestate/">Real Estate</a><c-icon name="chevron-right" />
+  {% if mode == 'edit' %}<a href="{{ ui_tenant_url }}realestate/{{ property.pk }}/">{{ property.nickname }}</a><c-icon name="chevron-right" /><span class="strong">Edit</span>
+  {% else %}<span class="strong">New</span>{% endif %}
+</c-breadcrumb>
+<c-page-header title="{% if mode == 'create' %}New property{% else %}Edit property{% endif %}" subtitle="Fields marked * are required." />
+
+{% if error %}<c-hint icon="triangle-alert">{{ error }}</c-hint>{% endif %}
+
+<form method="post">{% csrf_token %}
+  <div class="stack stack-20"
+       x-data="{ omode: '{{ property.ownership_mode|default:'owned_cash' }}',
+                 purchaseFunding: 'none', downSource: 'bank',
+                 sellerId: '{{ seller.pk|default:'' }}', sellerName: '{{ seller.display|default:''|escapejs }}', sellerTint: '{{ seller.avatar_tint|default:'slate' }}', sellerInit: '{{ seller.initials|default:'?' }}',
+                 pickVendor(d){ this.sellerId=d.id; this.sellerName=d.name; this.sellerTint=d.tint||'slate'; this.sellerInit=d.initials||'?'; },
+                 clearSeller(){ this.sellerId=''; } }">
+
+    <c-card title="Property" icon="house">
+      <div class="form-grid">
+        <c-field label="Nickname" required error="{{ form.nickname.errors.0 }}"><div class="control">{{ form.nickname }}</div></c-field>
+        <c-field label="Type">
+          <c-select name="property_type">{% for val, label in property_types %}<option value="{{ val }}"{% if property.property_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Use">
+          <c-select name="use">{% for val, label in uses %}<option value="{{ val }}"{% if property.use == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Currency" required>
+          <c-select name="currency">{% for c in currencies %}<option value="{{ c.code }}"{% if property.currency_id == c.code %} selected{% elif not property.currency_id and c.code == base.code %} selected{% endif %}>{{ c.code }} — {{ c.name }}</option>{% endfor %}</c-select>
+        </c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Address"><div class="control">{{ form.address_line1 }}</div></c-field>
+        <c-field label="Address line 2"><div class="control">{{ form.address_line2 }}</div></c-field>
+        <c-field label="City"><div class="control">{{ form.city }}</div></c-field>
+        <c-field label="State / region"><div class="control">{{ form.state }}</div></c-field>
+        <c-field label="Postcode"><div class="control">{{ form.postal_code }}</div></c-field>
+        <c-field label="Country"><div class="control">{{ form.country }}</div></c-field>
+      </div>
+    </c-card>
+
+    <c-card title="Ownership" icon="key-round">
+      <c-field label="How do you hold this property?" required>
+        <c-select name="ownership_mode" x-model="omode">
+          {% for val, label in ownership_modes %}<option value="{{ val }}"{% if property.ownership_mode == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </c-select>
+      </c-field>
+      <div x-show="omode === 'owned_financed'" x-cloak class="stack-16">
+        <c-field label="Mortgage loan" help="Pick the mortgage financing this property (create it in Loans first).">
+          <div class="control is-select">
+            <select name="loan">
+              <option value="">— none —</option>
+              {% for l in mortgage_loans %}<option value="{{ l.pk }}"{% if property.mortgage_loan_id == l.pk %} selected{% endif %}>{{ l.nickname }}</option>{% endfor %}
+            </select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+      </div>
+    </c-card>
+
+    {% if mode == 'create' %}
+    <c-card title="Acquisition" icon="banknote">
+      <c-hint icon="info">Records the purchase as a locked bill held at cost. Leave the price blank to add it later.</c-hint>
+      <div class="form-grid">
+        <c-field label="Purchase price"><div class="control"><input name="purchase_price" inputmode="decimal" placeholder="0.00"></div></c-field>
+        <c-field label="Purchase date"><div class="control"><input type="date" name="purchase_date" value="{% now 'Y-m-d' %}"></div></c-field>
+      </div>
+
+      {# Cash purchase: single funding #}
+      <div x-show="omode === 'owned_cash'" x-cloak class="form-grid">
+        <c-field label="Pay from">
+          <div class="control is-select">
+            <select name="purchase_funding" x-model="purchaseFunding">
+              <option value="none">Record bill only (unpaid)</option>
+              <option value="bank">Bank account</option>
+            </select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Bank account" x-show="purchaseFunding === 'bank'" x-cloak>
+          <div class="control is-select">
+            <select name="purchase_account"><option value="">—</option>{% for a in bank_accounts %}<option value="{{ a.pk }}">{{ a.nickname }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+      </div>
+
+      {# Financed purchase: down payment + mortgage settlement #}
+      <div x-show="omode === 'owned_financed'" x-cloak class="form-grid">
+        <c-field label="Down payment"><div class="control"><input name="down_payment" inputmode="decimal" placeholder="0.00"></div></c-field>
+        <c-field label="Down payment from">
+          <div class="control is-select">
+            <select name="down_source" x-model="downSource"><option value="bank">Bank account</option><option value="cash">Cash</option></select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Bank account" x-show="downSource === 'bank'" x-cloak>
+          <div class="control is-select">
+            <select name="down_account"><option value="">—</option>{% for a in bank_accounts %}<option value="{{ a.pk }}">{{ a.nickname }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Mortgage amount" help="Proceeds applied to the seller bill."><div class="control"><input name="loan_amount" inputmode="decimal" placeholder="0.00"></div></c-field>
+      </div>
+    </c-card>
+    {% endif %}
+
+    <c-card title="Seller" icon="building-2">
+      <c-field label="Seller / builder" help="Who you bought it from (optional). Needed to record the purchase as a bill.">
+        <div x-show="!sellerId">
+          <c-input type="search" name="seller_q" autocomplete="off" placeholder="Search organizations…"
+                   hx-get="{{ ui_tenant_url }}realestate/org-search/" hx-trigger="input changed delay:200ms, focus"
+                   hx-target="#seller-results" />
+          <div id="seller-results" class="rel-results"></div>
+          <c-input name="seller_organization_new_name" placeholder="…or type a new seller name" />
+        </div>
+        <div x-show="sellerId" x-cloak class="rel">
+          <span class="avatar a-sm" :class="'av-'+sellerTint" x-text="sellerInit"></span>
+          <div class="grow"><div class="r-name" x-text="sellerName"></div><div class="r-role">Seller</div></div>
+          <c-button type="button" variant="ghost" size="sm" @click="clearSeller()"><c-icon name="x" size="sm" /> Change</c-button>
+        </div>
+        <input type="hidden" name="seller_organization" :value="sellerId">
+      </c-field>
+    </c-card>
+
+    {# Owners #}
+    <c-card title="Owners &amp; occupants" icon="users">
+      <div class="stack stack-16"
+           x-data="{
+             rows: JSON.parse(document.getElementById('owner-rows-data').textContent),
+             add(d){ if(!this.rows.some(r => String(r.id) === String(d.id))){ this.rows.push({ id: d.id, name: d.name, tint: d.tint || 'slate', initials: d.initials || '?', role: 'owner' }); } },
+             remove(id){ this.rows = this.rows.filter(r => String(r.id) !== String(id)); }
+           }">
+        <c-field label="Household members" help="Tap to add the people on title / living here.">
+          <div class="row wrap">
+            {% for p in people %}
+            <c-button type="button" variant="ghost" size="sm" data-id="{{ p.pk }}" data-name="{{ p.display_name }}" data-tint="{{ p.avatar_tint }}" data-initials="{{ p.initials }}" @click="add($el.dataset)"><c-icon name="plus" size="sm" /> {{ p.display_name }}</c-button>
+            {% empty %}<span class="subtle">No household members yet — <a href="{{ ui_tenant_url }}setup/household-members/">add household members</a>.</span>{% endfor %}
+          </div>
+        </c-field>
+
+        <template x-for="r in rows" :key="r.id">
+          <div class="rel">
+            <span class="avatar a-sm" :class="'av-'+r.tint" x-text="r.initials"></span>
+            <div class="grow"><div class="r-name" x-text="r.name"></div></div>
+            <div class="control is-select" style="max-width:200px;">
+              <select x-model="r.role">
+                {% for val, label in owner_roles %}<option value="{{ val }}">{{ label }}</option>{% endfor %}
+              </select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+            <c-button type="button" variant="ghost" size="sm" @click="remove(r.id)"><c-icon name="x" size="sm" /></c-button>
+            <input type="hidden" name="owner_person" :value="r.id">
+            <input type="hidden" name="owner_role" :value="r.role">
+          </div>
+        </template>
+      </div>
+      {{ owner_rows|json_script:"owner-rows-data" }}
+    </c-card>
+
+    <c-card title="Details" icon="calendar-days">
+      <div class="stack stack-16">
+        <c-field label="Acquired"><c-partial-date prefix="acquired" day="{{ property.acquired_day|default:'' }}" month="{{ property.acquired_month|default:'' }}" year="{{ property.acquired_year|default:'' }}" /></c-field>
+        <c-field label="Notes"><textarea name="notes" class="control" rows="3">{{ form.notes.value|default:'' }}</textarea></c-field>
+      </div>
+    </c-card>
+  </div>
+
+  <c-save-bar note="{% if error or form.errors %}Some fields need attention before saving.{% else %}Saved to this household.{% endif %}">
+    <c-button variant="ghost" href="{% if mode == 'edit' %}{{ ui_tenant_url }}realestate/{{ property.pk }}/{% else %}{{ ui_tenant_url }}realestate/all/{% endif %}">Cancel</c-button>
+    <c-button type="submit" variant="primary"><c-icon name="check" /> {% if mode == 'create' %}Create property{% else %}Save changes{% endif %}</c-button>
+  </c-save-bar>
+</form>
+{% endblock %}

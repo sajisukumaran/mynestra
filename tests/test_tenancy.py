@@ -448,3 +448,40 @@ def test_insurance_are_isolated(make_tenant, settings, tmp_path):
         assert Bill.objects.count() == 0
         assert not Organization.objects.filter(name="Alpha Insurance").exists()
         assert JournalEntry.objects.count() == 0
+
+
+def test_realestate_are_isolated(make_tenant):
+    """Real Estate (Plan C): properties, their cost events, the locked payables bills they generate,
+    the 1410.NN asset nodes and the ledger entries must not leak across tenants."""
+    from apps.finance.models import Account, Currency
+    from apps.payables.models import Bill
+    from apps.realestate.models import CostKind, OwnershipMode, Property, PropertyCostEvent
+    from apps.realestate.services import save_cost_event
+
+    a = make_tenant(name="Alpha")
+    b = make_tenant(name="Beta")
+
+    with schema_context(a.schema_name):
+        usd = Currency.objects.get(code="USD")
+        prop = Property.objects.create(
+            nickname="Alpha Home", ownership_mode=OwnershipMode.OWNED_CASH, currency=usd,
+        )
+        ev = PropertyCostEvent(
+            property=prop, kind=CostKind.PURCHASE, date=datetime.date(2026, 1, 5),
+            amount=Decimal("300000"),
+            vendor_organization=Organization.objects.create(name="Alpha Seller"),
+        )
+        ev.save()
+        save_cost_event(ev, is_new=True)
+        assert Property.objects.count() == 1
+        assert PropertyCostEvent.objects.count() == 1
+        assert Bill.objects.filter(is_locked=True).count() == 1
+        assert Account.objects.filter(parent__code="1410").count() == 1  # the 1410.NN node
+
+    with schema_context(b.schema_name):
+        assert Property.objects.count() == 0
+        assert PropertyCostEvent.objects.count() == 0
+        assert Bill.objects.count() == 0
+        assert Account.objects.filter(parent__code="1410").count() == 0
+        assert not Organization.objects.filter(name="Alpha Seller").exists()
+        assert JournalEntry.objects.count() == 0

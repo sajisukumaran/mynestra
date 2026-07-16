@@ -1,0 +1,245 @@
+{% extends "realestate/base.html" %}
+{% block re_heading %}{{ property.nickname }}{% endblock %}
+
+{% block re %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}realestate/">Real Estate</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}realestate/all/">Properties</a><c-icon name="chevron-right" />
+  <span class="strong">{{ property.nickname }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ property.type_tint }}"><c-icon name="{{ property.type_glyph }}" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ property.nickname }}</h1>
+          <c-chip tint="{{ property.type_tint }}">{{ property.type_label }}</c-chip>
+          {% if property.is_active %}<c-badge variant="success">Owned</c-badge>{% else %}<c-badge variant="warning">Sold</c-badge>{% endif %}
+        </div>
+        <div class="muted">{{ property.address_oneline|default:property.use_label }}</div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="landmark" size="sm" class="subtle" /><span class="strong"><c-money :amount="property.cost" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> at cost</span>
+          <span class="row"><c-icon name="trending-up" size="sm" class="subtle" /><span class="strong"><c-money :amount="property.current_value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> market</span>
+          {% if loan_summary %}<span class="row"><c-icon name="banknote" size="sm" class="subtle" /><c-money :amount="loan_summary.balance" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> mortgage</span>{% endif %}
+        </div>
+      </div>
+      <div class="row">
+        {% if property.is_active %}
+        <c-modal title="Record a disposal">
+          <c-slot name="trigger"><c-button variant="default" title="Sell / dispose"><c-icon name="log-out" /> Dispose</c-button></c-slot>
+          <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/dispose/">{% csrf_token %}
+            <div class="stack-16">
+              <c-hint icon="info">Books proceeds vs book cost, with the difference to Gain/Loss on asset sale. The mortgage is untouched — record its payoff in Loans.</c-hint>
+              <div class="form-grid">
+                <c-field label="Method" required>
+                  <c-select name="method">{% for val, label in disposal_methods %}<option value="{{ val }}">{{ label }}</option>{% endfor %}</c-select>
+                </c-field>
+                <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% now 'Y-m-d' %}"></div></c-field>
+                <c-field label="Proceeds"><div class="control"><input name="proceeds" inputmode="decimal" placeholder="0.00"></div></c-field>
+              </div>
+              <c-field label="Proceeds to bank" help="Optional — records a deposit in that account's register.">
+                <div class="control is-select">
+                  <select name="proceeds_account"><option value="">Cash / external</option>{% for a in bank_accounts %}<option value="{{ a.pk }}">{{ a.nickname }}</option>{% endfor %}</select>
+                  <c-icon name="chevron-down" size="sm" class="subtle" />
+                </div>
+              </c-field>
+              <c-field label="Buyer">
+                <div class="control is-select">
+                  <select name="buyer_organization"><option value="">—</option>{% for o in organizations %}<option value="{{ o.pk }}">{{ o.display }}</option>{% endfor %}</select>
+                  <c-icon name="chevron-down" size="sm" class="subtle" />
+                </div>
+                <c-input name="buyer_organization_new_name" placeholder="…or type a new buyer name" />
+              </c-field>
+              <c-field label="Notes"><c-input name="notes" placeholder="Optional note" /></c-field>
+            </div>
+            <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Record disposal</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+          </form>
+        </c-modal>
+        {% endif %}
+        <c-confirm-dialog title="Delete {{ property.nickname }}?" message="This moves the property to Recently deleted. Its cost bills and ledger entries stay posted as history.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button variant="primary" href="{{ ui_tenant_url }}realestate/{{ property.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+  </c-card>
+
+  {% if disposal %}
+  <c-hint icon="info">Disposed on {{ disposal.date|date:'d M Y' }} ({{ disposal.method_label }}) — booked gain/loss <c-money :amount="disposal.gain_loss" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />.</c-hint>
+  {% endif %}
+
+  <div x-data="{ tab: 'overview' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="info" size="sm" /> Overview</button>
+      <button type="button" class="tab" :class="{ active: tab === 'costs' }" @click="tab = 'costs'"><c-icon name="banknote" size="sm" /> Costs {% if events %}<span class="tcount tnum">{{ events|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'valuations' }" @click="tab = 'valuations'"><c-icon name="trending-up" size="sm" /> Valuations {% if valuations %}<span class="tcount tnum">{{ valuations|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'people' }" @click="tab = 'people'"><c-icon name="users" size="sm" /> People {% if owners %}<span class="tcount tnum">{{ owners|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# Overview #}
+    <div x-show="tab === 'overview'" class="stack-16" style="margin-top:16px;">
+      <c-card icon="info" title="Details">
+        <c-key-value>
+          <c-kv-row key="Type">{{ property.type_label }}</c-kv-row>
+          <c-kv-row key="Use">{{ property.use_label }}</c-kv-row>
+          <c-kv-row key="Ownership">{{ property.ownership_label }}</c-kv-row>
+          <c-kv-row key="Address">{{ property.address_oneline|default:"—" }}</c-kv-row>
+          <c-kv-row key="Acquired">{% if property.acquired.is_set %}{{ property.acquired }}{% else %}—{% endif %}</c-kv-row>
+          <c-kv-row key="At cost"><c-money :amount="property.cost" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-kv-row>
+          <c-kv-row key="Market value"><c-money :amount="property.current_value" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-kv-row>
+          <c-kv-row key="Appreciation"><c-money :amount="property.appreciation" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-kv-row>
+          {% if loan_summary %}
+          <c-kv-row key="Mortgage">{{ loan_summary.loan.nickname }} · <c-money :amount="loan_summary.balance" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-kv-row>
+          <c-kv-row key="Equity"><c-money :amount="property.equity" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-kv-row>
+          {% endif %}
+        </c-key-value>
+        {% if property.notes %}<p class="muted" style="margin-top:12px;">{{ property.notes }}</p>{% endif %}
+      </c-card>
+    </div>
+
+    {# Costs #}
+    <div x-show="tab === 'costs'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="banknote" title="Cost register">
+        <c-slot name="actions">
+          <c-modal title="Record a cost">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="plus" size="sm" /> Add cost</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/costs/new/"
+                  x-data="{ kind: 'property_tax', funding: 'none', vendorId:'', vendorName:'', vendorTint:'slate', vendorInit:'?', pickVendor(d){ this.vendorId=d.id; this.vendorName=d.name; this.vendorTint=d.tint||'slate'; this.vendorInit=d.initials||'?'; }, clearVendor(){ this.vendorId=''; } }">{% csrf_token %}
+              {% include "realestate/partials/cost_fields.html" with suffix="new" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save cost</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% if events %}
+        <c-table>
+          <thead><tr><c-th>Date</c-th><c-th>Kind</c-th><c-th>Vendor</c-th><c-th>Status</c-th><th class="col-num">Amount</th><th></th></tr></thead>
+          <tbody>
+            {% for e in events %}
+            <tr>
+              <td class="tnum">{{ e.date|date:'d M Y' }}</td>
+              <td><c-chip>{{ e.kind_label }}</c-chip></td>
+              <td class="muted">{{ e.vendor_name|default:"—" }}</td>
+              <td>{% if e.bill %}{% if e.bill.status == 'paid' %}<c-badge variant="success">Paid</c-badge>{% elif e.bill.status == 'partially_paid' %}<c-badge variant="warning">Part-paid</c-badge>{% else %}<c-badge variant="info">Accrued</c-badge>{% endif %}{% else %}—{% endif %}</td>
+              <td class="col-num"><c-money :amount="e.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+              <td>
+                <div class="cell-actions">
+                  <c-modal title="Edit cost">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                    <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/costs/{{ e.pk }}/edit/"
+                          x-data="{ kind: '{{ e.kind }}', funding: '{{ e.funding_source }}', vendorId: '{{ e.vendor_organization_id|default:'' }}', vendorName: '{{ e.vendor_name|escapejs }}', vendorTint: '{{ e.vendor_organization.avatar_tint|default:'slate' }}', vendorInit: '{{ e.vendor_organization.initials|default:'?' }}', pickVendor(d){ this.vendorId=d.id; this.vendorName=d.name; this.vendorTint=d.tint||'slate'; this.vendorInit=d.initials||'?'; }, clearVendor(){ this.vendorId=''; } }">{% csrf_token %}
+                      {% include "realestate/partials/cost_fields.html" with event=e suffix=e.pk %}
+                      <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save changes</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+                    </form>
+                  </c-modal>
+                  <c-confirm-dialog title="Delete this cost?" message="Erases the cost and its locked bill / payment from the ledger.">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                    <c-slot name="confirm">
+                      <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/costs/{{ e.pk }}/delete/">{% csrf_token %}
+                        <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+                      </form>
+                    </c-slot>
+                  </c-confirm-dialog>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="banknote" title="No costs yet" text="Record property tax, maintenance, HOA fees or improvements — each becomes a locked bill in Payables." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Valuations #}
+    <div x-show="tab === 'valuations'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="trending-up" title="Valuations">
+        <c-slot name="actions">
+          <c-modal title="Record a valuation">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="plus" size="sm" /> Add valuation</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/valuation/">{% csrf_token %}
+              <div class="stack-16">
+                <div class="form-grid">
+                  <c-field label="Date" required><div class="control"><input type="date" name="as_of" value="{% now 'Y-m-d' %}"></div></c-field>
+                  <c-field label="Market value" required><div class="control"><input name="value" inputmode="decimal" placeholder="0.00"></div></c-field>
+                </div>
+                <c-field label="Source"><c-input name="source" placeholder="e.g. Zillow / appraisal" /></c-field>
+              </div>
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save valuation</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% if valuations %}
+        <c-table>
+          <thead><tr><c-th>As of</c-th><c-th>Source</c-th><th class="col-num">Value</th><th></th></tr></thead>
+          <tbody>
+            {% for v in valuations %}
+            <tr>
+              <td class="tnum">{{ v.as_of|date:'d M Y' }}</td>
+              <td class="muted">{{ v.source|default:"—" }}</td>
+              <td class="col-num"><c-money :amount="v.value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+              <td>
+                <c-confirm-dialog title="Delete this valuation?" message="Removes this market-value mark.">
+                  <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                  <c-slot name="confirm">
+                    <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/valuation/{{ v.pk }}/delete/">{% csrf_token %}
+                      <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+                    </form>
+                  </c-slot>
+                </c-confirm-dialog>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="trending-up" title="No valuations yet" text="Record a market value — a display overlay that never touches the ledger (net worth stays at cost)." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# People #}
+    <div x-show="tab === 'people'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if owners %}
+        {% for o in owners %}
+        <c-rel-row name="{{ o.person.display_name }}" role="{{ o.role_label }}">
+          <c-slot name="avatar"><c-avatar tint="{{ o.person.avatar_tint }}" size="sm">{{ o.person.initials }}</c-avatar></c-slot>
+        </c-rel-row>
+        {% endfor %}
+        {% else %}
+        <c-empty-state icon="users" title="No people" text="Edit the property to add owners and occupants." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# History #}
+    <div x-show="tab === 'history'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if history %}
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item>
+            <span class="strong">{{ h.get_history_type_display }}</span>
+            <span class="muted">· {{ h.history_date|date:'d M Y H:i' }}{% if h.history_user %} · {{ h.history_user }}{% endif %}</span>
+          </c-tl-item>
+          {% endfor %}
+        </c-timeline>
+        {% else %}
+        <c-empty-state icon="clock" title="No history yet" />
+        {% endif %}
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% comment %}Real Estate app shell: topbar + Real Estate per-app sidebar. Composes the kit.{% endcomment %}
+{% block title %}{% block re_heading %}Real Estate{% endblock %} · {{ ui_tenant_name }}{% endblock %}
+
+{% block content %}
+<c-shell tenant_name="{{ ui_tenant_name }}" tenant_initials="{{ ui_tenant_initials }}"
+         user_initials="{{ ui_user_initials }}"
+         setup_url="{% if is_owner %}{{ ui_tenant_url }}setup/{% endif %}"
+         home_url="{{ ui_tenant_url }}">
+  <c-slot name="sidebar">
+    <c-sidebar title="Real Estate" subtitle="{{ ui_tenant_name }}" glyph="house">
+      <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}realestate/" {% if active == 'dashboard' %}active="true"{% endif %} />
+      <c-sidebar-item label="Properties" icon="house" count="{{ nav_properties }}" href="{{ ui_tenant_url }}realestate/all/" {% if active == 'properties' %}active="true"{% endif %} />
+      <c-slot name="foot">
+        <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
+        {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}
+      </c-slot>
+    </c-sidebar>
+  </c-slot>
+
+  {% block re %}{% endblock %}
+</c-shell>
+{% endblock %}

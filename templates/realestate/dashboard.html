@@ -1,0 +1,49 @@
+{% extends "realestate/base.html" %}
+{% block re_heading %}Dashboard{% endblock %}
+
+{% block re %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Real Estate</span></c-breadcrumb>
+
+<c-page-header title="Real Estate" subtitle="Your household's property — held at cost, valued at market.">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}realestate/new/"><c-icon name="plus" /> New property</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="house" tint="teal" value="{{ properties_count }}" label="Properties">
+      <c-slot name="foot">on the balance sheet</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="landmark" tint="violet" value="" label="At cost">
+      <c-slot name="foot"><c-money :amount="portfolio_cost" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="trending-up" tint="emerald" value="" label="Market value">
+      <c-slot name="foot"><c-money :amount="portfolio_value" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="percent" tint="amber" value="" label="Appreciation">
+      <c-slot name="foot"><c-money :amount="portfolio_appreciation" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /> vs cost</c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="pie-chart" title="Value by property">
+      {% if bar_total %}
+      <c-bar-list :items="bar_items" :total="bar_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />
+      {% else %}
+      <c-empty-state icon="house" title="No property yet" text="Add a property to see it on the balance sheet." />
+      {% endif %}
+    </c-card>
+    <c-card icon="clock" title="Recent costs">
+      {% for e in recent %}
+      <c-rel-row name="{{ e.property.nickname }}" role="{{ e.kind_label }}{% if e.memo %} · {{ e.memo }}{% endif %} · {{ e.date|date:'d M Y' }}" href="{{ ui_tenant_url }}realestate/{{ e.property_id }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ e.property.type_tint }}" size="sm"><c-icon name="{{ e.kind_glyph }}" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="e.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="clock" title="No costs yet" text="Costs you record on a property show up here." />
+      {% endfor %}
+    </c-card>
+  </div>
+</div>
+{% endblock %}
