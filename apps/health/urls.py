@@ -9,6 +9,7 @@ app_name = "health"
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("providers/", views.providers, name="providers"),
+    path("providers/new/", views.provider_create, name="provider-create"),
     path("reminders/", views.reminders, name="reminders"),
 
     # Plans & benefits (cost-sharing overlay on insurance policies)

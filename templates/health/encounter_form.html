@@ -40,9 +40,9 @@
         </c-field>
       </div>
       <div class="form-grid" style="margin-top:12px;">
-        <c-field label="Facility" help="Where the visit happened.">
+        <c-field label="Facility" help="Where the visit happened — hospitals, clinics & pharmacies.">
           <div class="control is-select">
-            <select name="facility"><option value="">—</option>{% for o in organizations %}<option value="{{ o.pk }}"{% if encounter.facility_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select>
+            <select name="facility"><option value="">—</option>{% for o in facilities %}<option value="{{ o.pk }}"{% if encounter.facility_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select>
             <c-icon name="chevron-down" size="sm" class="subtle" />
           </div>
           <c-input name="facility_new_name" placeholder="…or type a new facility name" />
@@ -52,6 +52,7 @@
             <select name="primary_provider"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if encounter.primary_provider_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
             <c-icon name="chevron-down" size="sm" class="subtle" />
           </div>
+          <c-input name="primary_provider_new_name" placeholder="…or type a new provider name" />
         </c-field>
       </div>
       <c-field label="Reason" style="margin-top:12px;">{{ form.reason }}</c-field>

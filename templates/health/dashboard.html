@@ -6,6 +6,26 @@
 
 <c-page-header title="Health" subtitle="Visits and medical bills — what's paid, what's owed, and to whom.">
   <c-slot name="actions">
+    <c-modal title="New provider">
+      <c-slot name="trigger"><c-button><c-icon name="user-round-plus" /> New provider</c-button></c-slot>
+      <form method="post" action="{{ ui_tenant_url }}health/providers/new/">{% csrf_token %}
+        <div class="stack-16">
+          <c-hint icon="info">Adds a doctor to your contacts (tagged “Doctor”). They'll be pickable on visits, invoices and prescriptions.</c-hint>
+          <div class="form-grid">
+            <c-field label="First name" required><div class="control"><input name="first_name" placeholder="e.g. Dana"></div></c-field>
+            <c-field label="Last name"><div class="control"><input name="last_name" placeholder="e.g. Okafor"></div></c-field>
+          </div>
+          <c-field label="Practices at" help="Optional — links the doctor to a facility.">
+            <div class="control is-select">
+              <select name="affiliation"><option value="">—</option>{% for o in facilities %}<option value="{{ o.pk }}">{{ o.display }}</option>{% endfor %}</select>
+              <c-icon name="chevron-down" size="sm" class="subtle" />
+            </div>
+            <c-input name="affiliation_new_name" placeholder="…or type a new facility name" />
+          </c-field>
+        </div>
+        <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Add provider</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+      </form>
+    </c-modal>
     <c-button href="{{ ui_tenant_url }}health/invoices/new/"><c-icon name="plus" /> New invoice</c-button>
     <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/new/"><c-icon name="plus" /> New visit</c-button>
   </c-slot>

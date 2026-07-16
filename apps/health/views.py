@@ -139,11 +139,56 @@ def _hsa_accounts():
     return InvestmentAccount.objects.filter(registration="hsa", is_active=True).order_by("nickname")
 
 
-def _resolve_org(request, field):
-    """A picked org id or an inline-created org by name (mirrors realestate / payables)."""
+# Organization categories treated as "medical" — the facility picker is limited to these so a visit
+# is booked at a hospital / clinic / pharmacy, not any business in the household's contacts.
+MEDICAL_ORG_CATEGORIES = ("Hospital/Clinic", "Pharmacy")
+
+
+def _medical_organizations():
+    """Organizations tagged with a medical category (facility picker source)."""
+    return (
+        Organization.objects.filter(categories__name__in=MEDICAL_ORG_CATEGORIES)
+        .distinct().order_by("name")
+    )
+
+
+def _ensure_org_category(org, name) -> None:
+    """Tag an organization with an ORG category (idempotent; no-op if the category is unseeded)."""
+    from apps.setup.models import Category
+
+    cat = Category.objects.filter(kind=Category.Kind.ORG, name=name).first()
+    if cat:
+        org.categories.add(cat)
+
+
+def _ensure_person_category(person, name) -> None:
+    """Tag a person with a PERSON category (idempotent; no-op if the category is unseeded)."""
+    from apps.setup.models import Category
+
+    cat = Category.objects.filter(kind=Category.Kind.PERSON, name=name).first()
+    if cat:
+        person.categories.add(cat)
+
+
+def _split_name(raw):
+    """Split a free-typed full name into (first, last); last may be blank for a single token."""
+    parts = (raw or "").strip().split()
+    if not parts:
+        return None
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], " ".join(parts[1:])
+
+
+def _resolve_org(request, field, *, category_name=None):
+    """A picked org id or an inline-created org by name (mirrors realestate / payables). A newly
+    created org is tagged with `category_name` when given (e.g. a facility → Hospital/Clinic)."""
     new_name = request.POST.get(f"{field}_new_name", "").strip()
     if new_name:
-        return Organization.objects.create(name=new_name)
+        org = Organization.objects.create(name=new_name)
+        if category_name:
+            _ensure_org_category(org, category_name)
+        return org
     oid = request.POST.get(field) or 0
     return Organization.objects.filter(pk=oid).first()
 
@@ -151,6 +196,20 @@ def _resolve_org(request, field):
 def _resolve_person(request, field):
     pid = request.POST.get(field) or 0
     return Person.objects.filter(pk=pid).first()
+
+
+def _resolve_provider(request, field, *, category_name="Doctor"):
+    """A picked person id or an inline-created provider by name. A newly created person is tagged
+    with `category_name` (default Doctor) so it surfaces in Contacts as a provider."""
+    new_name = request.POST.get(f"{field}_new_name", "").strip()
+    if new_name:
+        split = _split_name(new_name)
+        if split:
+            person = Person.objects.create(first_name=split[0], last_name=split[1])
+            if category_name:
+                _ensure_person_category(person, category_name)
+            return person
+    return _resolve_person(request, field)
 
 
 def _form_context(request, **extra):
@@ -198,6 +257,7 @@ def dashboard(request):
         request, "dashboard", base=base_currency(),
         recent_visits=recent_visits, overdue=overdue[:8], plan_cards=plan_cards,
         hsa=hsa_summary(), members=member_rollups(), reminders=reminders_due(within_days=60)[:6],
+        facilities=_medical_organizations(),
         **stats,
     )
     return render(request, "health/dashboard.html", ctx)
@@ -213,6 +273,23 @@ def reminders(request):
         overdue_count=len([r for r in rows if r["days"] < 0]),
     )
     return render(request, "health/reminders.html", ctx)
+
+
+# --- Providers (quick-create a doctor) ------------------------------------------------------
+
+def provider_create(request):
+    """Quick-create a provider (a Doctor-categorized Person) with an optional practice affiliation,
+    from the dashboard. New people surface everywhere a provider can be picked + in Contacts."""
+    if request.method == "POST":
+        first = request.POST.get("first_name", "").strip()
+        last = request.POST.get("last_name", "").strip()
+        if first or last:
+            person = Person.objects.create(first_name=first, last_name=last)
+            _ensure_person_category(person, "Doctor")
+            org = _resolve_org(request, "affiliation", category_name="Hospital/Clinic")
+            if org is not None:
+                link_provider_affiliation(person, org)
+    return redirect(tenant_url(request, "health/"))
 
 
 # --- Outstanding by provider ----------------------------------------------------------------
@@ -281,8 +358,8 @@ def _apply_encounter(request, enc):
     enc.setting = setting if setting in EncounterSetting.values else EncounterSetting.OFFICE
     enc.visit_status = vstatus if vstatus in VisitStatus.values else VisitStatus.COMPLETED
     enc.date = date
-    enc.facility = _resolve_org(request, "facility")
-    enc.primary_provider = _resolve_person(request, "primary_provider")
+    enc.facility = _resolve_org(request, "facility", category_name="Hospital/Clinic")
+    enc.primary_provider = _resolve_provider(request, "primary_provider")
     enc.reason = request.POST.get("reason", "").strip()
     enc.notes = request.POST.get("notes", "").strip()
     return enc
@@ -330,9 +407,13 @@ def _encounter_form(request, enc, mode):
             error = "Choose the patient and the visit date."
         else:
             error = "Please complete the required fields."
+    facilities = list(_medical_organizations())
+    if enc.facility_id and enc.facility not in facilities:
+        facilities.insert(0, enc.facility)  # keep an already-set, non-medical facility selectable
     ctx = health_context(
         request, "visits", mode=mode, form=form, encounter=enc, error=error,
         roster=list(enc.providers.select_related("person", "organization").all()) if enc.pk else [],
+        facilities=facilities,
         **_form_context(request),
     )
     return render(request, "health/encounter_form.html", ctx)
@@ -674,8 +755,10 @@ def _apply_prescription(request, rx):
     rx.date = date
     rx.drug_name = request.POST.get("drug_name", "").strip()
     rx.dosage = request.POST.get("dosage", "").strip()
-    rx.prescriber_person = _resolve_person(request, "prescriber_person")
-    rx.pharmacy_organization = _resolve_org(request, "pharmacy_organization")
+    rx.prescriber_person = _resolve_provider(request, "prescriber_person")
+    rx.pharmacy_organization = _resolve_org(
+        request, "pharmacy_organization", category_name="Pharmacy"
+    )
     rx.cost = _decimal(request.POST.get("cost")) or Decimal("0")
     rx.quantity = _int(request.POST.get("quantity"), None, lo=0)
     rx.days_supply = _int(request.POST.get("days_supply"), None, lo=0)

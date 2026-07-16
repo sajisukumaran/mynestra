@@ -36,6 +36,7 @@
             <select name="prescriber_person"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if prescription.prescriber_person_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
             <c-icon name="chevron-down" size="sm" class="subtle" />
           </div>
+          <c-input name="prescriber_person_new_name" placeholder="…or type a new provider name" />
         </c-field>
         <c-field label="Pharmacy" help="The bill vendor — required for a paid fill.">
           <div class="control is-select">

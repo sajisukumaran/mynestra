@@ -171,6 +171,69 @@ def test_pending_then_confirm_flow(make_tenant, make_user, client):
         assert account_balance("medical_expense") == D("180")
 
 
+# --- facility filtering + provider inline-create ---------------------------------------------
+
+def test_facility_limited_to_medical_and_provider_inline_create(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user, name="Med HH", email="med@h.test")
+    with schema_context(tenant.schema_name):
+        from apps.organizations.models import Organization
+        from apps.setup.models import Category
+
+        hosp = Organization.objects.create(name="Mercy Clinic")
+        hosp.categories.add(Category.objects.get(kind=Category.Kind.ORG, name="Hospital/Clinic"))
+        Organization.objects.create(name="Big Bank Ltd")  # not medical — must be excluded
+        pid = _person("Pat", "Ient").pk
+    client.force_login(owner)
+
+    # the facility <select> lists the medical org, not the bank (the roster affiliation picker,
+    # which lists all orgs, is a separate control).
+    body = client.get(_c(tenant, "health/visits/new/")).content.decode()
+    start = body.index('name="facility"')
+    facility_select = body[start:body.index("</select>", start)]
+    assert "Mercy Clinic" in facility_select
+    assert "Big Bank Ltd" not in facility_select
+
+    # inline-create a provider + a facility while booking the visit
+    client.post(_c(tenant, "health/visits/new/"), {
+        "patient": pid, "date": "2026-03-01", "encounter_type": "medical",
+        "setting": "office", "visit_status": "completed",
+        "primary_provider_new_name": "Dana Okafor",
+        "facility_new_name": "New Health Center",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.contacts.models import Person
+        from apps.health.models import Encounter
+        from apps.organizations.models import Organization
+
+        doc = Person.objects.get(first_name="Dana", last_name="Okafor")
+        assert doc.categories.filter(name="Doctor").exists()
+        fac = Organization.objects.get(name="New Health Center")
+        assert fac.categories.filter(name="Hospital/Clinic").exists()  # tagged medical on create
+        enc = Encounter.objects.get()
+        assert enc.primary_provider_id == doc.pk and enc.facility_id == fac.pk
+
+
+def test_dashboard_provider_create(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user, name="Prov HH", email="prov@h.test")
+    client.force_login(owner)
+    client.post(_c(tenant, "health/providers/new/"), {
+        "first_name": "Lee", "last_name": "Nguyen",
+        "affiliation_new_name": "Downtown Family Practice",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.contacts.models import Person
+        from apps.organizations.models import Organization
+        from apps.relationships.models import PersonOrgRelationship
+
+        doc = Person.objects.get(first_name="Lee", last_name="Nguyen")
+        assert doc.categories.filter(name="Doctor").exists()
+        prac = Organization.objects.get(name="Downtown Family Practice")
+        assert prac.categories.filter(name="Hospital/Clinic").exists()
+        assert PersonOrgRelationship.objects.filter(
+            person=doc, organization=prac, type__code="provider_affiliation"
+        ).exists()
+
+
 # --- tenant isolation ------------------------------------------------------------------------
 
 def test_health_tenant_isolation(make_tenant, make_user, client):
