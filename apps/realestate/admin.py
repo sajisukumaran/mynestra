@@ -6,6 +6,7 @@ from apps.realestate.models import (
     Property,
     PropertyCostEvent,
     PropertyDisposal,
+    PropertyDocument,
     PropertyOwner,
     PropertyValuation,
 )
@@ -35,6 +36,13 @@ class PropertyCostEventAdmin(admin.ModelAdmin):
 class PropertyDisposalAdmin(admin.ModelAdmin):
     list_display = ("property", "method", "date", "proceeds")
     list_filter = ("method",)
+
+
+@admin.register(PropertyDocument)
+class PropertyDocumentAdmin(admin.ModelAdmin):
+    list_display = ("property", "title", "doc_type", "created_at")
+    list_filter = ("doc_type",)
+    search_fields = ("title", "note")
 
 
 admin.site.register(PropertyValuation)

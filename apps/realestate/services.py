@@ -18,6 +18,7 @@ mortgage-escrow home tax, which the Loans module already books from a mortgage p
 
 from __future__ import annotations
 
+import datetime
 from decimal import Decimal
 
 from django.db import transaction
@@ -25,6 +26,7 @@ from django.db import transaction
 from apps.finance.models import ZERO, Account, AccountType, JournalEntry, Side
 from apps.finance.services import (
     LineInput,
+    account_balance,
     post_entry,
     resolve_account,
     resolve_posting_account,
@@ -553,3 +555,64 @@ def launcher_counts() -> list[dict]:
         {"n": props.count(), "label": "Properties"},
         {"n": portfolio_value(), "label": "Market value"},
     ]
+
+
+# --- Value over time (appreciation chart; posts nothing) -------------------------------------
+
+def appreciation_series(property: Property) -> dict:
+    """A (date, cost, value) series for the value chart: `cost` from the GL as-of each key date
+    (step function of capitalizing events), `value` = the latest valuation carried forward, else
+    cost. Shaped for `investments.services.line_chart_points`. The inverse framing of
+    `automobile.services.depreciation_series` — market value normally rises above cost here."""
+    valuations = list(property.valuations.order_by("as_of"))
+    cap_events = list(
+        property.cost_events.filter(kind__in=list(CAPITALIZING_KINDS)).order_by("date")
+    )
+    dates = {v.as_of for v in valuations} | {e.date for e in cap_events}
+    if property.acquired.is_set and property.acquired.year:
+        dates.add(datetime.date(
+            property.acquired.year, property.acquired.month or 1, property.acquired.day or 1
+        ))
+    today = datetime.date.today()
+    dates.add(today)
+    ordered = sorted(d for d in dates if d <= today)
+    if len(ordered) < 2:
+        ordered = [today]
+
+    def cost_on(d):
+        if property.gl_account_id is not None:
+            return account_balance(property.gl_account, as_of=d)
+        return property.cost_basis or ZERO
+
+    def value_on(d):
+        latest = None
+        for v in valuations:
+            if v.as_of <= d:
+                latest = v.value
+        return latest
+
+    series = []
+    for d in ordered:
+        cost = cost_on(d)
+        value = value_on(d)
+        series.append((d, cost, value if value is not None else cost))
+    vals = [x for _, c, m in series for x in (c, m)]
+    last_cost = series[-1][1] if series else ZERO
+    last_value = series[-1][2] if series else ZERO
+    return {
+        "series": series,
+        "min": min(vals) if vals else ZERO,
+        "max": max(vals) if vals else ZERO,
+        "last_cost": last_cost,
+        "last_value": last_value,
+        "gain": last_value - last_cost,  # positive = appreciation above cost
+    }
+
+
+# --- Documents (plain attachments; post nothing) ---------------------------------------------
+
+def delete_document(doc) -> None:
+    """Remove a property document — delete the stored file, then the row (a plain attachment)."""
+    if doc.file:
+        doc.file.delete(save=False)
+    doc.delete()

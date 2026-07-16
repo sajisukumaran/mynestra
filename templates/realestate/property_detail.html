@@ -77,12 +77,38 @@
   <c-hint icon="info">Disposed on {{ disposal.date|date:'d M Y' }} ({{ disposal.method_label }}) — booked gain/loss <c-money :amount="disposal.gain_loss" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />.</c-hint>
   {% endif %}
 
+  {# Value & appreciation #}
+  <c-card icon="trending-up" title="Value over time">
+    <c-slot name="actions">
+      <c-modal title="Add a value estimate">
+        <c-slot name="trigger"><c-button size="sm"><c-icon name="plus" size="sm" /> Add value</c-button></c-slot>
+        <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/valuation/">{% csrf_token %}
+          <div class="stack-16">
+            <p class="muted">A display-only estimate (posts nothing; net worth stays at cost).</p>
+            <div class="form-grid">
+              <c-field label="Market value" required><div class="control"><input name="value" inputmode="decimal" placeholder="0.00"></div></c-field>
+              <c-field label="As of" required><div class="control"><input type="date" name="as_of" value="{% now 'Y-m-d' %}"></div></c-field>
+              <c-field label="Source"><c-input name="source" placeholder="e.g. Zillow / appraisal" /></c-field>
+            </div>
+            <div class="row"><c-button type="submit" variant="primary">Save value</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+          </div>
+        </form>
+      </c-modal>
+    </c-slot>
+    {% include "realestate/partials/value_chart.html" %}
+    <div class="ph-meta" style="margin-top:12px;">
+      <span class="row"><c-icon name="trending-up" size="sm" class="subtle" />Appreciation <span class="strong"><c-money :amount="property.appreciation" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>
+      {% if loan_summary %}<span class="row"><c-icon name="banknote" size="sm" class="subtle" />Equity <span class="strong"><c-money :amount="property.equity" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>{% endif %}
+    </div>
+  </c-card>
+
   <div x-data="{ tab: 'overview' }">
     <c-tabs>
       <button type="button" class="tab" :class="{ active: tab === 'overview' }" @click="tab = 'overview'"><c-icon name="info" size="sm" /> Overview</button>
       <button type="button" class="tab" :class="{ active: tab === 'costs' }" @click="tab = 'costs'"><c-icon name="banknote" size="sm" /> Costs {% if events %}<span class="tcount tnum">{{ events|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'valuations' }" @click="tab = 'valuations'"><c-icon name="trending-up" size="sm" /> Valuations {% if valuations %}<span class="tcount tnum">{{ valuations|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'people' }" @click="tab = 'people'"><c-icon name="users" size="sm" /> People {% if owners %}<span class="tcount tnum">{{ owners|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'documents' }" @click="tab = 'documents'"><c-icon name="file-text" size="sm" /> Documents {% if documents %}<span class="tcount tnum">{{ documents|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
     </c-tabs>
 
@@ -104,6 +130,23 @@
           {% endif %}
         </c-key-value>
         {% if property.notes %}<p class="muted" style="margin-top:12px;">{{ property.notes }}</p>{% endif %}
+      </c-card>
+
+      {# Insurance — read-through to the Insurance module (a policy posts its own premiums there) #}
+      <c-card title="Insurance" icon="shield-check">
+        <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" size="sm" /> Add policy</c-button></c-slot>
+        {% with policies=property.active_insurance_policies %}
+        {% if policies %}
+        {% for p in policies %}
+        <c-rel-row name="{{ p.display }}" role="{{ p.type_label }}{% if p.insurer_name %} · {{ p.insurer_name }}{% endif %}{% if p.expiry_date %} · renews {{ p.expiry_date|date:'d M Y' }}{% endif %}" href="{{ ui_tenant_url }}insurance/policies/{{ p.pk }}/">
+          <c-slot name="avatar"><c-avatar tint="{{ p.type_tint }}" size="sm" square><c-icon name="shield-check" size="sm" /></c-avatar></c-slot>
+          <c-slot name="tail"><c-money :amount="p.annualized_premium" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> / yr</c-slot>
+        </c-rel-row>
+        {% endfor %}
+        {% else %}
+        <c-empty-state icon="shield-check" title="No policy linked" text="Add a home or renters policy in the Insurance module and link this property to it." />
+        {% endif %}
+        {% endwith %}
       </c-card>
     </div>
 
@@ -219,6 +262,58 @@
         {% endfor %}
         {% else %}
         <c-empty-state icon="users" title="No people" text="Edit the property to add owners and occupants." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Documents #}
+    <div x-show="tab === 'documents'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="file-text" title="Documents">
+        <c-slot name="actions">
+          <c-modal title="Upload a document">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="upload" size="sm" /> Upload</c-button></c-slot>
+            <form method="post" enctype="multipart/form-data" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/documents/new/">{% csrf_token %}
+              {% include "realestate/partials/document_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Upload</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% if documents %}
+        <c-table>
+          <thead><tr><c-th>Title</c-th><c-th>Type</c-th><c-th>Added</c-th><th></th></tr></thead>
+          <tbody>
+            {% for d in documents %}
+            <tr>
+              <td><a href="{{ d.file.url }}" target="_blank" class="strong">{{ d.title }}</a>{% if d.note %}<div class="muted">{{ d.note }}</div>{% endif %}</td>
+              <td><c-chip>{{ d.type_label }}</c-chip></td>
+              <td class="tnum muted">{{ d.created_at|date:'d M Y' }}</td>
+              <td>
+                <div class="cell-actions">
+                  <c-button icon_only size="sm" variant="ghost" href="{{ d.file.url }}" title="Download"><c-icon name="download" size="sm" /></c-button>
+                  <c-confirm-dialog title="Delete this document?" message="Removes the file and its record. This can't be undone.">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                    <c-slot name="confirm">
+                      <form method="post" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/documents/{{ d.pk }}/delete/">{% csrf_token %}
+                        <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+                      </form>
+                    </c-slot>
+                  </c-confirm-dialog>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="file-text" title="No documents" text="Upload the deed, closing disclosure, tax bills, appraisals or insurance paperwork.">
+          <c-modal title="Upload a document">
+            <c-slot name="trigger"><c-button variant="primary"><c-icon name="upload" /> Upload</c-button></c-slot>
+            <form method="post" enctype="multipart/form-data" action="{{ ui_tenant_url }}realestate/{{ property.pk }}/documents/new/">{% csrf_token %}
+              {% include "realestate/partials/document_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Upload</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-empty-state>
         {% endif %}
       </c-card>
     </div>

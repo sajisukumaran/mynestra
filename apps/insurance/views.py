@@ -44,6 +44,7 @@ from apps.insurance.services import (
     save_claim,
     save_premium,
     set_claim_vehicle,
+    set_covered_properties,
     set_covered_vehicles,
     sync_policy_p2o,
     void_claim,
@@ -112,6 +113,12 @@ def _vehicles():
     from apps.automobile.models import Vehicle
 
     return Vehicle.objects.filter(is_active=True).order_by("nickname")
+
+
+def _properties():
+    from apps.realestate.models import Property
+
+    return Property.objects.filter(is_active=True).order_by("nickname")
 
 
 def _expense_accounts():
@@ -267,6 +274,12 @@ def _save_covered_vehicles(request, policy):
     set_covered_vehicles(policy, vehicles)
 
 
+def _save_covered_properties(request, policy):
+    ids = [i for i in request.POST.getlist("covered_property") if i]
+    properties = list(_properties().filter(pk__in=ids)) if ids else []
+    set_covered_properties(policy, properties)
+
+
 def policy_create(request):
     return _policy_form(request, InsurancePolicy(), "create")
 
@@ -303,15 +316,30 @@ def _policy_form(request, policy, mode):
             _save_coverages(request, policy)
             _save_members(request, policy)
             _save_covered_vehicles(request, policy)
+            _save_covered_properties(request, policy)
             sync_policy_p2o(policy)
             return redirect(tenant_url(request, f"insurance/policies/{policy.pk}/"))
         error = "Please complete the required fields."
 
     coverage_rows = list(policy.coverages.all()) if policy.pk else []
     member_rows = list(policy.members.select_related("person").all()) if policy.pk else []
-    covered_ids = (
-        set(policy.assets.values_list("object_id", flat=True)) if policy.pk else set()
-    )
+    # Covered-asset ids are per-content-type: `object_id` alone collides across asset kinds (a
+    # vehicle #3 and a property #3 are different assets), so scope each picker's checked-set by CT.
+    covered_vehicle_ids, covered_property_ids = set(), set()
+    if policy.pk:
+        from django.contrib.contenttypes.models import ContentType
+
+        from apps.automobile.models import Vehicle
+        from apps.realestate.models import Property
+
+        v_ct = ContentType.objects.get_for_model(Vehicle)
+        p_ct = ContentType.objects.get_for_model(Property)
+        covered_vehicle_ids = set(
+            policy.assets.filter(content_type=v_ct).values_list("object_id", flat=True)
+        )
+        covered_property_ids = set(
+            policy.assets.filter(content_type=p_ct).values_list("object_id", flat=True)
+        )
     ctx = insurance_context(
         request, "policies",
         form=form, policy=policy, mode=mode, error=error,
@@ -324,7 +352,9 @@ def _policy_form(request, policy, mode):
         people=_household_people(),
         insurer=policy.insurer_organization,
         vehicles=_vehicles(),
-        covered_ids=covered_ids,
+        properties=_properties(),
+        covered_vehicle_ids=covered_vehicle_ids,
+        covered_property_ids=covered_property_ids,
         coverage_rows=coverage_rows,
         member_rows=member_rows,
     )

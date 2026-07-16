@@ -130,3 +130,84 @@ def test_record_property_tax_cost(make_tenant, make_user, client):
         assert ev.bill is not None and ev.bill.is_locked
         assert account_balance("property_tax_expense") == D("6000")
         assert account_balance("property_tax") == D("0")  # not the 5140 escrow home tax
+
+
+# --- value chart + documents tab + insurance read-through (Phase 2) --------------------------
+
+def test_detail_shows_value_chart_docs_tab_and_insurance_card(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.realestate.models import OwnershipMode, Property, PropertyValuation
+        from apps.realestate.services import ensure_gl_account
+
+        p = Property.objects.create(
+            nickname="Family Home", ownership_mode=OwnershipMode.OWNED_CASH, currency=_usd()
+        )
+        ensure_gl_account(p)
+        PropertyValuation.objects.create(property=p, as_of=datetime.date(2026, 1, 1),
+                                         value=D("300000"))
+        PropertyValuation.objects.create(property=p, as_of=datetime.date(2026, 6, 1),
+                                         value=D("340000"))
+        pid = p.pk
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/realestate/{pid}/").content.decode()
+    assert "Value over time" in body and "At cost" in body   # chart card + legend
+    assert "Documents" in body                               # docs tab
+    assert "No policy linked" in body                        # insurance read-through empty-state
+
+
+def test_property_reads_through_to_policy(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import InsurancePolicy, PolicyType
+        from apps.insurance.services import set_covered_properties
+        from apps.realestate.models import OwnershipMode, Property
+
+        p = Property.objects.create(
+            nickname="Family Home", ownership_mode=OwnershipMode.OWNED_CASH, currency=_usd()
+        )
+        policy = InsurancePolicy.objects.create(
+            policy_type=PolicyType.HOME, insurer_organization=_org("Home Insurer"),
+            currency=_usd(), nickname="Home Policy",
+        )
+        set_covered_properties(policy, [p])
+        pid, policy_id = p.pk, policy.pk
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/realestate/{pid}/").content.decode()
+    assert "Home Policy" in body
+    assert f"insurance/policies/{policy_id}/" in body
+
+
+def test_upload_and_delete_document(make_tenant, make_user, client, settings, tmp_path):
+    settings.MEDIA_ROOT = str(tmp_path)  # keep uploads out of the project media dir
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.realestate.models import OwnershipMode, Property
+
+        p = Property.objects.create(
+            nickname="Family Home", ownership_mode=OwnershipMode.OWNED_CASH, currency=_usd()
+        )
+        pid = p.pk
+    client.force_login(owner)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    up = SimpleUploadedFile("deed.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+    resp = client.post(
+        f"/t/{tenant.schema_name}/realestate/{pid}/documents/new/",
+        {"title": "Deed", "doc_type": "deed", "document": up},
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.realestate.models import PropertyDocument
+
+        doc = PropertyDocument.objects.get(property_id=pid)
+        assert doc.title == "Deed" and doc.doc_type == "deed"
+        did = doc.pk
+    resp = client.post(
+        f"/t/{tenant.schema_name}/realestate/{pid}/documents/{did}/delete/"
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.realestate.models import PropertyDocument
+
+        assert PropertyDocument.objects.count() == 0

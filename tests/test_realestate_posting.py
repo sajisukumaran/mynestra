@@ -239,3 +239,80 @@ def test_valuation_overlay_posts_nothing(make_tenant):
         assert p.current_value == D("400000")               # market value overlay
         assert p.cost == D("300000")                        # net worth stays at cost
         assert JournalEntry.objects.count() == entries_before  # nothing posted
+
+
+# --- value-over-time (appreciation) chart series (Phase 2) -----------------------------------
+
+def test_appreciation_series_carries_value_and_cost(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.realestate.services import appreciation_series
+
+        p = _property()
+        _event(p, CostKind.PURCHASE, "300000", vendor=_org("Seller"))  # cost basis in the GL
+        PropertyValuation.objects.create(property=p, as_of=MAR, value=D("350000"))
+        p.refresh_from_db()
+        data = appreciation_series(p)
+        assert data["last_cost"] == D("300000")
+        assert data["last_value"] == D("350000")
+        assert data["gain"] == D("50000")                   # positive = appreciation above cost
+        # The valuation carries forward; the earliest point (before it) falls back to cost.
+        assert len(data["series"]) >= 2
+        assert data["series"][0][2] == data["series"][0][1]  # pre-valuation: value == cost
+
+
+def test_appreciation_series_single_point_guard(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.realestate.services import appreciation_series
+
+        p = _property()  # no purchase, no valuation, no acquisition date
+        data = appreciation_series(p)
+        assert len(data["series"]) == 1                     # only today's point
+        assert data["last_cost"] == data["last_value"] == ZERO
+
+
+# --- insurance tie-in (covered-property links; Phase 2) --------------------------------------
+
+def _home_policy():
+    from apps.insurance.models import InsurancePolicy, PolicyType
+
+    return InsurancePolicy.objects.create(
+        policy_type=PolicyType.HOME, insurer_organization=_org("Home Insurer"), currency=_usd()
+    )
+
+
+def test_set_covered_properties_and_read_through(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.insurance.services import policies_for_asset, set_covered_properties
+
+        p = _property()
+        policy = _home_policy()
+        set_covered_properties(policy, [p])
+        assert list(policies_for_asset(p)) == [policy]
+        assert p.active_insurance_policies == [policy]      # model read-through
+        set_covered_properties(policy, [])                  # unlink
+        assert list(policies_for_asset(p)) == []
+        assert p.active_insurance_policies == []
+
+
+def test_covered_assets_do_not_clobber_across_types(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import OwnershipMode as VOwn
+        from apps.automobile.models import Vehicle
+        from apps.insurance.services import set_covered_properties, set_covered_vehicles
+
+        prop = _property()
+        vehicle = Vehicle.objects.create(
+            nickname="Family SUV", ownership_mode=VOwn.OWNED_CASH, currency=_usd()
+        )
+        policy = _home_policy()
+        set_covered_vehicles(policy, [vehicle])
+        set_covered_properties(policy, [prop])
+        assert policy.assets.count() == 2                   # both covered
+        # Rewriting the vehicle set to empty leaves the property asset untouched (per-CT scope).
+        set_covered_vehicles(policy, [])
+        assert policy.assets.count() == 1
+        assert prop.active_insurance_policies == [policy]

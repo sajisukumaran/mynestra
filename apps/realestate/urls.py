@@ -19,5 +19,7 @@ urlpatterns = [
     path("<int:pk>/valuation/", views.valuation_add, name="valuation-add"),
     path("<int:pk>/valuation/<int:vid>/delete/", views.valuation_delete, name="valuation-delete"),
     path("<int:pk>/dispose/", views.dispose, name="dispose"),
+    path("<int:pk>/documents/new/", views.document_upload, name="document-upload"),
+    path("<int:pk>/documents/<int:did>/delete/", views.document_delete, name="document-delete"),
     path("org-search/", views.org_search, name="org-search"),
 ]

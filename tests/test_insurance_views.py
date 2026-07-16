@@ -156,6 +156,35 @@ def test_create_auto_policy_with_coverage_member_and_vehicle(make_tenant, make_u
         ).exists()
 
 
+def test_create_home_policy_covering_property(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.realestate.models import OwnershipMode, Property
+
+        prop = Property.objects.create(
+            nickname="Family Home", ownership_mode=OwnershipMode.OWNED_CASH, currency=_usd()
+        )
+        pid = prop.pk
+    client.force_login(owner)
+    resp = client.post(
+        f"/t/{tenant.schema_name}/insurance/policies/new/",
+        {
+            "policy_type": "home", "status": "active", "currency": "USD",
+            "insurer_organization": "", "insurer_organization_new_name": "Home Insurer",
+            "nickname": "Home Policy", "premium_amount": "1800", "premium_frequency": "annual",
+            "covered_property": str(pid), "notes": "",
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import InsurancePolicy
+        from apps.realestate.models import Property
+
+        policy = InsurancePolicy.objects.get(nickname="Home Policy")
+        assert policy.assets.filter(object_id=pid).count() == 1
+        assert Property.objects.get(pk=pid).active_insurance_policies == [policy]
+
+
 # --- record a premium via the client ---------------------------------------------------------
 
 def test_record_bank_funded_premium(make_tenant, make_user, client):

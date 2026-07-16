@@ -531,16 +531,35 @@ def _vehicle_ct():
     return ContentType.objects.get_for_model(Vehicle)
 
 
-def set_covered_vehicles(policy: InsurancePolicy, vehicles) -> None:
-    """Replace the policy's covered-Vehicle assets with `vehicles` (used by auto policies)."""
-    ct = _vehicle_ct()
+def _property_ct():
+    from django.contrib.contenttypes.models import ContentType
+
+    from apps.realestate.models import Property
+
+    return ContentType.objects.get_for_model(Property)
+
+
+def _set_covered_assets(policy: InsurancePolicy, ct, objs) -> None:
+    """Replace the policy's covered assets OF ONE content-type with `objs`, leaving assets of every
+    other content-type untouched (so a policy can cover a vehicle AND a property without either
+    picker clobbering the other)."""
     keep = set()
-    for v in vehicles:
+    for obj in objs:
         asset, _ = PolicyAsset.objects.get_or_create(
-            policy=policy, content_type=ct, object_id=v.pk
+            policy=policy, content_type=ct, object_id=obj.pk
         )
         keep.add(asset.pk)
     policy.assets.filter(content_type=ct).exclude(pk__in=keep).delete()
+
+
+def set_covered_vehicles(policy: InsurancePolicy, vehicles) -> None:
+    """Replace the policy's covered-Vehicle assets with `vehicles` (used by auto policies)."""
+    _set_covered_assets(policy, _vehicle_ct(), vehicles)
+
+
+def set_covered_properties(policy: InsurancePolicy, properties) -> None:
+    """Replace the policy's covered-Property assets with `properties` (home / renters policies)."""
+    _set_covered_assets(policy, _property_ct(), properties)
 
 
 def policies_for_asset(asset, *, active_only=True):

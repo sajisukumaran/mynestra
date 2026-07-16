@@ -142,11 +142,23 @@
       {% if vehicles %}
       <div class="stack-8">
         {% for v in vehicles %}
-        <label class="row"><input type="checkbox" name="covered_vehicle" value="{{ v.pk }}"{% if v.pk in covered_ids %} checked{% endif %}> <span>{{ v.nickname }} <span class="subtle">· {{ v.full_name }}</span></span></label>
+        <label class="row"><input type="checkbox" name="covered_vehicle" value="{{ v.pk }}"{% if v.pk in covered_vehicle_ids %} checked{% endif %}> <span>{{ v.nickname }} <span class="subtle">· {{ v.full_name }}</span></span></label>
         {% endfor %}
       </div>
       {% else %}
       <c-empty-state icon="car" title="No vehicles" text="Add a vehicle in the Vehicles module, then link it here." />
+      {% endif %}
+    </c-card>
+
+    <c-card title="Covered property" icon="house" x-show="ptype === 'home' || ptype === 'renters'" x-cloak>
+      {% if properties %}
+      <div class="stack-8">
+        {% for p in properties %}
+        <label class="row"><input type="checkbox" name="covered_property" value="{{ p.pk }}"{% if p.pk in covered_property_ids %} checked{% endif %}> <span>{{ p.nickname }}{% if p.address_oneline %} <span class="subtle">· {{ p.address_oneline }}</span>{% endif %}</span></label>
+        {% endfor %}
+      </div>
+      {% else %}
+      <c-empty-state icon="house" title="No properties" text="Add a property in the Real Estate module, then link it here." />
       {% endif %}
     </c-card>
 

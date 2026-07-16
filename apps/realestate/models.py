@@ -312,6 +312,16 @@ class Property(SoftDeleteModel):
     def is_disposed(self) -> bool:
         return self.disposed.is_set or hasattr(self, "disposal")
 
+    # --- insurance (read-through to the Insurance module) ---
+    @property
+    def active_insurance_policies(self):
+        """Active InsurancePolicy rows covering this property (read-through to the Insurance module
+        via the PolicyAsset generic link). Empty when no home/renters policy is linked. Twin of
+        `automobile.Vehicle.active_insurance_policies`."""
+        from apps.insurance.services import policies_for_asset
+
+        return list(policies_for_asset(self))
+
 
 class PropertyOwner(TimeStampedModel):
     """A household member on the property, with a role (mirrors VehicleDriver / LoanBorrower). Title
@@ -550,3 +560,47 @@ class PropertyDisposal(SoftDeleteModel):
     @_prop
     def buyer(self):
         return self.buyer_person or self.buyer_organization
+
+
+class DocumentType(models.TextChoices):
+    DEED = "deed", "Deed / title"
+    PURCHASE_AGREEMENT = "purchase_agreement", "Purchase agreement"
+    CLOSING_DISCLOSURE = "closing_disclosure", "Closing disclosure"
+    TAX_BILL = "tax_bill", "Property tax bill"
+    INSURANCE = "insurance", "Insurance"
+    APPRAISAL = "appraisal", "Appraisal / inspection"
+    RECEIPT = "receipt", "Receipt"
+    CORRESPONDENCE = "correspondence", "Correspondence"
+    OTHER = "other", "Other"
+
+
+class PropertyDocument(TimeStampedModel):
+    """An uploaded file attached to a property (deed, closing disclosure, tax bill, appraisal, ...).
+    No GL effect — a plain attachment (twin of `insurance.PolicyDocument`). Files share MEDIA_ROOT
+    with the rest of the app; the row is schema-isolated like every tenant record."""
+
+    property = models.ForeignKey(
+        Property, on_delete=models.CASCADE, related_name="documents"
+    )
+    title = models.CharField(max_length=160)
+    doc_type = models.CharField(
+        max_length=20, choices=DocumentType.choices, default=DocumentType.OTHER
+    )
+    file = models.FileField(upload_to="realestate_docs/")
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return self.title
+
+    @_prop
+    def type_label(self) -> str:
+        return self.get_doc_type_display()
+
+    @_prop
+    def filename(self) -> str:
+        import os
+
+        return os.path.basename(self.file.name) if self.file else ""

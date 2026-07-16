@@ -15,25 +15,30 @@ from django.utils.dateparse import parse_date
 from apps.contacts.models import Person
 from apps.finance.models import Account, AccountType, Currency
 from apps.finance.services import base_currency
+from apps.investments.services import line_chart_points
 from apps.organizations.models import Organization
 from apps.realestate.forms import PropertyForm
 from apps.realestate.models import (
     CostKind,
     DisposalMethod,
+    DocumentType,
     Funding,
     OwnerRole,
     OwnershipMode,
     Property,
     PropertyCostEvent,
     PropertyDisposal,
+    PropertyDocument,
     PropertyOwner,
     PropertyType,
     PropertyUse,
     PropertyValuation,
 )
 from apps.realestate.services import (
+    appreciation_series,
     dashboard_stats,
     delete_cost_event,
+    delete_document,
     ensure_gl_account,
     post_disposal,
     save_cost_event,
@@ -320,6 +325,20 @@ def property_delete(request, pk):
 
 # --- Property detail ------------------------------------------------------------------------
 
+def _value_geo(property):
+    """Precomputed SVG geometry + latest figures for the value-over-time chart (empty geo when
+    there's not enough history to draw a line). Mirrors automobile.views._value_geo."""
+    data = appreciation_series(property)
+    series = data["series"]
+    if len(series) < 2:
+        return {}, data
+    dates = [d for d, _, _ in series]
+    geo = line_chart_points(
+        series, min_v=data["min"], max_v=data["max"], start=min(dates), end=max(dates)
+    )
+    return geo, data
+
+
 def property_detail(request, pk):
     property = get_object_or_404(
         Property.objects.select_related("currency", "gl_account", "mortgage_loan"), pk=pk
@@ -332,6 +351,7 @@ def property_detail(request, pk):
     if property.mortgage_loan_id:
         loan = property.mortgage_loan
         loan_summary = {"loan": loan, "balance": loan.balance}
+    geo, value_data = _value_geo(property)
     ctx = realestate_context(
         request, "properties",
         property=property, base=base_currency(),
@@ -340,6 +360,9 @@ def property_detail(request, pk):
             property.owners.select_related("person").all(), key=lambda o: o.role_order
         ),
         valuations=list(property.valuations.all()[:20]),
+        value_geo=geo, value_data=value_data,
+        documents=list(property.documents.all()),
+        document_types=DocumentType.choices,
         history=property.history.all()[:60],
         loan_summary=loan_summary,
         cost_kinds=COST_PICKER_KINDS,
@@ -474,6 +497,31 @@ def dispose(request, pk):
             )
             disposal.save()
             post_disposal(disposal, user=request.user)
+    return redirect(tenant_url(request, f"realestate/{pk}/"))
+
+
+# --- Documents ------------------------------------------------------------------------------
+
+def document_upload(request, pk):
+    property = get_object_or_404(Property, pk=pk)
+    if request.method == "POST" and "document" in request.FILES:
+        dtype = request.POST.get("doc_type") or DocumentType.OTHER
+        doc = PropertyDocument(
+            property=property,
+            title=request.POST.get("title", "").strip() or request.FILES["document"].name,
+            doc_type=dtype if dtype in DocumentType.values else DocumentType.OTHER,
+            note=request.POST.get("note", "").strip(),
+            file=request.FILES["document"],
+        )
+        doc.save()
+    return redirect(tenant_url(request, f"realestate/{pk}/"))
+
+
+def document_delete(request, pk, did):
+    property = get_object_or_404(Property, pk=pk)
+    doc = get_object_or_404(PropertyDocument, pk=did, property=property)
+    if request.method == "POST":
+        delete_document(doc)
     return redirect(tenant_url(request, f"realestate/{pk}/"))
 
 
