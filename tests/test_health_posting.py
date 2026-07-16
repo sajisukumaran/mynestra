@@ -336,6 +336,38 @@ def test_itemized_charges_drive_amount_and_bill(make_tenant):
         _assert_balanced()
 
 
+# --- copay at visit --------------------------------------------------------------------------
+
+def test_visit_copay_posts_and_pays(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        from apps.health.services import record_visit_copay
+
+        enc = _encounter(facility=_org("Downtown Clinic"))
+        inv = record_visit_copay(enc, amount=D("30"), funding=Funding.CASH)
+        inv.refresh_from_db()
+        assert inv.status == InvoiceStatus.PAID          # paid on the spot
+        assert inv.encounter_id == enc.pk
+        assert account_balance("medical_expense") == D("30")
+        assert account_balance("accounts_payable") == ZERO
+        ch = inv.charges.get()
+        assert ch.copay_amount == D("30")
+        assert ch.applies_to_oop and not ch.applies_to_deductible  # counts to OOP, not deductible
+        enc.refresh_from_db()
+        assert enc.total_paid == D("30")
+        _assert_balanced()
+
+
+def test_visit_copay_needs_a_biller(make_tenant):
+    import pytest
+
+    with schema_context(make_tenant().schema_name):
+        from apps.health.services import record_visit_copay
+
+        enc = _encounter()  # no facility, no primary provider
+        with pytest.raises(ValueError):
+            record_visit_copay(enc, amount=D("30"), funding=Funding.CASH)
+
+
 # --- disputes --------------------------------------------------------------------------------
 
 def test_disputed_stays_accrued_but_out_of_owed(make_tenant):

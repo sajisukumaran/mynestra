@@ -250,6 +250,56 @@ def test_patient_picker_lists_household_members_only(make_tenant, make_user, cli
         assert "Doc External" not in patient_select, path
 
 
+# --- dashboard insurance + visit insurance/copay capture -------------------------------------
+
+def test_dashboard_shows_health_insurance(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user, name="Ins HH", email="ins@h.test")
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import InsurancePolicy, PolicyStatus, PolicyType
+
+        InsurancePolicy.objects.create(  # active health policy, no HealthPlan satellite
+            policy_type=PolicyType.HEALTH, insurer_organization=_org("Blue Shield"),
+            currency=_usd(), status=PolicyStatus.ACTIVE, policy_number="BS-9",
+        )
+    client.force_login(owner)
+    body = client.get(_c(tenant, "health/")).content.decode()
+    assert "Blue Shield" in body  # surfaced on the dashboard even without cost-sharing set up
+
+
+def test_visit_captures_insurance_and_copay(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user, name="Copay HH", email="copay@h.test")
+    with schema_context(tenant.schema_name):
+        from apps.contacts.models import Person
+        from apps.insurance.models import InsurancePolicy, PolicyStatus, PolicyType
+
+        patient = Person.objects.create(first_name="Pat", last_name="Ient",
+                                        is_household_member=True)
+        facility = _org("Downtown Clinic")
+        policy = InsurancePolicy.objects.create(
+            policy_type=PolicyType.HEALTH, insurer_organization=_org("Aetna"),
+            currency=_usd(), status=PolicyStatus.ACTIVE,
+        )
+        pid, fid, polid = patient.pk, facility.pk, policy.pk
+    client.force_login(owner)
+
+    client.post(_c(tenant, "health/visits/new/"), {
+        "patient": pid, "date": "2026-04-01", "encounter_type": "medical",
+        "setting": "office", "visit_status": "completed",
+        "facility": fid, "plan": polid,
+        "copay_amount": "30", "copay_funding": "cash",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import account_balance
+        from apps.health.models import Encounter, ProviderInvoice
+
+        enc = Encounter.objects.get()
+        assert enc.plan_id == polid  # captured the insurance presented at the visit
+        inv = ProviderInvoice.objects.get(encounter=enc)
+        assert inv.status == "paid" and inv.charges.get().copay_amount == D("30")
+        assert account_balance("medical_expense") == D("30")
+        assert account_balance("accounts_payable") == D("0")
+
+
 # --- tenant isolation ------------------------------------------------------------------------
 
 def test_health_tenant_isolation(make_tenant, make_user, client):

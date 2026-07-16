@@ -587,6 +587,43 @@ def delete_invoice_payment(inv: ProviderInvoice, payment, *, user=None) -> None:
     _recompute_encounter(inv.encounter)
 
 
+@transaction.atomic
+def record_visit_copay(
+    enc: Encounter, *, amount, funding,
+    account=None, card=None, cash=None, hsa=None, user=None,
+):
+    """Quick-capture a copay paid at the time of a visit: a locked ProviderInvoice under the
+    encounter (biller = its facility, else its primary provider) carrying a single copay charge
+    (feeds the out-of-pocket accumulator, not the deductible), posted and paid in full from the
+    chosen funding source. Returns the invoice, or None when the amount isn't positive. Reuses the
+    normal invoice bill + payment seams, so the copay lands in the encounter-type expense account,
+    the provider ledger, and OOP tracking (via the encounter's linked plan)."""
+    from apps.health.models import InvoiceCharge
+
+    amount = Decimal(amount)
+    if amount <= ZERO:
+        return None
+    biller_org = enc.facility
+    biller_person = enc.primary_provider if biller_org is None else None
+    if biller_org is None and biller_person is None:
+        raise ValueError("Add a facility or primary provider to record a copay.")
+    inv = ProviderInvoice(
+        encounter=enc, biller_organization=biller_org, biller_person=biller_person,
+        invoice_date=enc.date, status=InvoiceStatus.UNPAID, memo="Copay at visit",
+    )
+    inv.save()
+    InvoiceCharge.objects.create(
+        invoice=inv, description="Copay", copay_amount=amount,
+        applies_to_deductible=False, applies_to_oop=True, order=0,
+    )
+    save_invoice(inv, user=user, is_new=True)
+    record_invoice_payment(
+        inv, amount=amount, date=enc.date, funding=funding,
+        account=account, card=card, cash=cash, hsa=hsa, user=user,
+    )
+    return inv
+
+
 # --- Write-off / dispute / refund ------------------------------------------------------------
 
 @transaction.atomic
@@ -1006,7 +1043,7 @@ def dashboard_stats() -> dict:
 
 def active_health_plans():
     """Active insurance policies that carry a HealthPlan (medical / dental / vision) — the
-    household's live benefit plans. Drives the Health insurance read-through + the OOP meters."""
+    household's live benefit plans. Drives the OOP meters + the plan-year reset reminder."""
     from apps.insurance.models import InsurancePolicy, PolicyStatus
 
     return list(
@@ -1014,6 +1051,31 @@ def active_health_plans():
             status=PolicyStatus.ACTIVE, health_plan__isnull=False
         ).select_related("health_plan", "insurer_organization", "insurer_person")
     )
+
+
+def active_health_insurance() -> list[dict]:
+    """Every active health-related insurance policy (medical / dental / vision), whether or not a
+    HealthPlan cost-sharing satellite is set — so the dashboard surfaces the household's coverage
+    even before deductible/OOP figures are entered. Each row carries the covered members and the
+    deductible/OOP status (None without a HealthPlan). A pure read."""
+    from apps.insurance.models import COVERED_ROLES, InsurancePolicy, PolicyStatus, PolicyType
+
+    policies = (
+        InsurancePolicy.objects.filter(
+            status=PolicyStatus.ACTIVE,
+            policy_type__in=[PolicyType.HEALTH, PolicyType.DENTAL, PolicyType.VISION],
+        )
+        .select_related("insurer_organization", "insurer_person")
+        .prefetch_related("members__person")
+        .order_by("policy_type", "-effective_date", "-id")
+    )
+    rows = []
+    for p in policies:
+        covered = [
+            m.person for m in p.members.all() if m.role in COVERED_ROLES and m.person_id
+        ]
+        rows.append({"policy": p, "status": deductible_oop_status(p), "covered": covered})
+    return rows
 
 
 # Prescription / refill glyph — a placeholder from the current sprite (the UI-gate sprite regen

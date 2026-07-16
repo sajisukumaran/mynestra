@@ -24,6 +24,7 @@
           {{ encounter.patient_name }} · {{ encounter.date|date:'d M Y' }} · {{ encounter.setting_label }}
           {% if encounter.primary_provider_id %} · Dr {{ encounter.primary_provider.display_name }}{% endif %}
         </div>
+        {% if encounter.plan_id %}<div class="row" style="margin-top:4px;"><c-icon name="shield-check" size="sm" class="subtle" /><span class="muted">Insurance: <span class="strong">{{ encounter.plan.type_label }}</span> · {{ encounter.plan.insurer_name }}{% if encounter.plan.policy_number %} · #{{ encounter.plan.policy_number }}{% endif %}</span></div>{% endif %}
         <div class="ph-meta">
           <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><span class="strong"><c-money :amount="encounter.total_patient_responsibility" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> your total</span>
           <span class="row"><c-icon name="circle-check" size="sm" class="subtle" /><c-money :amount="encounter.total_paid" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> paid</span>

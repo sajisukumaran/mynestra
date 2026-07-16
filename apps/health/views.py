@@ -33,6 +33,7 @@ from apps.health.models import (
     VisitStatus,
 )
 from apps.health.services import (
+    active_health_insurance,
     confirm_invoice,
     dashboard_stats,
     delete_document,
@@ -48,6 +49,7 @@ from apps.health.services import (
     record_invoice_payment,
     record_prescription_payment,
     record_refund,
+    record_visit_copay,
     reminders_due,
     resolve_dispute,
     save_encounter,
@@ -203,6 +205,27 @@ def _resolve_person(request, field):
     return Person.objects.filter(pk=pid).first()
 
 
+def _health_insurance_policies():
+    """Active health-related insurance policies (medical / dental / vision) for the visit picker."""
+    from apps.insurance.models import InsurancePolicy, PolicyStatus, PolicyType
+
+    return (
+        InsurancePolicy.objects.filter(
+            status=PolicyStatus.ACTIVE,
+            policy_type__in=[PolicyType.HEALTH, PolicyType.DENTAL, PolicyType.VISION],
+        )
+        .select_related("insurer_organization", "insurer_person")
+        .order_by("policy_type", "-effective_date", "-id")
+    )
+
+
+def _resolve_health_policy(request, field):
+    from apps.insurance.models import InsurancePolicy
+
+    pid = request.POST.get(field) or 0
+    return InsurancePolicy.objects.filter(pk=pid).first()
+
+
 def _resolve_provider(request, field, *, category_name="Doctor"):
     """A picked person id or an inline-created provider by name. A newly created person is tagged
     with `category_name` (default Doctor) so it surfaces in Contacts as a provider."""
@@ -232,6 +255,7 @@ def _form_context(request, **extra):
         "credit_cards": _credit_cards(),
         "cash_accounts": _cash_accounts(),
         "hsa_accounts": _hsa_accounts(),
+        "health_policies": _health_insurance_policies(),
         "base": base_currency(),
         "today": datetime.date.today(),
     }
@@ -253,14 +277,10 @@ def dashboard(request):
         if inv.is_overdue
     ]
     overdue.sort(key=lambda i: i.due_date)
-    from apps.health.services import active_health_plans, deductible_oop_status
-
-    plan_cards = [
-        {"policy": p, "status": deductible_oop_status(p)} for p in active_health_plans()
-    ]
     ctx = health_context(
         request, "dashboard", base=base_currency(),
-        recent_visits=recent_visits, overdue=overdue[:8], plan_cards=plan_cards,
+        recent_visits=recent_visits, overdue=overdue[:8],
+        insurance_cards=active_health_insurance(),
         hsa=hsa_summary(), members=member_rollups(), reminders=reminders_due(within_days=60)[:6],
         facilities=_medical_organizations(),
         **stats,
@@ -365,6 +385,7 @@ def _apply_encounter(request, enc):
     enc.date = date
     enc.facility = _resolve_org(request, "facility", category_name="Hospital/Clinic")
     enc.primary_provider = _resolve_provider(request, "primary_provider")
+    enc.plan = _resolve_health_policy(request, "plan")  # blank → save_encounter auto-links
     enc.reason = request.POST.get("reason", "").strip()
     enc.notes = request.POST.get("notes", "").strip()
     return enc
@@ -404,12 +425,27 @@ def _encounter_form(request, enc, mode):
     if request.method == "POST":
         if form.is_valid():
             enc = form.save(commit=False)
-            if _apply_encounter(request, enc) is not None:
-                enc.save()
-                _save_roster(request, enc)
-                save_encounter(enc, user=request.user, is_new=(mode == "create"))
-                return redirect(tenant_url(request, f"health/visits/{enc.pk}/"))
-            error = "Choose the patient and the visit date."
+            if _apply_encounter(request, enc) is None:
+                error = "Choose the patient and the visit date."
+            else:
+                copay = _decimal(request.POST.get("copay_amount"))
+                want_copay = mode == "create" and copay and copay > 0
+                if want_copay and enc.facility is None and enc.primary_provider is None:
+                    error = "Add a facility or primary provider to record a copay at the visit."
+                else:
+                    enc.save()
+                    _save_roster(request, enc)
+                    save_encounter(enc, user=request.user, is_new=(mode == "create"))
+                    if want_copay:
+                        funding = request.POST.get("copay_funding") or Funding.BANK
+                        if funding in Funding.values:
+                            kw = _resolve_funding_target(request, funding)
+                            try:
+                                record_visit_copay(enc, amount=copay, funding=funding,
+                                                   user=request.user, **kw)
+                            except ValueError:
+                                pass
+                    return redirect(tenant_url(request, f"health/visits/{enc.pk}/"))
         else:
             error = "Please complete the required fields."
     facilities = list(_medical_organizations())

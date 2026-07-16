@@ -118,23 +118,33 @@
   </c-card>
   {% endif %}
 
-  {% if plan_cards %}
-  <c-card icon="shield-check" title="Insurance & benefits">
+  <c-card icon="shield-check" title="Health insurance">
     <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/plans/">Manage plans</c-button></c-slot>
+    {% if insurance_cards %}
     <div class="stack-16">
-      {% for pc in plan_cards %}
+      {% for pc in insurance_cards %}
       <div>
-        <div class="row wrap" style="justify-content:space-between;">
-          <span class="row"><c-avatar tint="{{ pc.policy.type_tint }}" size="sm" square><c-icon name="{{ pc.policy.type_glyph }}" size="sm" /></c-avatar> <a href="{{ ui_tenant_url }}health/plans/{{ pc.policy.pk }}/edit/" class="strong">{{ pc.policy.display }}</a> <c-chip tint="{{ pc.policy.type_tint }}">{{ pc.policy.type_label }}</c-chip></span>
+        <div class="row wrap" style="justify-content:space-between; align-items:baseline;">
+          <span class="row"><c-avatar tint="{{ pc.policy.type_tint }}" size="sm" square><c-icon name="{{ pc.policy.type_glyph }}" size="sm" /></c-avatar> <a href="{{ ui_tenant_url }}health/plans/{{ pc.policy.pk }}/edit/" class="strong">{{ pc.policy.insurer_name|default:pc.policy.display }}</a> <c-chip tint="{{ pc.policy.type_tint }}">{{ pc.policy.type_label }}</c-chip>{% if pc.policy.policy_number %}<span class="muted tnum">#{{ pc.policy.policy_number }}</span>{% endif %}</span>
+          {% if pc.policy.premium_amount %}<span class="muted"><c-money :amount="pc.policy.premium_amount" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> / {{ pc.policy.frequency_label|lower }}</span>{% endif %}
         </div>
+        {% if pc.covered %}
+        <div class="muted" style="margin-top:4px;">Covers {% for person in pc.covered %}{{ person.display_name }}{% if not forloop.last %}, {% endif %}{% endfor %}</div>
+        {% endif %}
         {% if pc.status and pc.status.meters %}
         <div style="margin-top:10px;">{% include "health/partials/meters.html" with status=pc.status %}</div>
+        {% else %}
+        <div style="margin-top:6px;"><a href="{{ ui_tenant_url }}health/plans/{{ pc.policy.pk }}/edit/" class="subtle">Set up deductible & out-of-pocket tracking →</a></div>
         {% endif %}
       </div>
       {% endfor %}
     </div>
+    {% else %}
+    <c-empty-state icon="shield-check" title="No health insurance yet" text="Add a medical, dental or vision policy in the Insurance module — it'll show here with deductible & out-of-pocket tracking.">
+      <c-button href="{{ ui_tenant_url }}insurance/">Open Insurance</c-button>
+    </c-empty-state>
+    {% endif %}
   </c-card>
-  {% endif %}
 
   <div class="grid-2">
     <c-card icon="clock" title="Recent visits">
