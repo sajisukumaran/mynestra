@@ -12,6 +12,7 @@
       <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}health/" {% if active == 'dashboard' %}active="true"{% endif %} />
       <c-sidebar-item label="Visits" icon="calendar-days" count="{{ nav_visits }}" href="{{ ui_tenant_url }}health/visits/" {% if active == 'visits' %}active="true"{% endif %} />
       <c-sidebar-item label="Invoices" icon="banknote" count="{{ nav_invoices }}" href="{{ ui_tenant_url }}health/invoices/" {% if active == 'invoices' %}active="true"{% endif %} />
+      <c-sidebar-item label="Claims" icon="file-text" count="{{ nav_claims }}" href="{{ ui_tenant_url }}health/claims/" {% if active == 'claims' %}active="true"{% endif %} />
       <c-sidebar-item label="Prescriptions" icon="heart" count="{{ nav_prescriptions }}" href="{{ ui_tenant_url }}health/prescriptions/" {% if active == 'prescriptions' %}active="true"{% endif %} />
       <c-sidebar-item label="By provider" icon="users" href="{{ ui_tenant_url }}health/providers/" {% if active == 'providers' %}active="true"{% endif %} />
       <c-sidebar-item label="Reminders" icon="calendar-days" href="{{ ui_tenant_url }}health/reminders/" {% if active == 'reminders' %}active="true"{% endif %} />

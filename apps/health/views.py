@@ -16,8 +16,12 @@ from django.utils.dateparse import parse_date
 from apps.contacts.models import Person
 from apps.finance.models import Account, AccountType
 from apps.finance.services import base_currency
-from apps.health.forms import EncounterForm, InvoiceForm, PrescriptionForm
+from apps.health.forms import ClaimForm, EncounterForm, InvoiceForm, PrescriptionForm
 from apps.health.models import (
+    ClaimLine,
+    ClaimNetwork,
+    ClaimRemark,
+    ClaimStatus,
     DocumentType,
     Encounter,
     EncounterProvider,
@@ -27,6 +31,7 @@ from apps.health.models import (
     HealthDocument,
     InvoiceCharge,
     InvoiceStatus,
+    MedicalClaim,
     Prescription,
     ProviderInvoice,
     ProviderRole,
@@ -36,6 +41,7 @@ from apps.health.services import (
     active_health_insurance,
     confirm_invoice,
     dashboard_stats,
+    delete_claim,
     delete_document,
     delete_invoice,
     delete_invoice_payment,
@@ -46,12 +52,14 @@ from apps.health.services import (
     link_provider_affiliation,
     member_rollups,
     outstanding_by_provider,
+    recent_claims,
     record_invoice_payment,
     record_prescription_payment,
     record_refund,
     record_visit_copay,
     reminders_due,
     resolve_dispute,
+    save_claim,
     save_encounter,
     save_invoice,
     save_prescription,
@@ -85,6 +93,7 @@ def health_context(request, active, **extra):
         "nav_visits": Encounter.objects.count(),
         "nav_invoices": ProviderInvoice.objects.count(),
         "nav_prescriptions": Prescription.objects.count(),
+        "nav_claims": MedicalClaim.objects.count(),
     }
     ctx.update(extra)
     return ctx
@@ -282,7 +291,7 @@ def dashboard(request):
         recent_visits=recent_visits, overdue=overdue[:8],
         insurance_cards=active_health_insurance(),
         hsa=hsa_summary(), members=member_rollups(), reminders=reminders_due(within_days=60)[:6],
-        facilities=_medical_organizations(),
+        claims=recent_claims(), facilities=_medical_organizations(),
         **stats,
     )
     return render(request, "health/dashboard.html", ctx)
@@ -466,9 +475,12 @@ def _encounter_form(request, enc, mode):
 def encounter_delete(request, pk):
     enc = get_object_or_404(Encounter, pk=pk)
     if request.method == "POST":
-        # Refuse if any invoice has a foreign Payables payment; otherwise erase its invoices' bills.
+        # Refuse if any bill has a foreign Payables payment; otherwise erase claims + invoices'
+        # bills (claims first — each tears down its own generated bill).
         try:
             with transaction.atomic():
+                for claim in list(enc.claims.all()):
+                    delete_claim(claim, user=request.user)
                 for inv in list(enc.invoices.all()):
                     delete_invoice(inv, user=request.user)
                 enc.hard_delete()
@@ -487,9 +499,13 @@ def encounter_detail(request, pk):
         enc.invoices.select_related("bill", "biller_person", "biller_organization",
                                     "rendering_provider").order_by("-invoice_date", "-id")
     )
+    claims = list(
+        enc.claims.select_related("provider_organization", "provider_person", "plan", "invoice")
+        .order_by("-service_date", "-id")
+    )
     ctx = health_context(
         request, "visits", encounter=enc,
-        invoices=invoices,
+        invoices=invoices, claims=claims,
         roster=list(enc.providers.select_related("person", "organization").all()),
         documents=list(enc.documents.all()),
         history=enc.history.all()[:60],
@@ -909,6 +925,204 @@ def prescription_document_upload(request, pk):
     return redirect(tenant_url(request, f"health/prescriptions/{pk}/"))
 
 
+# --- Medical claims (EOB) -------------------------------------------------------------------
+
+def claim_list(request):
+    qs = MedicalClaim.objects.select_related(
+        "patient", "provider_organization", "provider_person", "plan", "invoice"
+    )
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(claim_number__icontains=q)
+            | Q(patient__first_name__icontains=q) | Q(patient__last_name__icontains=q)
+            | Q(provider_organization__name__icontains=q)
+        ).distinct()
+    status = request.GET.get("status", "")
+    if status in ClaimStatus.values:
+        qs = qs.filter(status=status)
+    qs = qs.order_by("-service_date", "-id")
+    total = MedicalClaim.objects.count()
+    status_chips = [
+        {"val": val, "label": label, "count": MedicalClaim.objects.filter(status=val).count()}
+        for val, label in ClaimStatus.choices
+    ]
+    page = Paginator(qs, 15).get_page(request.GET.get("page"))
+    ctx = health_context(
+        request, "claims", base=base_currency(),
+        page=page, claims=list(page.object_list), q=q, status=status, total=total,
+        status_chips=status_chips,
+    )
+    return render(request, "health/claim_list.html", ctx)
+
+
+def _apply_claim(request, claim):
+    sdate = parse_date(request.POST.get("service_date") or "")
+    patient = _resolve_person(request, "patient")
+    if sdate is None or patient is None:
+        return None
+    claim.patient = patient
+    claim.service_date = sdate
+    claim.service_date_end = parse_date(request.POST.get("service_date_end") or "") or None
+    claim.processed_date = parse_date(request.POST.get("processed_date") or "") or None
+    status = request.POST.get("status") or ClaimStatus.PROCESSED
+    claim.status = status if status in ClaimStatus.values else ClaimStatus.PROCESSED
+    net = request.POST.get("network") or ClaimNetwork.IN_NETWORK
+    claim.network = net if net in ClaimNetwork.values else ClaimNetwork.IN_NETWORK
+    claim.claim_number = request.POST.get("claim_number", "").strip()
+    claim.member_id = request.POST.get("member_id", "").strip()
+    claim.group_number = request.POST.get("group_number", "").strip()
+    claim.provider_organization = _resolve_org(
+        request, "provider_organization", category_name="Hospital/Clinic"
+    )
+    claim.provider_person = _resolve_provider(request, "provider_person")
+    claim.plan = _resolve_health_policy(request, "plan")
+    claim.notes = request.POST.get("notes", "").strip()
+    return claim
+
+
+def _save_claim_lines(request, claim):
+    descs = request.POST.getlist("line_description")
+    codes = request.POST.getlist("line_code")
+    billed = request.POST.getlist("line_billed")
+    discount = request.POST.getlist("line_discount")
+    allowed = request.POST.getlist("line_allowed")
+    plan_paid = request.POST.getlist("line_plan_paid")
+    deduct = request.POST.getlist("line_deductible")
+    copay = request.POST.getlist("line_copay")
+    coins = request.POST.getlist("line_coinsurance")
+    notcov = request.POST.getlist("line_not_covered")
+    remarks = request.POST.getlist("line_remarks")
+    claim.lines.all().delete()
+
+    def _d(lst, i):
+        return _decimal(lst[i] if i < len(lst) else "") or Decimal("0")
+
+    order = 0
+    for i, desc in enumerate(descs):
+        if not desc.strip():
+            continue
+        ClaimLine.objects.create(
+            claim=claim, description=desc.strip(), order=order,
+            service_code=(codes[i] if i < len(codes) else "").strip(),
+            billed=_d(billed, i), plan_discount=_d(discount, i), allowed=_d(allowed, i),
+            plan_paid=_d(plan_paid, i), deductible=_d(deduct, i), copay=_d(copay, i),
+            coinsurance=_d(coins, i), not_covered=_d(notcov, i),
+            remark_codes=(remarks[i] if i < len(remarks) else "").strip(),
+        )
+        order += 1
+
+
+def _save_claim_remarks(request, claim):
+    codes = request.POST.getlist("remark_code")
+    texts = request.POST.getlist("remark_text")
+    claim.remarks.all().delete()
+    order = 0
+    for i, raw in enumerate(codes):
+        code = (raw or "").strip()
+        if not code:
+            continue
+        ClaimRemark.objects.create(
+            claim=claim, code=code, text=(texts[i] if i < len(texts) else "").strip(), order=order
+        )
+        order += 1
+
+
+def _claim_form(request, claim, mode, *, encounter=None):
+    form = ClaimForm(request.POST or None, instance=claim)
+    error = ""
+    if request.method == "POST":
+        if form.is_valid():
+            claim = form.save(commit=False)
+            if encounter is not None:
+                claim.encounter = encounter
+            if _apply_claim(request, claim) is None:
+                error = "Choose the patient and the service date."
+            else:
+                try:
+                    with transaction.atomic():
+                        claim.save()
+                        _save_claim_lines(request, claim)
+                        _save_claim_remarks(request, claim)
+                        save_claim(claim, user=request.user, is_new=(mode == "create"))
+                    return redirect(tenant_url(request, f"health/claims/{claim.pk}/"))
+                except ValueError as exc:
+                    error = str(exc) or "Add the claim's provider to record what you owe."
+        else:
+            error = "Please complete the required fields."
+    patients = list(_patients())
+    if claim.patient_id and claim.patient not in patients:
+        patients.insert(0, claim.patient)
+    facilities = list(_medical_organizations())
+    if claim.provider_organization_id and claim.provider_organization not in facilities:
+        facilities.insert(0, claim.provider_organization)
+    ctx = health_context(
+        request, "claims", mode=mode, form=form, claim=claim, encounter=encounter, error=error,
+        patients=patients, facilities=facilities,
+        lines=list(claim.lines.all()) if claim.pk else [],
+        remarks=list(claim.remarks.all()) if claim.pk else [],
+        claim_statuses=ClaimStatus.choices, claim_networks=ClaimNetwork.choices,
+        **_form_context(request),
+    )
+    return render(request, "health/claim_form.html", ctx)
+
+
+def claim_create(request):
+    return _claim_form(request, MedicalClaim(), "create")
+
+
+def claim_create_for_visit(request, pk):
+    enc = get_object_or_404(Encounter, pk=pk)
+    return _claim_form(
+        request, MedicalClaim(encounter=enc, patient=enc.patient, plan=enc.plan), "create",
+        encounter=enc,
+    )
+
+
+def claim_edit(request, pk):
+    claim = get_object_or_404(MedicalClaim, pk=pk)
+    return _claim_form(request, claim, "edit", encounter=claim.encounter)
+
+
+def claim_detail(request, pk):
+    claim = get_object_or_404(
+        MedicalClaim.objects.select_related(
+            "patient", "provider_organization", "provider_person", "plan", "invoice"
+        ),
+        pk=pk,
+    )
+    from apps.health.services import deductible_oop_status
+
+    ctx = health_context(
+        request, "claims", claim=claim,
+        lines=list(claim.lines.all()),
+        remarks=list(claim.remarks.all()),
+        documents=list(claim.documents.all()),
+        history=claim.history.all()[:60],
+        oop=deductible_oop_status(claim.plan) if claim.plan_id else None,
+        **_form_context(request),
+    )
+    return render(request, "health/claim_detail.html", ctx)
+
+
+def claim_delete(request, pk):
+    claim = get_object_or_404(MedicalClaim, pk=pk)
+    enc_id = claim.encounter_id
+    if request.method == "POST":
+        try:
+            delete_claim(claim, user=request.user)
+        except ValueError:
+            return redirect(tenant_url(request, f"health/claims/{pk}/"))
+    dest = f"health/visits/{enc_id}/" if enc_id else "health/claims/"
+    return redirect(tenant_url(request, dest))
+
+
+def claim_document_upload(request, pk):
+    claim = get_object_or_404(MedicalClaim, pk=pk)
+    _upload_document(request, claim=claim)
+    return redirect(tenant_url(request, f"health/claims/{pk}/"))
+
+
 # --- Plans & benefits (P2) ------------------------------------------------------------------
 
 def _health_policy_types():
@@ -997,11 +1211,11 @@ def _save_copay_rules(request, hp):
 
 # --- Documents ------------------------------------------------------------------------------
 
-def _upload_document(request, *, encounter=None, invoice=None, prescription=None):
+def _upload_document(request, *, encounter=None, invoice=None, prescription=None, claim=None):
     if request.method == "POST" and "document" in request.FILES:
         dtype = request.POST.get("doc_type") or DocumentType.OTHER
         doc = HealthDocument(
-            encounter=encounter, invoice=invoice, prescription=prescription,
+            encounter=encounter, invoice=invoice, prescription=prescription, claim=claim,
             title=request.POST.get("title", "").strip() or request.FILES["document"].name,
             doc_type=dtype if dtype in DocumentType.values else DocumentType.OTHER,
             note=request.POST.get("note", "").strip(),
@@ -1030,6 +1244,8 @@ def document_delete(request, did):
         dest = f"health/invoices/{doc.invoice_id}/"
     elif doc.prescription_id:
         dest = f"health/prescriptions/{doc.prescription_id}/"
+    elif doc.claim_id:
+        dest = f"health/claims/{doc.claim_id}/"
     else:
         dest = "health/"
     if request.method == "POST":

@@ -146,6 +146,18 @@
     {% endif %}
   </c-card>
 
+  {% if claims %}
+  <c-card icon="file-text" title="Recent claims">
+    <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/claims/">View all</c-button></c-slot>
+    {% for cl in claims %}
+    <c-rel-row name="{{ cl.provider_name|default:cl.patient_name }}" role="{{ cl.status_label }} · {{ cl.service_date|date:'d M Y' }}{% if cl.claim_number %} · #{{ cl.claim_number }}{% endif %}" href="{{ ui_tenant_url }}health/claims/{{ cl.pk }}/">
+      <c-slot name="avatar"><c-avatar tint="rose" size="sm" square><c-icon name="file-text" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><span class="muted">billed <c-money :amount="cl.total_billed" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> · </span><span class="strong">owe <c-money :amount="cl.total_patient_responsibility" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></c-slot>
+    </c-rel-row>
+    {% endfor %}
+  </c-card>
+  {% endif %}
+
   <div class="grid-2">
     <c-card icon="clock" title="Recent visits">
       {% for e in recent_visits %}

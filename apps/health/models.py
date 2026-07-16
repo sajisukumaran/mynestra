@@ -642,10 +642,211 @@ class Prescription(SoftDeleteModel):
         return f"health/prescriptions/{self.pk}/"
 
 
+class ClaimStatus(models.TextChoices):
+    """Where a medical claim (EOB) is in the insurer's pipeline. RECEIVED / IN_PROCESS / APPEALED
+    post nothing (no final patient responsibility yet); PROCESSED / DENIED carry a determined
+    'what you owe' and materialize a provider bill for it."""
+
+    RECEIVED = "received", "Received"
+    IN_PROCESS = "in_process", "In process"
+    PROCESSED = "processed", "Processed"
+    DENIED = "denied", "Denied"
+    APPEALED = "appealed", "Appealed"
+
+
+# Claim statuses whose determined patient responsibility becomes a provider bill (what you owe).
+POSTED_CLAIM_STATUSES = frozenset({ClaimStatus.PROCESSED, ClaimStatus.DENIED})
+
+
+class ClaimNetwork(models.TextChoices):
+    IN_NETWORK = "in", "In-network"
+    OUT_OF_NETWORK = "out", "Out-of-network"
+
+
+class MedicalClaim(SoftDeleteModel):
+    """A medical insurance claim — the Explanation of Benefits (EOB) the plan sends after a visit.
+
+    An EOB is **not a bill**: it explains the money flow — Amount billed → Plan discount
+    (negotiated savings) → Amount allowed → Plan paid → **What you owe** (deductible + copay +
+    coinsurance + non-covered). The claim itself posts **nothing** (a pure overlay). When it's
+    PROCESSED / DENIED and there's a patient responsibility, it materializes a locked
+    `ProviderInvoice` (mirroring its lines) for exactly that amount, so the money you actually owe
+    flows through the Payables backbone and feeds deductible / OOP tracking — the EOB entered once,
+    the bill derived from it. RECEIVED / IN_PROCESS / APPEALED post nothing (like pending-insurance
+    invoices)."""
+
+    patient = models.ForeignKey(
+        "contacts.Person", on_delete=models.PROTECT, related_name="health_claims"
+    )
+    encounter = models.ForeignKey(
+        Encounter, on_delete=models.SET_NULL, null=True, blank=True, related_name="claims"
+    )
+    plan = models.ForeignKey(
+        "insurance.InsurancePolicy", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="health_claims",
+    )
+
+    claim_number = models.CharField(max_length=80, blank=True)  # the insurer's claim ID
+    member_id = models.CharField(max_length=80, blank=True)     # as printed on the EOB
+    group_number = models.CharField(max_length=80, blank=True)
+
+    # The provider whose services the claim covers (billing entity + rendering doctor).
+    provider_organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="health_claims",
+    )
+    provider_person = models.ForeignKey(
+        "contacts.Person", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="health_claims_rendered",
+    )
+
+    service_date = models.DateField()
+    service_date_end = models.DateField(null=True, blank=True)  # for a date range
+    processed_date = models.DateField(null=True, blank=True)    # when the insurer processed it
+
+    status = models.CharField(
+        max_length=12, choices=ClaimStatus.choices, default=ClaimStatus.PROCESSED
+    )
+    network = models.CharField(
+        max_length=3, choices=ClaimNetwork.choices, default=ClaimNetwork.IN_NETWORK
+    )
+
+    # Denormalized EOB waterfall totals (recomputed from the lines on save).
+    total_billed = _money(default=ZERO)
+    total_plan_discount = _money(default=ZERO)   # negotiated savings (billed − allowed)
+    total_allowed = _money(default=ZERO)
+    total_plan_paid = _money(default=ZERO)
+    total_deductible = _money(default=ZERO)
+    total_copay = _money(default=ZERO)
+    total_coinsurance = _money(default=ZERO)
+    total_not_covered = _money(default=ZERO)
+    total_patient_responsibility = _money(default=ZERO)  # what you owe (Σ of the four above)
+
+    # The locked provider bill materialized for the patient responsibility (what you owe).
+    invoice = models.OneToOneField(
+        ProviderInvoice, on_delete=models.SET_NULL, null=True, blank=True, related_name="claim"
+    )
+
+    notes = models.TextField(blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-service_date", "-id"]
+
+    def __str__(self) -> str:
+        return self.display
+
+    @property
+    def display(self) -> str:
+        who = self.provider_name or self.patient_name
+        return f"Claim {self.claim_number}" + (f" · {who}" if who else "")
+
+    @property
+    def patient_name(self) -> str:
+        return _party_name(self.patient)
+
+    @property
+    def provider(self):
+        return self.provider_organization or self.provider_person
+
+    @property
+    def provider_name(self) -> str:
+        return _party_name(self.provider)
+
+    @property
+    def plan_label(self) -> str:
+        return self.plan.display if self.plan_id else ""
+
+    @property
+    def status_label(self) -> str:
+        return self.get_status_display()
+
+    @property
+    def network_label(self) -> str:
+        return self.get_network_display()
+
+    @property
+    def is_processed(self) -> bool:
+        return self.status == ClaimStatus.PROCESSED
+
+    @property
+    def is_denied(self) -> bool:
+        return self.status == ClaimStatus.DENIED
+
+    @property
+    def posts_a_bill(self) -> bool:
+        return self.status in POSTED_CLAIM_STATUSES
+
+    @property
+    def savings(self):
+        """The plan's negotiated savings — the headline 'you saved' figure on an EOB."""
+        return self.total_plan_discount
+
+    @property
+    def you_owe(self):
+        return self.total_patient_responsibility
+
+
+class ClaimLine(TimeStampedModel):
+    """One service line of an EOB — the per-service money breakdown (rewritten in place). The
+    columns mirror a UnitedHealthcare EOB: billed → plan discount → allowed, then how the allowed
+    amount splits into what the plan paid vs. what you owe (deductible / copay / coinsurance /
+    non-covered), with any remark codes referencing the claim's legend."""
+
+    claim = models.ForeignKey(MedicalClaim, on_delete=models.CASCADE, related_name="lines")
+    description = models.CharField(max_length=200)
+    service_code = models.CharField(max_length=40, blank=True)   # CPT / HCPCS
+    service_date = models.DateField(null=True, blank=True)
+    place_of_service = models.CharField(max_length=80, blank=True)
+
+    billed = _money(default=ZERO)          # provider's charge
+    plan_discount = _money(default=ZERO)   # negotiated savings (not covered by the plan's rate)
+    allowed = _money(default=ZERO)         # amount eligible for benefits
+    plan_paid = _money(default=ZERO)       # what the plan paid the provider
+
+    deductible = _money(default=ZERO)
+    copay = _money(default=ZERO)
+    coinsurance = _money(default=ZERO)
+    not_covered = _money(default=ZERO)     # patient owes for a non-covered charge
+
+    remark_codes = models.CharField(max_length=120, blank=True)  # e.g. "A1, C5"
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:
+        return self.description
+
+    @property
+    def patient_responsibility(self):
+        """What you owe for this line = deductible + copay + coinsurance + non-covered."""
+        return (
+            (self.deductible or ZERO) + (self.copay or ZERO)
+            + (self.coinsurance or ZERO) + (self.not_covered or ZERO)
+        )
+
+
+class ClaimRemark(TimeStampedModel):
+    """A remark / reason code legend entry on the EOB (footnote code → explanation)."""
+
+    claim = models.ForeignKey(MedicalClaim, on_delete=models.CASCADE, related_name="remarks")
+    code = models.CharField(max_length=20)
+    text = models.CharField(max_length=300)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.code}: {self.text}"
+
+
 class HealthDocument(TimeStampedModel):
     """An uploaded file attached to exactly one Health owner (an encounter, an invoice, a
-    prescription, or a person). No GL effect — a plain attachment; the row is schema-isolated like
-    every tenant record."""
+    prescription, a claim, or a person). No GL effect — a plain attachment; the row is
+    schema-isolated like every tenant record."""
 
     encounter = models.ForeignKey(
         Encounter, on_delete=models.CASCADE, null=True, blank=True, related_name="documents"
@@ -655,6 +856,9 @@ class HealthDocument(TimeStampedModel):
     )
     prescription = models.ForeignKey(
         Prescription, on_delete=models.CASCADE, null=True, blank=True, related_name="documents"
+    )
+    claim = models.ForeignKey(
+        MedicalClaim, on_delete=models.CASCADE, null=True, blank=True, related_name="documents"
     )
     person = models.ForeignKey(
         "contacts.Person", on_delete=models.CASCADE, null=True, blank=True,
@@ -670,17 +874,19 @@ class HealthDocument(TimeStampedModel):
     class Meta:
         ordering = ["-created_at", "-id"]
         constraints = [
-            # Exactly one owner set (encounter XOR invoice XOR prescription XOR person).
+            # Exactly one owner set (encounter XOR invoice XOR prescription XOR claim XOR person).
             models.CheckConstraint(
                 condition=(
                     models.Q(encounter__isnull=False, invoice__isnull=True,
-                             prescription__isnull=True, person__isnull=True)
+                             prescription__isnull=True, claim__isnull=True, person__isnull=True)
                     | models.Q(encounter__isnull=True, invoice__isnull=False,
-                               prescription__isnull=True, person__isnull=True)
+                               prescription__isnull=True, claim__isnull=True, person__isnull=True)
                     | models.Q(encounter__isnull=True, invoice__isnull=True,
-                               prescription__isnull=False, person__isnull=True)
+                               prescription__isnull=False, claim__isnull=True, person__isnull=True)
                     | models.Q(encounter__isnull=True, invoice__isnull=True,
-                               prescription__isnull=True, person__isnull=False)
+                               prescription__isnull=True, claim__isnull=False, person__isnull=True)
+                    | models.Q(encounter__isnull=True, invoice__isnull=True,
+                               prescription__isnull=True, claim__isnull=True, person__isnull=False)
                 ),
                 name="healthdocument_one_owner",
             ),

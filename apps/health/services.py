@@ -29,10 +29,12 @@ from apps.finance.services import (
 from apps.health.models import (
     ENCOUNTER_TYPE_ACCOUNT,
     OWED_STATUSES,
+    POSTED_CLAIM_STATUSES,
     Encounter,
     EncounterType,
     Funding,
     InvoiceStatus,
+    MedicalClaim,
     Prescription,
     ProviderInvoice,
     VisitStatus,
@@ -295,16 +297,23 @@ def deductible_oop_status(policy, *, as_of=None) -> dict | None:
     if hp is None:
         return None
     start, end = hp.plan_year_window(as_of)
+    from django.db.models import Q
+
     from apps.health.models import InvoiceCharge
 
     def _charges(person=None):
+        # A charge counts when its invoice is linked to this plan either via the visit
+        # (encounter.plan) or via a claim generated for this plan (invoice.claim.plan). Both are
+        # to-one joins, so the OR never double-counts a charge.
         qs = InvoiceCharge.objects.filter(
-            invoice__encounter__plan=policy,
+            Q(invoice__encounter__plan=policy) | Q(invoice__claim__plan=policy),
             invoice__invoice_date__gte=start,
             invoice__invoice_date__lte=end,
         )
         if person is not None:
-            qs = qs.filter(invoice__encounter__patient=person)
+            qs = qs.filter(
+                Q(invoice__encounter__patient=person) | Q(invoice__claim__patient=person)
+            )
         return qs
 
     from apps.insurance.models import COVERED_ROLES
@@ -927,6 +936,123 @@ def delete_prescription(rx: Prescription, *, user=None) -> None:
     erase the bill + entry + the prescription."""
     _teardown_prescription_bill(rx, user=user)
     rx.hard_delete()
+
+
+# --- Medical claims (EOB) --------------------------------------------------------------------
+
+def _recompute_claim_totals(claim: MedicalClaim) -> None:
+    """Recompute the EOB waterfall totals from the claim's lines (a pure read cache)."""
+    lines = list(claim.lines.all())
+    fields = {
+        "total_billed": sum((line.billed or ZERO for line in lines), ZERO),
+        "total_plan_discount": sum((line.plan_discount or ZERO for line in lines), ZERO),
+        "total_allowed": sum((line.allowed or ZERO for line in lines), ZERO),
+        "total_plan_paid": sum((line.plan_paid or ZERO for line in lines), ZERO),
+        "total_deductible": sum((line.deductible or ZERO for line in lines), ZERO),
+        "total_copay": sum((line.copay or ZERO for line in lines), ZERO),
+        "total_coinsurance": sum((line.coinsurance or ZERO for line in lines), ZERO),
+        "total_not_covered": sum((line.not_covered or ZERO for line in lines), ZERO),
+        "total_patient_responsibility": sum((line.patient_responsibility for line in lines), ZERO),
+    }
+    dirty = [k for k, v in fields.items() if getattr(claim, k) != v]
+    if dirty:
+        for k in dirty:
+            setattr(claim, k, fields[k])
+        claim.save(update_fields=[*dirty, "updated_at"])
+
+
+def _teardown_claim_invoice(claim: MedicalClaim, *, user=None) -> None:
+    """Drop the provider bill a claim materialized (guards on a foreign Payables allocation)."""
+    inv = claim.invoice
+    if inv is None:
+        return
+    claim.invoice = None
+    claim.save(update_fields=["invoice", "updated_at"])
+    delete_invoice(inv, user=user)
+
+
+def _sync_claim_invoice(claim: MedicalClaim, *, user=None) -> None:
+    """Materialize (or refresh) the locked ProviderInvoice for a claim's patient responsibility —
+    one InvoiceCharge per claim line, mirroring the EOB breakdown, so the money you owe posts
+    through Payables and feeds deductible / OOP tracking. A claim not yet PROCESSED / DENIED, or one
+    with no patient responsibility, carries no bill (torn down if it had one)."""
+    from apps.health.models import InvoiceCharge
+
+    lines = list(claim.lines.all())
+    responsibility = sum((line.patient_responsibility for line in lines), ZERO)
+    if claim.status not in POSTED_CLAIM_STATUSES or responsibility <= ZERO:
+        if claim.invoice_id is not None:
+            _teardown_claim_invoice(claim, user=user)
+        return
+    if claim.provider is None:
+        raise ValueError("Add the claim's provider before it can materialize what you owe.")
+
+    is_new_inv = claim.invoice_id is None
+    inv = claim.invoice or ProviderInvoice(status=InvoiceStatus.UNPAID)
+    inv.encounter = claim.encounter
+    inv.biller_organization = claim.provider_organization
+    inv.biller_person = claim.provider_person if claim.provider_organization is None else None
+    inv.rendering_provider = claim.provider_person
+    inv.invoice_number = claim.claim_number
+    inv.invoice_date = claim.processed_date or claim.service_date
+    inv.reference = claim.claim_number
+    inv.memo = f"Insurance claim {claim.claim_number}".strip()
+    inv.save()
+
+    if is_new_inv:
+        claim.invoice = inv
+        claim.save(update_fields=["invoice", "updated_at"])
+
+    inv.charges.all().delete()  # rebuilt from the claim lines each sync
+    for i, line in enumerate(lines):
+        InvoiceCharge.objects.create(
+            invoice=inv, description=line.description or "Service", service_code=line.service_code,
+            billed=line.billed or ZERO, allowed=line.allowed or ZERO,
+            insurance_paid=line.plan_paid or ZERO,
+            deductible_amount=line.deductible or ZERO, copay_amount=line.copay or ZERO,
+            coinsurance_amount=line.coinsurance or ZERO, noncovered_amount=line.not_covered or ZERO,
+            order=i,
+        )
+    save_invoice(inv, user=user, is_new=is_new_inv)
+
+
+@transaction.atomic
+def save_claim(claim: MedicalClaim, *, user=None, is_new=True) -> MedicalClaim:
+    """Persist a medical claim (EOB) and sync the bill for what you owe. Recomputes the waterfall
+    totals from the lines, auto-links the covering plan when unset, then materializes / refreshes
+    the patient-responsibility ProviderInvoice (PROCESSED / DENIED with a positive amount) or tears
+    it down. The caller has saved the claim row (so it has a pk) and its lines."""
+    _recompute_claim_totals(claim)
+    if claim.plan_id is None and claim.patient_id:
+        plan = active_health_plan(
+            claim.patient, on_date=claim.service_date, encounter_type=EncounterType.MEDICAL
+        )
+        if plan is not None:
+            claim.plan = plan
+            claim.save(update_fields=["plan", "updated_at"])
+    _sync_claim_invoice(claim, user=user)
+    _recompute_encounter(claim.encounter)
+    return claim
+
+
+@transaction.atomic
+def delete_claim(claim: MedicalClaim, *, user=None) -> None:
+    """Hard-erase a claim and the provider bill it materialized (refused if a foreign Payables
+    payment is attached to that bill)."""
+    enc = claim.encounter
+    if claim.invoice_id is not None:
+        _teardown_claim_invoice(claim, user=user)
+    claim.hard_delete()
+    _recompute_encounter(enc)
+
+
+def recent_claims(limit: int = 8):
+    """The household's most recent medical claims (dashboard feed)."""
+    return list(
+        MedicalClaim.objects.select_related(
+            "patient", "provider_organization", "provider_person", "plan"
+        ).order_by("-service_date", "-id")[:limit]
+    )
 
 
 # --- Provider affiliation (persistent doctor ↔ business P2O link) -----------------------------

@@ -1,0 +1,65 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Claims{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" /><span class="strong">Claims</span></c-breadcrumb>
+
+<c-page-header title="Medical claims" subtitle="{{ total }} total · Explanation of Benefits from your insurer">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}health/claims/new/"><c-icon name="plus" /> New claim</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <div class="row wrap">
+    <a class="fchip{% if not status %} active{% endif %}" href="{% querystring status=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    {% for chip in status_chips %}
+    <a class="fchip{% if status == chip.val %} active{% endif %}" href="{% querystring status=chip.val page=None %}">{{ chip.label }} <span class="cnt tnum">{{ chip.count }}</span></a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if claims %}
+    <c-table>
+      <thead><tr><c-th>Claim</c-th><c-th>Patient</c-th><c-th>Provider</c-th><c-th>Service date</c-th><c-th>Status</c-th><th class="col-num">Billed</th><th class="col-num">Plan paid</th><th class="col-num">You owe</th></tr></thead>
+      <tbody>
+        {% for cl in claims %}
+        <tr>
+          <td><a href="{{ ui_tenant_url }}health/claims/{{ cl.pk }}/" class="strong">{{ cl.claim_number|default:"—" }}</a>{% if cl.network == 'out' %}<div class="muted">Out-of-network</div>{% endif %}</td>
+          <td class="muted">{{ cl.patient_name }}</td>
+          <td class="muted">{{ cl.provider_name|default:"—" }}</td>
+          <td class="tnum muted">{{ cl.service_date|date:'d M Y' }}</td>
+          <td>
+            {% if cl.status == 'processed' %}<c-badge variant="success">Processed</c-badge>
+            {% elif cl.status == 'denied' %}<c-badge variant="danger">Denied</c-badge>
+            {% elif cl.status == 'appealed' %}<c-badge variant="warning">Appealed</c-badge>
+            {% elif cl.status == 'in_process' %}<c-badge variant="info">In process</c-badge>
+            {% else %}<c-badge>Received</c-badge>{% endif %}
+          </td>
+          <td class="col-num"><c-money :amount="cl.total_billed" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num"><c-money :amount="cl.total_plan_paid" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num strong"><c-money :amount="cl.total_patient_responsibility" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="file-text"
+      title="{% if q or status %}No matching claims{% else %}No claims yet{% endif %}"
+      text="Log an Explanation of Benefits from your insurer — the billed / allowed / plan-paid / you-owe breakdown, per service line.">
+      <c-button variant="primary" href="{{ ui_tenant_url }}health/claims/new/"><c-icon name="plus" /> New claim</c-button>
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

@@ -1,0 +1,138 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}{% if mode == 'edit' %}Edit claim{% else %}New claim{% endif %}{% endblock %}
+
+{% block hl %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" />
+  {% if encounter %}<a href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/">{{ encounter.display }}</a>{% else %}<a href="{{ ui_tenant_url }}health/claims/">Claims</a>{% endif %}<c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'edit' %}Edit{% else %}New claim{% endif %}</span>
+</c-breadcrumb>
+
+<c-page-header title="{% if mode == 'edit' %}Edit claim{% else %}New medical claim (EOB){% endif %}"
+               subtitle="Enter the Explanation of Benefits as your insurer sent it. When processed, the amount you owe posts as a bill and counts toward your deductible & out-of-pocket." />
+
+{% if error %}<c-hint icon="triangle-alert" variant="danger">{{ error }}</c-hint>{% endif %}
+
+<form method="post" x-data="{ lines: [], remarks: [] }">{% csrf_token %}
+  <div class="stack-20">
+    <c-card icon="file-text" title="Claim">
+      <div class="form-grid">
+        <c-field label="Patient" required>
+          <div class="control is-select">
+            <select name="patient"><option value="">—</option>{% for p in patients %}<option value="{{ p.pk }}"{% if claim.patient_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Claim #">{{ form.claim_number }}</c-field>
+        <c-field label="Status" required>
+          <c-select name="status">{% for val, label in claim_statuses %}<option value="{{ val }}"{% if claim.status == val %} selected{% elif not claim.pk and val == 'processed' %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Service date" required><div class="control"><input type="date" name="service_date" value="{% if claim.pk %}{{ claim.service_date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+        <c-field label="Service date end" help="For a date range (optional)."><div class="control"><input type="date" name="service_date_end" value="{% if claim.service_date_end %}{{ claim.service_date_end|date:'Y-m-d' }}{% endif %}"></div></c-field>
+        <c-field label="Processed date"><div class="control"><input type="date" name="processed_date" value="{% if claim.processed_date %}{{ claim.processed_date|date:'Y-m-d' }}{% endif %}"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Provider" help="The billing provider / facility.">
+          <div class="control is-select">
+            <select name="provider_organization"><option value="">—</option>{% for o in facilities %}<option value="{{ o.pk }}"{% if claim.provider_organization_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+          <c-input name="provider_organization_new_name" placeholder="…or type a new provider name" />
+        </c-field>
+        <c-field label="Rendering doctor" help="The doctor seen (optional).">
+          <div class="control is-select">
+            <select name="provider_person"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if claim.provider_person_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+          <c-input name="provider_person_new_name" placeholder="…or type a new doctor name" />
+        </c-field>
+        <c-field label="Network">
+          <c-select name="network">{% for val, label in claim_networks %}<option value="{{ val }}"{% if claim.network == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Insurance / plan" help="Auto-detected when left blank.">
+          <div class="control is-select">
+            <select name="plan"><option value="">— auto-detect —</option>{% for pol in health_policies %}<option value="{{ pol.pk }}"{% if claim.plan_id == pol.pk %} selected{% endif %}>{{ pol.type_label }} · {{ pol.insurer_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Member ID">{{ form.member_id }}</c-field>
+        <c-field label="Group #">{{ form.group_number }}</c-field>
+      </div>
+      <c-field label="Notes">{{ form.notes }}</c-field>
+    </c-card>
+
+    <c-card icon="file-text" title="Service lines">
+      <c-slot name="actions">
+        <c-button type="button" size="sm" @click="lines.push({description:'',code:'',billed:'',discount:'',allowed:'',plan_paid:'',deductible:'',copay:'',coinsurance:'',not_covered:'',remarks:''})"><c-icon name="plus" size="sm" /> Add line</c-button>
+      </c-slot>
+      <c-hint icon="info">Each line: <span class="strong">Billed → Plan discount → Allowed</span>, then how the allowed amount splits into <span class="strong">Plan paid</span> vs. what you owe (Deductible + Copay + Coinsurance + Not covered).</c-hint>
+      <div style="overflow-x:auto; margin-top:8px;">
+        <div style="min-width:1180px;">
+          <div style="display:grid; grid-template-columns:1.8fr .9fr repeat(8,1fr) .9fr; gap:6px; margin-bottom:6px;" class="subtle">
+            <span>Service</span><span>Code</span><span>Billed</span><span>Discount</span><span>Allowed</span><span>Plan paid</span><span>Deductible</span><span>Copay</span><span>Coinsurance</span><span>Not covered</span><span>Remarks</span>
+          </div>
+          {% for l in lines %}
+          <div style="display:grid; grid-template-columns:1.8fr .9fr repeat(8,1fr) .9fr; gap:6px; margin-bottom:6px;">
+            <input name="line_description" value="{{ l.description }}" placeholder="Service">
+            <input name="line_code" value="{{ l.service_code }}" placeholder="CPT">
+            <input name="line_billed" value="{{ l.billed|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_discount" value="{{ l.plan_discount|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_allowed" value="{{ l.allowed|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_plan_paid" value="{{ l.plan_paid|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_deductible" value="{{ l.deductible|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_copay" value="{{ l.copay|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_coinsurance" value="{{ l.coinsurance|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_not_covered" value="{{ l.not_covered|floatformat:'-2' }}" inputmode="decimal">
+            <input name="line_remarks" value="{{ l.remark_codes }}" placeholder="A1">
+          </div>
+          {% endfor %}
+          <template x-for="(row, i) in lines" :key="i">
+            <div style="display:grid; grid-template-columns:1.8fr .9fr repeat(8,1fr) .9fr; gap:6px; margin-bottom:6px;">
+              <input name="line_description" x-model="row.description" placeholder="Service">
+              <input name="line_code" x-model="row.code" placeholder="CPT">
+              <input name="line_billed" x-model="row.billed" inputmode="decimal">
+              <input name="line_discount" x-model="row.discount" inputmode="decimal">
+              <input name="line_allowed" x-model="row.allowed" inputmode="decimal">
+              <input name="line_plan_paid" x-model="row.plan_paid" inputmode="decimal">
+              <input name="line_deductible" x-model="row.deductible" inputmode="decimal">
+              <input name="line_copay" x-model="row.copay" inputmode="decimal">
+              <input name="line_coinsurance" x-model="row.coinsurance" inputmode="decimal">
+              <input name="line_not_covered" x-model="row.not_covered" inputmode="decimal">
+              <input name="line_remarks" x-model="row.remarks" placeholder="A1">
+            </div>
+          </template>
+        </div>
+      </div>
+    </c-card>
+
+    <c-card icon="info" title="Remark codes">
+      <c-slot name="actions">
+        <c-button type="button" size="sm" @click="remarks.push({code:'',text:''})"><c-icon name="plus" size="sm" /> Add code</c-button>
+      </c-slot>
+      <p class="subtle">The footnote legend that explains the adjustment codes used on the lines above.</p>
+      {% for r in remarks %}
+      <div style="display:grid; grid-template-columns:.4fr 2fr; gap:6px; margin-bottom:6px;">
+        <input name="remark_code" value="{{ r.code }}" placeholder="A1">
+        <input name="remark_text" value="{{ r.text }}" placeholder="Explanation">
+      </div>
+      {% endfor %}
+      <template x-for="(row, i) in remarks" :key="i">
+        <div style="display:grid; grid-template-columns:.4fr 2fr; gap:6px; margin-bottom:6px;">
+          <input name="remark_code" x-model="row.code" placeholder="A1">
+          <input name="remark_text" x-model="row.text" placeholder="Explanation">
+        </div>
+      </template>
+    </c-card>
+
+    <div class="row">
+      <c-button type="submit" variant="primary">{% if mode == 'edit' %}Save changes{% else %}Create claim{% endif %}</c-button>
+      <c-button variant="ghost" href="{% if encounter %}{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/{% else %}{{ ui_tenant_url }}health/claims/{% endif %}">Cancel</c-button>
+    </div>
+  </div>
+</form>
+{% endblock %}

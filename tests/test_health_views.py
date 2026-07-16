@@ -300,6 +300,45 @@ def test_visit_captures_insurance_and_copay(make_tenant, make_user, client):
         assert account_balance("accounts_payable") == D("0")
 
 
+def test_claim_create_via_view_generates_bill(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user, name="Claim HH", email="claim@h.test")
+    with schema_context(tenant.schema_name):
+        from apps.contacts.models import Person
+
+        patient = Person.objects.create(first_name="Cy", last_name="Press",
+                                        is_household_member=True)
+        provider = _org("UHC Clinic")
+        pid, prid = patient.pk, provider.pk
+    client.force_login(owner)
+
+    client.post(_c(tenant, "health/claims/new/"), {
+        "patient": pid, "service_date": "2026-05-01", "status": "processed", "network": "in",
+        "claim_number": "CLM-9", "provider_organization": prid,
+        "line_description": ["Office visit", "Lab"],
+        "line_code": ["99213", "80053"],
+        "line_billed": ["200", "100"], "line_discount": ["80", "40"],
+        "line_allowed": ["120", "60"], "line_plan_paid": ["90", "0"],
+        "line_deductible": ["0", "60"], "line_copay": ["30", "0"],
+        "line_coinsurance": ["0", "0"], "line_not_covered": ["0", "0"],
+        "line_remarks": ["A1", ""],
+        "remark_code": ["A1"], "remark_text": ["Applied to your copay"],
+    })
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import account_balance
+        from apps.health.models import MedicalClaim
+
+        claim = MedicalClaim.objects.get()
+        cid = claim.pk
+        assert claim.total_patient_responsibility == D("90")
+        assert claim.lines.count() == 2 and claim.remarks.count() == 1
+        assert claim.invoice_id is not None
+        assert account_balance("medical_expense") == D("90")
+        assert account_balance("accounts_payable") == D("90")
+
+    body = client.get(_c(tenant, f"health/claims/{cid}/")).content.decode()
+    assert "CLM-9" in body and "What you owe" in body
+
+
 # --- tenant isolation ------------------------------------------------------------------------
 
 def test_health_tenant_isolation(make_tenant, make_user, client):

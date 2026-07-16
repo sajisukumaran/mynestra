@@ -49,6 +49,7 @@
   <div x-data="{ tab: 'invoices' }">
     <c-tabs>
       <button type="button" class="tab" :class="{ active: tab === 'invoices' }" @click="tab = 'invoices'"><c-icon name="banknote" size="sm" /> Invoices {% if invoices %}<span class="tcount tnum">{{ invoices|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'claims' }" @click="tab = 'claims'"><c-icon name="file-text" size="sm" /> Claims {% if claims %}<span class="tcount tnum">{{ claims|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'people' }" @click="tab = 'people'"><c-icon name="users" size="sm" /> People {% if roster %}<span class="tcount tnum">{{ roster|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'documents' }" @click="tab = 'documents'"><c-icon name="file-text" size="sm" /> Documents {% if documents %}<span class="tcount tnum">{{ documents|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
@@ -86,6 +87,42 @@
         {% else %}
         <c-empty-state icon="banknote" title="No invoices yet" text="Add the provider invoices for this visit — facility, physician, radiology, lab. Each becomes a locked bill in Payables.">
           <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/invoices/new/"><c-icon name="plus" /> Add invoice</c-button>
+        </c-empty-state>
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Claims (EOB) #}
+    <div x-show="tab === 'claims'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="file-text" title="Insurance claims (EOB)">
+        <c-slot name="actions">
+          <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/claims/new/"><c-icon name="plus" size="sm" /> Add claim</c-button>
+        </c-slot>
+        {% if claims %}
+        <c-table>
+          <thead><tr><c-th>Claim</c-th><c-th>Provider</c-th><c-th>Status</c-th><th class="col-num">Billed</th><th class="col-num">Plan paid</th><th class="col-num">You owe</th></tr></thead>
+          <tbody>
+            {% for cl in claims %}
+            <tr>
+              <td><a href="{{ ui_tenant_url }}health/claims/{{ cl.pk }}/" class="strong">{{ cl.claim_number|default:cl.pk }}</a></td>
+              <td class="muted">{{ cl.provider_name|default:"—" }}</td>
+              <td>
+                {% if cl.status == 'processed' %}<c-badge variant="success">Processed</c-badge>
+                {% elif cl.status == 'denied' %}<c-badge variant="danger">Denied</c-badge>
+                {% elif cl.status == 'appealed' %}<c-badge variant="warning">Appealed</c-badge>
+                {% elif cl.status == 'in_process' %}<c-badge variant="info">In process</c-badge>
+                {% else %}<c-badge>Received</c-badge>{% endif %}
+              </td>
+              <td class="col-num"><c-money :amount="cl.total_billed" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+              <td class="col-num"><c-money :amount="cl.total_plan_paid" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+              <td class="col-num strong"><c-money :amount="cl.total_patient_responsibility" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="file-text" title="No claims yet" text="Log the insurer's Explanation of Benefits for this visit — the billed / allowed / plan-paid / you-owe breakdown.">
+          <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/claims/new/"><c-icon name="plus" /> Add claim</c-button>
         </c-empty-state>
         {% endif %}
       </c-card>

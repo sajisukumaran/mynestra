@@ -3,12 +3,15 @@
 from django.contrib import admin
 
 from apps.health.models import (
+    ClaimLine,
+    ClaimRemark,
     CopayRule,
     Encounter,
     EncounterProvider,
     HealthDocument,
     HealthPlan,
     InvoiceCharge,
+    MedicalClaim,
     Prescription,
     ProviderInvoice,
 )
@@ -57,6 +60,25 @@ class PrescriptionAdmin(admin.ModelAdmin):
                     "refills_remaining", "next_refill_date")
     list_filter = ("status",)
     date_hierarchy = "date"
+
+
+class ClaimLineInline(admin.TabularInline):
+    model = ClaimLine
+    extra = 0
+
+
+class ClaimRemarkInline(admin.TabularInline):
+    model = ClaimRemark
+    extra = 0
+
+
+@admin.register(MedicalClaim)
+class MedicalClaimAdmin(admin.ModelAdmin):
+    list_display = ("claim_number", "patient", "provider_name", "service_date", "status",
+                    "total_billed", "total_plan_paid", "total_patient_responsibility")
+    list_filter = ("status", "network")
+    date_hierarchy = "service_date"
+    inlines = [ClaimLineInline, ClaimRemarkInline]
 
 
 @admin.register(HealthDocument)

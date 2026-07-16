@@ -24,6 +24,8 @@ urlpatterns = [
     path("visits/<int:pk>/delete/", views.encounter_delete, name="visit-delete"),
     path("visits/<int:pk>/invoices/new/", views.invoice_create_for_visit,
          name="visit-invoice-create"),
+    path("visits/<int:pk>/claims/new/", views.claim_create_for_visit,
+         name="visit-claim-create"),
     path("visits/<int:pk>/documents/new/", views.encounter_document_upload,
          name="visit-document-upload"),
 
@@ -43,6 +45,15 @@ urlpatterns = [
     path("invoices/<int:pk>/refund/", views.invoice_refund, name="invoice-refund"),
     path("invoices/<int:pk>/documents/new/", views.invoice_document_upload,
          name="invoice-document-upload"),
+
+    # Medical claims (EOB)
+    path("claims/", views.claim_list, name="claims"),
+    path("claims/new/", views.claim_create, name="claim-create"),
+    path("claims/<int:pk>/", views.claim_detail, name="claim-detail"),
+    path("claims/<int:pk>/edit/", views.claim_edit, name="claim-edit"),
+    path("claims/<int:pk>/delete/", views.claim_delete, name="claim-delete"),
+    path("claims/<int:pk>/documents/new/", views.claim_document_upload,
+         name="claim-document-upload"),
 
     # Prescriptions
     path("prescriptions/", views.prescription_list, name="prescriptions"),
