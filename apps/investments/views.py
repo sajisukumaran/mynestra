@@ -793,9 +793,15 @@ def _apply_txn_post(request, txn):
     lot_rows = _parse_lot_carry(request) if t == InvTxnType.IN_KIND_IN else []
 
     # Per-type required-field guards.
-    if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.CASH_IN_LIEU,
+    if t in (InvTxnType.BUY, InvTxnType.SELL,
              InvTxnType.DIVIDEND_REINVEST, InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER):
         if security is None or quantity <= 0 or amount <= 0:
+            return None
+    elif t == InvTxnType.CASH_IN_LIEU:
+        # Cash received for a fractional share. Quantity is OPTIONAL: enter the fraction to sell it
+        # out of the position (realizing the gain/loss on that sliver's cost basis), or leave it
+        # blank/0 to keep the share count and book the whole amount as a realized gain.
+        if security is None or amount <= 0:
             return None
     elif t == InvTxnType.DIV_PAID_SHORT:
         if security is None or amount <= 0:  # substitute dividend paid on the shorted security

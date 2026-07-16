@@ -89,8 +89,8 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
 {# Sell — cost basis note #}
 <div x-show="type === 'sell'" x-cloak><c-hint icon="info">Lots are sold first-in, first-out; the realized gain posts to Realized Capital Gain/Loss.</c-hint></div>
 
-{# Cash in lieu — a fractional-share sale (e.g. from a spin-off / merger) #}
-<div x-show="type === 'cash_in_lieu'" x-cloak><c-hint icon="info">Cash received for a fractional share (e.g. after a spin-off). It's a small sale — enter the fractional quantity and the cash amount; the gain/loss against that fraction's cost basis posts to Realized Capital Gain/Loss. Picking the security fills in the fractional part of your holding.</c-hint></div>
+{# Cash in lieu — a fractional-share sale (e.g. from a split / spin-off / merger) #}
+<div x-show="type === 'cash_in_lieu'" x-cloak><c-hint icon="info">Cash received for a fractional share (e.g. after a split or spin-off). <strong>Quantity is optional:</strong> enter the fractional quantity to sell that sliver out of your position (the gain/loss on its cost basis posts to Realized Capital Gain/Loss), or leave it blank to keep your share count and book the whole amount as a realized gain. Picking the security fills in the fractional part of your holding, if any.</c-hint></div>
 
 {# Split ratio #}
 <div x-show="type === 'split'" x-cloak>

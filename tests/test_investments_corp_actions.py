@@ -404,3 +404,43 @@ def test_cash_in_lieu_behaves_like_a_sell(make_tenant):
         assert cil.realized_gain == D("40")            # proceeds 140 - cost 100 (2 @ 50)
         assert next(h for h in holdings(acct) if h.security.id == s.id).quantity == D("8")
         assert _inv(acct)
+
+
+def test_cash_in_lieu_without_quantity_keeps_shares_and_books_full_gain(make_tenant):
+    """The 'I just received cash' case (GOOG CL C statement): a cash-in-lieu with NO quantity
+    consumes no lots, leaves the share count untouched, and books the whole amount as a realized
+    gain. The invariant still holds (cash +amount, gl node +amount, Σ cost unchanged)."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        s = _sec("GOOG")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=s, qty="10", price="50", amount="500")
+        cash_before = cash_balance(acct)
+        cil = _add(acct, InvTxnType.CASH_IN_LIEU, MAR, security=s, qty="0", amount="7.64")
+        assert cil.realized_gain == D("7.64")          # no cost consumed → all proceeds are gain
+        assert next(h for h in holdings(acct) if h.security.id == s.id).quantity == D("10")
+        assert len(_open(acct, s)) == 1                 # the 10-share lot is untouched
+        acct.refresh_from_db()
+        assert cash_balance(acct) == cash_before + D("7.64")
+        assert _inv(acct)
+
+
+def test_cash_in_lieu_view_accepts_blank_quantity(make_tenant, make_user, client):
+    """Regression for the form guard: the Cash-in-Lieu form no longer forces a quantity — a blank
+    quantity is accepted and books the cash as a realized gain without touching the position."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        acct = _account(org=_brokerage())
+        s = _sec("GOOG")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=s, qty="10", price="50", amount="500")
+        aid, sid = acct.pk, s.pk
+    client.force_login(owner)
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "cash_in_lieu", "date": "2026-03-02", "security": sid, "amount": "7.64"})
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        cil = InvestmentTransaction.objects.get(account_id=aid, txn_type="cash_in_lieu")
+        assert cil.quantity == D("0") and cil.realized_gain == D("7.64")
+        assert next(h for h in holdings(acct) if h.security.id == sid).quantity == D("10")
+        assert _inv(acct)

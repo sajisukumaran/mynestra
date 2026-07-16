@@ -21,10 +21,14 @@
     var num = function (v) { return parseFloat(v) || 0; };
     var t = s.type, a = num(s.amount), q = num(s.quantity);
     if (!s.date) return 'Pick a date.';
-    if (['buy', 'sell', 'cash_in_lieu', 'dividend_reinvest', 'sell_short', 'buy_to_cover'].includes(t)) {
+    if (['buy', 'sell', 'dividend_reinvest', 'sell_short', 'buy_to_cover'].includes(t)) {
       if (!s.security) return 'Pick a security.';
       if (q <= 0) return 'Enter a quantity above 0.';
       if (a <= 0) return 'Enter an amount above 0.';
+    } else if (t === 'cash_in_lieu') {
+      // Quantity is optional: 0 / blank keeps the share count and books the whole amount as a gain.
+      if (!s.security) return 'Pick a security.';
+      if (a <= 0) return 'Enter the cash amount received.';
     } else if (t === 'in_kind_out') {
       if (!s.security) return 'Pick a security.';
       if (q <= 0) return 'Enter a quantity above 0.';
