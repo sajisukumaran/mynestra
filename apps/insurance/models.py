@@ -32,6 +32,8 @@ class PolicyType(models.TextChoices):
     HOME = "home", "Homeowners"
     RENTERS = "renters", "Renters"
     HEALTH = "health", "Health"
+    DENTAL = "dental", "Dental"
+    VISION = "vision", "Vision"
     LIFE = "life", "Life"
     UMBRELLA = "umbrella", "Umbrella / liability"
     DISABILITY = "disability", "Disability"
@@ -94,6 +96,8 @@ POLICY_TYPE_TINT = {
     PolicyType.HOME: "teal",
     PolicyType.RENTERS: "emerald",
     PolicyType.HEALTH: "rose",
+    PolicyType.DENTAL: "sky",
+    PolicyType.VISION: "violet",
     PolicyType.LIFE: "violet",
     PolicyType.UMBRELLA: "indigo",
     PolicyType.DISABILITY: "amber",
@@ -109,6 +113,8 @@ POLICY_TYPE_GLYPH = {
     PolicyType.HOME: "house",
     PolicyType.RENTERS: "key-round",
     PolicyType.HEALTH: "activity",
+    PolicyType.DENTAL: "activity",
+    PolicyType.VISION: "activity",
     PolicyType.LIFE: "heart",
     PolicyType.UMBRELLA: "shield-check",
     PolicyType.DISABILITY: "user-round",

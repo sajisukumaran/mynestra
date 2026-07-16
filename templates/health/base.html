@@ -13,6 +13,7 @@
       <c-sidebar-item label="Visits" icon="calendar-days" count="{{ nav_visits }}" href="{{ ui_tenant_url }}health/visits/" {% if active == 'visits' %}active="true"{% endif %} />
       <c-sidebar-item label="Invoices" icon="banknote" count="{{ nav_invoices }}" href="{{ ui_tenant_url }}health/invoices/" {% if active == 'invoices' %}active="true"{% endif %} />
       <c-sidebar-item label="By provider" icon="users" href="{{ ui_tenant_url }}health/providers/" {% if active == 'providers' %}active="true"{% endif %} />
+      <c-sidebar-item label="Plans" icon="shield-check" href="{{ ui_tenant_url }}health/plans/" {% if active == 'plans' %}active="true"{% endif %} />
       <c-slot name="foot">
         <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
         {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}

@@ -86,6 +86,18 @@ def _decimal(raw):
         return None
 
 
+def _int(raw, default, *, lo=None, hi=None):
+    try:
+        val = int((raw or "").strip())
+    except (ValueError, TypeError):
+        return default
+    if lo is not None:
+        val = max(lo, val)
+    if hi is not None:
+        val = min(hi, val)
+    return val
+
+
 # --- shared pick-lists -----------------------------------------------------------------------
 
 def _people():
@@ -168,9 +180,14 @@ def dashboard(request):
         if inv.is_overdue
     ]
     overdue.sort(key=lambda i: i.due_date)
+    from apps.health.services import active_health_plans, deductible_oop_status
+
+    plan_cards = [
+        {"policy": p, "status": deductible_oop_status(p)} for p in active_health_plans()
+    ]
     ctx = health_context(
         request, "dashboard", base=base_currency(),
-        recent_visits=recent_visits, overdue=overdue[:8], **stats,
+        recent_visits=recent_visits, overdue=overdue[:8], plan_cards=plan_cards, **stats,
     )
     return render(request, "health/dashboard.html", ctx)
 
@@ -597,6 +614,92 @@ def invoice_refund(request, pk):
             except ValueError:
                 pass
     return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+# --- Plans & benefits (P2) ------------------------------------------------------------------
+
+def _health_policy_types():
+    from apps.insurance.models import PolicyType
+
+    return [PolicyType.HEALTH, PolicyType.DENTAL, PolicyType.VISION]
+
+
+def plans_list(request):
+    from apps.health.services import active_health_plans, deductible_oop_status
+    from apps.insurance.models import InsurancePolicy
+
+    policies = list(
+        InsurancePolicy.objects.filter(policy_type__in=_health_policy_types())
+        .select_related("insurer_organization", "insurer_person", "health_plan")
+        .order_by("-id")
+    )
+    rows = []
+    for p in policies:
+        hp = getattr(p, "health_plan", None)
+        rows.append({"policy": p, "plan": hp,
+                     "status": deductible_oop_status(p) if hp else None})
+    ctx = health_context(
+        request, "plans", base=base_currency(),
+        rows=rows, plans_count=len(active_health_plans()),
+    )
+    return render(request, "health/plans_list.html", ctx)
+
+
+def plan_edit(request, pk):
+    from apps.health.models import HealthPlan
+    from apps.insurance.models import InsurancePolicy
+
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    hp = getattr(policy, "health_plan", None)
+    if request.method == "POST":
+        g = request.POST.get
+
+        def _m(key):
+            return _decimal(g(key)) or Decimal("0")
+
+        defaults = {
+            "plan_year_start_month": _int(g("plan_year_start_month"), 1, lo=1, hi=12),
+            "plan_year_start_day": _int(g("plan_year_start_day"), 1, lo=1, hi=31),
+            "network": g("network", "").strip(),
+            "deductible_individual": _m("deductible_individual"),
+            "deductible_family": _m("deductible_family"),
+            "oop_max_individual": _m("oop_max_individual"),
+            "oop_max_family": _m("oop_max_family"),
+            "coinsurance_pct": _m("coinsurance_pct"),
+            "dental_annual_max": _decimal(g("dental_annual_max")),
+            "vision_allowance": _decimal(g("vision_allowance")),
+        }
+        hp, _ = HealthPlan.objects.update_or_create(policy=policy, defaults=defaults)
+        _save_copay_rules(request, hp)
+        return redirect(tenant_url(request, "health/plans/"))
+    ctx = health_context(
+        request, "plans", policy=policy, plan=hp,
+        copay_rows=list(hp.copay_rules.all()) if hp else [],
+        months=[(i, datetime.date(2000, i, 1).strftime("%B")) for i in range(1, 13)],
+        **_form_context(request),
+    )
+    return render(request, "health/plan_form.html", ctx)
+
+
+def _save_copay_rules(request, hp):
+    from apps.health.models import CopayRule
+
+    sts = request.POST.getlist("copay_service")
+    amts = request.POST.getlist("copay_amount")
+    notes = request.POST.getlist("copay_note")
+    hp.copay_rules.all().delete()
+    seen, order = set(), 0
+    for i, raw in enumerate(sts):
+        st = (raw or "").strip()
+        if not st or st in seen:
+            continue
+        seen.add(st)
+        CopayRule.objects.create(
+            plan=hp, service_type=st,
+            copay_amount=_decimal(amts[i] if i < len(amts) else "") or Decimal("0"),
+            note=(notes[i] if i < len(notes) else "").strip(), order=order,
+        )
+        order += 1
 
 
 # --- Documents ------------------------------------------------------------------------------

@@ -164,6 +164,8 @@ CHART_OF_ACCOUNTS = [
     ("5520", "Life Insurance", EXPENSE, "5500", True, "life_insurance"),
     ("5530", "Umbrella / Liability Insurance", EXPENSE, "5500", True, "umbrella_insurance"),
     ("5540", "Renters Insurance", EXPENSE, "5500", True, "renters_insurance"),
+    ("5550", "Dental Insurance", EXPENSE, "5500", True, "dental_insurance"),
+    ("5560", "Vision Insurance", EXPENSE, "5500", True, "vision_insurance"),
     ("5590", "Other Insurance", EXPENSE, "5500", True, "other_insurance"),
     ("5600", "Education", EXPENSE, "5000", True, ""),
     ("5700", "Personal & Lifestyle", EXPENSE, "5000", True, ""),

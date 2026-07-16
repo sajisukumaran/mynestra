@@ -228,12 +228,167 @@ def _recompute_encounter(enc: Encounter | None) -> None:
         enc.save(update_fields=[*dirty, "updated_at"])
 
 
+# --- Insurance plan linkage (P2) -------------------------------------------------------------
+
+# EncounterType → the insurance PolicyType a plan must be to cover it.
+def _encounter_to_policy_type():
+    from apps.insurance.models import PolicyType
+
+    return {
+        EncounterType.MEDICAL: PolicyType.HEALTH,
+        EncounterType.HOSPITAL: PolicyType.HEALTH,
+        EncounterType.DENTAL: PolicyType.DENTAL,
+        EncounterType.VISION: PolicyType.VISION,
+    }
+
+
+def active_health_plan(patient, *, on_date=None, encounter_type=None):
+    """The active insurance policy (carrying a HealthPlan) that covers `patient` for the given
+    `encounter_type` on `on_date` — used to auto-link an encounter. Prefers the type-matching
+    policy; returns None if none applies. A pure read."""
+    from apps.insurance.models import COVERED_ROLES, InsurancePolicy, PolicyStatus
+
+    on_date = on_date or datetime.date.today()
+    qs = InsurancePolicy.objects.filter(
+        status=PolicyStatus.ACTIVE,
+        health_plan__isnull=False,
+        members__person=patient,
+        members__role__in=list(COVERED_ROLES),
+    ).distinct()
+    ptype = _encounter_to_policy_type().get(encounter_type) if encounter_type else None
+    if ptype is not None:
+        qs = qs.filter(policy_type=ptype)
+    for policy in qs.order_by("-effective_date", "-id"):
+        if policy.effective_date and policy.effective_date > on_date:
+            continue
+        if policy.expiry_date and policy.expiry_date < on_date:
+            continue
+        return policy
+    return None
+
+
+def _meter(label: str, used, limit, *, kind="deductible", person=None) -> dict:
+    """A single accumulator meter row for the deductible / OOP display."""
+    used = used or ZERO
+    limit = limit or ZERO
+    pct = int(min(Decimal("100"), (used / limit * 100))) if limit > ZERO else 0
+    return {
+        "label": label, "kind": kind, "person": person,
+        "used": used, "limit": limit, "pct": pct,
+        "remaining": (limit - used) if limit > used else ZERO,
+        "met": limit > ZERO and used >= limit,
+    }
+
+
+def deductible_oop_status(policy, *, as_of=None) -> dict | None:
+    """The deductible / out-of-pocket accumulator for an insurance policy's HealthPlan (twin of
+    `investments.contribution_limit_status`). Sums each covered person's EOB charges over the plan-
+    year window: `deductible_used` = Σ deductible_amount (applies_to_deductible); `oop_used` =
+    Σ (deductible + copay + coinsurance) (applies_to_oop). Family = the sum across covered persons;
+    an individual counts as met when their OWN or the FAMILY aggregate reaches its limit
+    (individual-embedded-in-family). Dental annual-max / vision allowance = Σ insurance_paid vs the
+    benefit cap. Returns a `{plan, window, meters, family, persons}` bundle, or None with no
+    HealthPlan. Posts nothing — a pure read."""
+    hp = getattr(policy, "health_plan", None)
+    if hp is None:
+        return None
+    start, end = hp.plan_year_window(as_of)
+    from apps.health.models import InvoiceCharge
+
+    def _charges(person=None):
+        qs = InvoiceCharge.objects.filter(
+            invoice__encounter__plan=policy,
+            invoice__invoice_date__gte=start,
+            invoice__invoice_date__lte=end,
+        )
+        if person is not None:
+            qs = qs.filter(invoice__encounter__patient=person)
+        return qs
+
+    from apps.insurance.models import COVERED_ROLES
+
+    covered = list(
+        policy.members.filter(role__in=list(COVERED_ROLES)).select_related("person")
+    )
+    seen, persons = set(), []
+    fam_ded_used = fam_oop_used = ZERO
+    for m in covered:
+        if m.person_id in seen:
+            continue
+        seen.add(m.person_id)
+        ded = oop = ZERO
+        for c in _charges(m.person):
+            if c.applies_to_deductible:
+                ded += c.deductible_amount or ZERO
+            if c.applies_to_oop:
+                oop += (c.deductible_amount or ZERO) + (c.copay_amount or ZERO) \
+                    + (c.coinsurance_amount or ZERO)
+        fam_ded_used += ded
+        fam_oop_used += oop
+        persons.append({"person": m.person, "deductible_used": ded, "oop_used": oop})
+
+    fam_ded_limit = hp.deductible_family or ZERO
+    fam_oop_limit = hp.oop_max_family or ZERO
+    ind_ded_limit = hp.deductible_individual or ZERO
+    ind_oop_limit = hp.oop_max_individual or ZERO
+
+    # Individual-embedded-in-family: an individual limit also counts as met once the FAMILY
+    # aggregate reaches its cap, even if that person's own spend hasn't.
+    fam_ded_met = fam_ded_limit > ZERO and fam_ded_used >= fam_ded_limit
+    fam_oop_met = fam_oop_limit > ZERO and fam_oop_used >= fam_oop_limit
+
+    meters = []
+    if fam_ded_limit > ZERO:
+        meters.append(_meter("Family deductible", fam_ded_used, fam_ded_limit))
+    if fam_oop_limit > ZERO:
+        meters.append(_meter("Family out-of-pocket max", fam_oop_used, fam_oop_limit, kind="oop"))
+    for row in persons:
+        p = row["person"]
+        name = getattr(p, "display_name", "") or str(p)
+        if ind_ded_limit > ZERO:
+            mt = _meter(f"{name} — deductible", row["deductible_used"], ind_ded_limit, person=p)
+            mt["met"] = mt["met"] or fam_ded_met
+            meters.append(mt)
+        if ind_oop_limit > ZERO:
+            mt = _meter(f"{name} — out-of-pocket", row["oop_used"], ind_oop_limit,
+                        kind="oop", person=p)
+            mt["met"] = mt["met"] or fam_oop_met
+            meters.append(mt)
+
+    # Benefit caps (dental annual max / vision allowance) — Σ what the plan PAID this year.
+    paid_total = sum((c.insurance_paid or ZERO for c in _charges()), ZERO)
+    dental = vision = None
+    if hp.dental_annual_max:
+        dental = _meter("Dental benefit used", paid_total, hp.dental_annual_max, kind="benefit")
+        meters.append(dental)
+    if hp.vision_allowance:
+        vision = _meter("Vision allowance used", paid_total, hp.vision_allowance, kind="benefit")
+        meters.append(vision)
+
+    return {
+        "plan": hp, "policy": policy, "window": (start, end), "meters": meters,
+        "persons": persons, "dental": dental, "vision": vision,
+        "family": {
+            "deductible_used": fam_ded_used, "deductible_limit": fam_ded_limit,
+            "oop_used": fam_oop_used, "oop_limit": fam_oop_limit,
+        },
+    }
+
+
 # --- Encounter orchestration -----------------------------------------------------------------
 
 @transaction.atomic
 def save_encounter(enc: Encounter, *, user=None, is_new=True):
     """Persist a visit and refresh its rollups. The caller has saved the encounter row (so it has a
-    pk); this recomputes the denormalized totals from whatever invoices it currently groups."""
+    pk). Auto-links the visit to the patient's active health plan (P2) when one isn't set, then
+    recomputes the denormalized totals from whatever invoices it currently groups."""
+    if enc.plan_id is None and enc.patient_id:
+        plan = active_health_plan(
+            enc.patient, on_date=enc.date, encounter_type=enc.encounter_type
+        )
+        if plan is not None:
+            enc.plan = plan
+            enc.save(update_fields=["plan", "updated_at"])
     _recompute_encounter(enc)
     return enc
 
@@ -300,6 +455,17 @@ def save_invoice(inv: ProviderInvoice, *, user=None, is_new=True) -> list[dict]:
         # Not on the books yet — tear down any prior accrual (only if no foreign payment).
         if inv.bill_id is not None:
             _teardown_bill(inv, user=user)
+        _recompute_encounter(inv.encounter)
+        return warnings
+
+    if inv.amount_due <= ZERO:
+        # Nothing for the patient to pay (e.g. a fully insurance-covered service) — no bill to
+        # accrue, but the invoice + its EOB charges are kept (they feed deductible/OOP tracking).
+        if inv.bill_id is not None:
+            _teardown_bill(inv, user=user)
+        if inv.status not in (InvoiceStatus.DISPUTED, InvoiceStatus.WRITTEN_OFF, InvoiceStatus.PAID):
+            inv.status = InvoiceStatus.PAID
+            inv.save(update_fields=["status", "updated_at"])
         _recompute_encounter(inv.encounter)
         return warnings
 
@@ -642,6 +808,18 @@ def dashboard_stats() -> dict:
         "by_provider": outstanding_by_provider(),
         "recent_payments": recent_payments(),
     }
+
+
+def active_health_plans():
+    """Active insurance policies that carry a HealthPlan (medical / dental / vision) — the
+    household's live benefit plans. Drives the Health insurance read-through + the OOP meters."""
+    from apps.insurance.models import InsurancePolicy, PolicyStatus
+
+    return list(
+        InsurancePolicy.objects.filter(
+            status=PolicyStatus.ACTIVE, health_plan__isnull=False
+        ).select_related("health_plan", "insurer_organization", "insurer_person")
+    )
 
 
 def launcher_counts() -> list[dict]:

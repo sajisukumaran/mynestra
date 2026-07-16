@@ -1,0 +1,67 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Cost-sharing{% endblock %}
+
+{% block hl %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/plans/">Plans</a><c-icon name="chevron-right" />
+  <span class="strong">{{ policy.display }}</span>
+</c-breadcrumb>
+
+<c-page-header title="Cost-sharing — {{ policy.display }}"
+               subtitle="{{ policy.type_label }} · {{ policy.insurer_name }}. Deductible / OOP / copays are a pure overlay — they post nothing." />
+
+<form method="post" x-data="{ copays: [] }">{% csrf_token %}
+  <div class="stack-20">
+    <c-card icon="sliders-horizontal" title="Plan year & cost-sharing">
+      <div class="form-grid">
+        <c-field label="Plan year starts" help="Benefit-year reset.">
+          <div class="control is-select">
+            <select name="plan_year_start_month">{% for i, name in months %}<option value="{{ i }}"{% if plan and plan.plan_year_start_month == i or not plan and i == 1 %} selected{% endif %}>{{ name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Day"><div class="control"><input name="plan_year_start_day" inputmode="numeric" value="{% if plan %}{{ plan.plan_year_start_day }}{% else %}1{% endif %}"></div></c-field>
+        <c-field label="Network"><c-input name="network" value="{% if plan %}{{ plan.network }}{% endif %}" placeholder="PPO / HMO / EPO" /></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Deductible — individual"><div class="control"><input name="deductible_individual" inputmode="decimal" value="{% if plan %}{{ plan.deductible_individual|floatformat:'-2' }}{% endif %}" placeholder="0.00"></div></c-field>
+        <c-field label="Deductible — family"><div class="control"><input name="deductible_family" inputmode="decimal" value="{% if plan %}{{ plan.deductible_family|floatformat:'-2' }}{% endif %}" placeholder="0.00"></div></c-field>
+        <c-field label="Coinsurance %" help="What you pay after the deductible."><div class="control"><input name="coinsurance_pct" inputmode="decimal" value="{% if plan %}{{ plan.coinsurance_pct|floatformat:'-2' }}{% endif %}" placeholder="0"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Out-of-pocket max — individual"><div class="control"><input name="oop_max_individual" inputmode="decimal" value="{% if plan %}{{ plan.oop_max_individual|floatformat:'-2' }}{% endif %}" placeholder="0.00"></div></c-field>
+        <c-field label="Out-of-pocket max — family"><div class="control"><input name="oop_max_family" inputmode="decimal" value="{% if plan %}{{ plan.oop_max_family|floatformat:'-2' }}{% endif %}" placeholder="0.00"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Dental annual max" help="Benefit cap (dental plans)."><div class="control"><input name="dental_annual_max" inputmode="decimal" value="{% if plan and plan.dental_annual_max is not None %}{{ plan.dental_annual_max|floatformat:'-2' }}{% endif %}" placeholder="—"></div></c-field>
+        <c-field label="Vision allowance" help="Benefit cap (vision plans)."><div class="control"><input name="vision_allowance" inputmode="decimal" value="{% if plan and plan.vision_allowance is not None %}{{ plan.vision_allowance|floatformat:'-2' }}{% endif %}" placeholder="—"></div></c-field>
+      </div>
+    </c-card>
+
+    <c-card icon="banknote" title="Copays by service type">
+      <c-slot name="actions"><c-button type="button" size="sm" @click="copays.push({service:'',amount:'',note:''})"><c-icon name="plus" size="sm" /> Add copay</c-button></c-slot>
+      {% for c in copay_rows %}
+      <div class="form-grid" style="margin-bottom:8px;">
+        <input name="copay_service" value="{{ c.service_type }}" placeholder="e.g. Office visit">
+        <input name="copay_amount" value="{{ c.copay_amount|floatformat:'-2' }}" inputmode="decimal" placeholder="0.00">
+        <input name="copay_note" value="{{ c.note }}" placeholder="Note">
+      </div>
+      {% endfor %}
+      <template x-for="(row, i) in copays" :key="i">
+        <div class="form-grid" style="margin-bottom:8px;">
+          <input name="copay_service" x-model="row.service" placeholder="e.g. Specialist">
+          <input name="copay_amount" x-model="row.amount" inputmode="decimal" placeholder="0.00">
+          <div class="row"><input name="copay_note" x-model="row.note" placeholder="Note"><c-button type="button" icon_only size="sm" variant="ghost" @click="copays.splice(i,1)"><c-icon name="x" size="sm" /></c-button></div>
+        </div>
+      </template>
+    </c-card>
+
+    <div class="row">
+      <c-button type="submit" variant="primary">Save cost-sharing</c-button>
+      <c-button variant="ghost" href="{{ ui_tenant_url }}health/plans/">Cancel</c-button>
+    </div>
+  </div>
+</form>
+{% endblock %}

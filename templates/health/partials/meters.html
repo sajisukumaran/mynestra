@@ -1,0 +1,15 @@
+{% comment %}Deductible / OOP / benefit accumulator meters. Expects `status` (the
+deductible_oop_status bundle) with a `meters` list of {label, used, limit, pct, met}.{% endcomment %}
+{% if status and status.meters %}
+<div class="stack-12">
+  {% for m in status.meters %}
+  <c-meter :value="m.used" :max="m.limit" tint="{% if m.met %}success{% elif m.pct >= 80 %}warning{% endif %}">
+    <span>{{ m.label }}</span>
+    <span class="tnum"><c-money :amount="m.used" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> / <c-money :amount="m.limit" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span>
+  </c-meter>
+  {% endfor %}
+  <p class="subtle">Plan year {{ status.window.0|date:'d M Y' }} – {{ status.window.1|date:'d M Y' }}.</p>
+</div>
+{% else %}
+<c-empty-state icon="pie-chart" title="No accumulators yet" text="Set deductible / out-of-pocket limits on the plan to see live meters." />
+{% endif %}

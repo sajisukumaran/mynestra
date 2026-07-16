@@ -51,6 +51,24 @@
     </c-card>
   </div>
 
+  {% if plan_cards %}
+  <c-card icon="shield-check" title="Insurance & benefits">
+    <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/plans/">Manage plans</c-button></c-slot>
+    <div class="stack-16">
+      {% for pc in plan_cards %}
+      <div>
+        <div class="row wrap" style="justify-content:space-between;">
+          <span class="row"><c-avatar tint="{{ pc.policy.type_tint }}" size="sm" square><c-icon name="{{ pc.policy.type_glyph }}" size="sm" /></c-avatar> <a href="{{ ui_tenant_url }}health/plans/{{ pc.policy.pk }}/edit/" class="strong">{{ pc.policy.display }}</a> <c-chip tint="{{ pc.policy.type_tint }}">{{ pc.policy.type_label }}</c-chip></span>
+        </div>
+        {% if pc.status and pc.status.meters %}
+        <div style="margin-top:10px;">{% include "health/partials/meters.html" with status=pc.status %}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </c-card>
+  {% endif %}
+
   <div class="grid-2">
     <c-card icon="clock" title="Recent visits">
       {% for e in recent_visits %}

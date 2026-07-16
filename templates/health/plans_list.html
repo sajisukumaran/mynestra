@@ -1,0 +1,46 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Plans{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" /><span class="strong">Plans</span></c-breadcrumb>
+
+<c-page-header title="Plans & benefits" subtitle="Medical, dental & vision insurance — cost-sharing, deductibles and out-of-pocket meters.">
+  <c-slot name="actions">
+    <c-button href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" /> New policy</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <c-hint icon="info">Health plans are insurance policies (managed in the Insurance module). Here you add the cost-sharing overlay — deductible, out-of-pocket max, copays — that drives the accumulator meters. Invoices on a covered visit link to the plan automatically.</c-hint>
+
+  {% if rows %}
+  {% for r in rows %}
+  <c-card>
+    <div class="row wrap" style="justify-content:space-between; align-items:flex-start;">
+      <div class="row">
+        <c-avatar size="lg" square tint="{{ r.policy.type_tint }}"><c-icon name="{{ r.policy.type_glyph }}" size="lg" /></c-avatar>
+        <div>
+          <div class="row wrap"><span class="strong">{{ r.policy.display }}</span><c-chip tint="{{ r.policy.type_tint }}">{{ r.policy.type_label }}</c-chip>{% if not r.policy.is_active %}<c-badge variant="warning">{{ r.policy.status_label }}</c-badge>{% endif %}</div>
+          <div class="muted">{% if r.policy.insurer_name %}{{ r.policy.insurer_name }}{% endif %}{% if r.plan and r.plan.network %} · {{ r.plan.network }}{% endif %}</div>
+        </div>
+      </div>
+      <div class="row">
+        <c-button size="sm" href="{{ ui_tenant_url }}insurance/policies/{{ r.policy.pk }}/">Policy</c-button>
+        <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}health/plans/{{ r.policy.pk }}/edit/"><c-icon name="sliders-horizontal" size="sm" /> {% if r.plan %}Edit cost-sharing{% else %}Set up cost-sharing{% endif %}</c-button>
+      </div>
+    </div>
+    {% if r.status %}
+    <div style="margin-top:16px;">{% include "health/partials/meters.html" with status=r.status %}</div>
+    {% elif r.plan %}
+    <p class="subtle" style="margin-top:12px;">Cost-sharing set; no deductible / OOP limits entered yet.</p>
+    {% endif %}
+  </c-card>
+  {% endfor %}
+  {% else %}
+  <c-empty-state icon="shield-check" title="No medical / dental / vision policies yet"
+    text="Add a health, dental or vision policy in the Insurance module, then set up its cost-sharing here.">
+    <c-button variant="primary" href="{{ ui_tenant_url }}insurance/policies/new/"><c-icon name="plus" /> New policy</c-button>
+  </c-empty-state>
+  {% endif %}
+</div>
+{% endblock %}

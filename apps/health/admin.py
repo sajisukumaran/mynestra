@@ -3,9 +3,11 @@
 from django.contrib import admin
 
 from apps.health.models import (
+    CopayRule,
     Encounter,
     EncounterProvider,
     HealthDocument,
+    HealthPlan,
     InvoiceCharge,
     ProviderInvoice,
 )
@@ -14,6 +16,17 @@ from apps.health.models import (
 class EncounterProviderInline(admin.TabularInline):
     model = EncounterProvider
     extra = 0
+
+
+class CopayRuleInline(admin.TabularInline):
+    model = CopayRule
+    extra = 0
+
+
+@admin.register(HealthPlan)
+class HealthPlanAdmin(admin.ModelAdmin):
+    list_display = ("policy", "deductible_individual", "deductible_family", "oop_max_individual")
+    inlines = [CopayRuleInline]
 
 
 class InvoiceChargeInline(admin.TabularInline):

@@ -10,6 +10,10 @@ urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("providers/", views.providers, name="providers"),
 
+    # Plans & benefits (cost-sharing overlay on insurance policies)
+    path("plans/", views.plans_list, name="plans"),
+    path("plans/<int:pk>/edit/", views.plan_edit, name="plan-edit"),
+
     # Visits (encounters)
     path("visits/", views.encounter_list, name="visits"),
     path("visits/new/", views.encounter_create, name="visit-create"),

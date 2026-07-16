@@ -50,6 +50,8 @@ POLICY_TYPE_ACCOUNT = {
     PolicyType.HOME: "home_insurance",          # 5150
     PolicyType.RENTERS: "renters_insurance",    # 5540
     PolicyType.HEALTH: "health_insurance",      # 5510
+    PolicyType.DENTAL: "dental_insurance",      # 5550
+    PolicyType.VISION: "vision_insurance",      # 5560
     PolicyType.LIFE: "life_insurance",          # 5520
     PolicyType.UMBRELLA: "umbrella_insurance",  # 5530
     PolicyType.DISABILITY: "other_insurance",   # 5590

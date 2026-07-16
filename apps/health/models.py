@@ -551,6 +551,75 @@ class HealthDocument(TimeStampedModel):
         return os.path.basename(self.file.name) if self.file else ""
 
 
+class HealthPlan(TimeStampedModel):
+    """Cost-sharing satellite for a medical / dental / vision insurance policy (Plan D, P2) — a
+    OneToOne on `insurance.InsurancePolicy`, keeping the policy generic. Carries the plan-year
+    window and the deductible / out-of-pocket / coinsurance / dental-max / vision-allowance figures
+    that drive the deductible & OOP accumulator meters. Posts nothing (a pure overlay)."""
+
+    policy = models.OneToOneField(
+        "insurance.InsurancePolicy", on_delete=models.CASCADE, related_name="health_plan"
+    )
+    # Plan-year window (benefit year). Defaults to the calendar year (Jan 1).
+    plan_year_start_month = models.PositiveSmallIntegerField(default=1)
+    plan_year_start_day = models.PositiveSmallIntegerField(default=1)
+
+    network = models.CharField(max_length=80, blank=True)  # e.g. PPO / HMO / EPO
+
+    deductible_individual = _money(default=ZERO)
+    deductible_family = _money(default=ZERO)
+    oop_max_individual = _money(default=ZERO)
+    oop_max_family = _money(default=ZERO)
+    coinsurance_pct = models.DecimalField(  # the % the patient pays after the deductible
+        max_digits=5, decimal_places=2, default=ZERO
+    )
+
+    dental_annual_max = _money(null=True, blank=True)  # a benefit cap (Σ insurance_paid vs this)
+    vision_allowance = _money(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-id"]
+
+    def __str__(self) -> str:
+        return f"Health plan · {self.policy.display}"
+
+    def plan_year_window(self, as_of: datetime.date | None = None):
+        """The [start, end] dates of the plan year containing `as_of` (default today)."""
+        import calendar
+
+        as_of = as_of or datetime.date.today()
+        m = self.plan_year_start_month or 1
+        d = self.plan_year_start_day or 1
+
+        def _clamp(year, month, day):
+            return datetime.date(year, month, min(day, calendar.monthrange(year, month)[1]))
+
+        start_this = _clamp(as_of.year, m, d)
+        start = start_this if as_of >= start_this else _clamp(as_of.year - 1, m, d)
+        end = _clamp(start.year + 1, m, d) - datetime.timedelta(days=1)
+        return start, end
+
+
+class CopayRule(TimeStampedModel):
+    """A per-service-type copay on a health plan (e.g. office visit $30, specialist $50, ER $250).
+    A related child collection, rewritten in place. One row per (plan, service_type)."""
+
+    plan = models.ForeignKey(HealthPlan, on_delete=models.CASCADE, related_name="copay_rules")
+    service_type = models.CharField(max_length=80)  # free text: office / specialist / ER / …
+    copay_amount = _money(default=ZERO)
+    note = models.CharField(max_length=200, blank=True)
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["plan", "service_type"], name="copayrule_unique"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.service_type}: {self.copay_amount}"
+
+
 def _party_name(party) -> str:
     """Best human name for a Person / Organization (or '' when unset)."""
     if party is None:
