@@ -113,6 +113,11 @@ def _people():
     return Person.objects.all().order_by("last_name", "first_name")
 
 
+def _patients():
+    """Patients are household members only (you, family, dependents) — not external providers."""
+    return Person.objects.filter(is_household_member=True).order_by("last_name", "first_name")
+
+
 def _organizations():
     return Organization.objects.all().order_by("name")
 
@@ -410,10 +415,13 @@ def _encounter_form(request, enc, mode):
     facilities = list(_medical_organizations())
     if enc.facility_id and enc.facility not in facilities:
         facilities.insert(0, enc.facility)  # keep an already-set, non-medical facility selectable
+    patients = list(_patients())
+    if enc.patient_id and enc.patient not in patients:
+        patients.insert(0, enc.patient)  # keep an already-set patient selectable on edit
     ctx = health_context(
         request, "visits", mode=mode, form=form, encounter=enc, error=error,
         roster=list(enc.providers.select_related("person", "organization").all()) if enc.pk else [],
-        facilities=facilities,
+        facilities=facilities, patients=patients,
         **_form_context(request),
     )
     return render(request, "health/encounter_form.html", ctx)
@@ -784,8 +792,12 @@ def _prescription_form(request, rx, mode):
                 return redirect(tenant_url(request, f"health/prescriptions/{rx.pk}/"))
         else:
             error = "Please complete the required fields."
+    patients = list(_patients())
+    if rx.patient_id and rx.patient not in patients:
+        patients.insert(0, rx.patient)  # keep an already-set patient selectable on edit
     ctx = health_context(
         request, "prescriptions", mode=mode, form=form, prescription=rx, error=error,
+        patients=patients,
         **_form_context(request),
     )
     return render(request, "health/prescription_form.html", ctx)

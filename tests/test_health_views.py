@@ -234,6 +234,22 @@ def test_dashboard_provider_create(make_tenant, make_user, client):
         ).exists()
 
 
+def test_patient_picker_lists_household_members_only(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user, name="HH Only", email="hho@h.test")
+    with schema_context(tenant.schema_name):
+        from apps.contacts.models import Person
+
+        Person.objects.create(first_name="Home", last_name="Member", is_household_member=True)
+        Person.objects.create(first_name="Doc", last_name="External")  # a provider, not household
+    client.force_login(owner)
+    for path in ("health/visits/new/", "health/prescriptions/new/"):
+        body = client.get(_c(tenant, path)).content.decode()
+        start = body.index('name="patient"')
+        patient_select = body[start:body.index("</select>", start)]
+        assert "Home Member" in patient_select, path
+        assert "Doc External" not in patient_select, path
+
+
 # --- tenant isolation ------------------------------------------------------------------------
 
 def test_health_tenant_isolation(make_tenant, make_user, client):

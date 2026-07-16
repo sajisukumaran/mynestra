@@ -19,11 +19,11 @@
   <div class="stack-20">
     <c-card icon="info" title="Visit">
       <div class="form-grid">
-        <c-field label="Patient" required>
+        <c-field label="Patient" required help="Household members only — set who's in the household in Contacts.">
           <div class="control is-select">
             <select name="patient">
               <option value="">—</option>
-              {% for p in people %}<option value="{{ p.pk }}"{% if encounter.patient_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}
+              {% for p in patients %}<option value="{{ p.pk }}"{% if encounter.patient_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}
             </select>
             <c-icon name="chevron-down" size="sm" class="subtle" />
           </div>
