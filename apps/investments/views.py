@@ -552,6 +552,7 @@ def account_detail(request, pk):
     attach_account_totals([account])  # header stats read stamped figures, not one query each
     hold = holdings(account)
     market = sum((h.market_value for h in hold), Decimal("0"))
+    unrealized = sum((h.unrealized_gain for h in hold), Decimal("0"))
     # Holdings table: server-side header sort (defaults to market value, high → low, as before).
     hsort, _hdir, holdings_headers = _table_sort(
         _HOLDINGS_SORT, request.GET.get("hsort"), request.GET.get("hdir"), "market_value"
@@ -590,6 +591,7 @@ def account_detail(request, pk):
         vesting_rows=vesting_rows,
         vesting_totals=vesting_totals,
         market_total=market,
+        unrealized_total=unrealized,
         register=reg,
         register_cols=_register_sort_cols(reg["sort"], reg["direction"]),
         register_arrow="up" if reg["direction"] == "asc" else "down",

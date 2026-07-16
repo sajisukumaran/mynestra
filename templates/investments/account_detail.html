@@ -143,6 +143,12 @@
             </tr>
             {% endfor %}
           </tbody>
+          <tfoot><tr>
+            <td class="strong">Total</td>
+            <td></td><td></td><td></td>
+            <td class="col-num strong"><c-money :amount="market_total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+            <td class="col-num strong">{% if unrealized_total >= 0 %}<span class="amount-pos">{% else %}<span class="amount-neg">{% endif %}<c-money :amount="unrealized_total" symbol="{{ account.currency.symbol }}" dp="{{ account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span></td>
+          </tr></tfoot>
         </c-table>
         {% else %}
         <c-empty-state icon="briefcase" title="No holdings yet" text="Record a buy (or an opening / existing holding) in the register to build positions." />

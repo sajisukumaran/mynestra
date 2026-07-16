@@ -120,10 +120,15 @@ def test_add_buy_then_sell_via_views(make_tenant, make_user, client):
         assert Lot.objects.filter(account_id=aid, open=True).count() == 1
         sell = InvestmentTransaction.objects.get(account_id=aid, txn_type="sell")
         assert sell.realized_gain == Decimal("80")
+        # Mark the 6 remaining shares (cost basis 300) to 70 → market 420, unrealized 120.
+        from apps.investments.models import SecurityPrice
+        SecurityPrice.objects.create(security_id=sid, as_of="2026-03-02", price=Decimal("70"))
 
     # Detail page shows the holding + drill-down works.
     body = client.get(_url(tenant, f"accounts/{aid}/")).content.decode()
     assert "ACME" in body and "Holdings" in body
+    # Holdings table footer totals market value and unrealized gain across the visible rows.
+    assert "Total" in body and "420.00" in body and "120.00" in body
     assert client.get(_url(tenant, f"accounts/{aid}/holdings/{sid}/")).status_code == 200
 
 
