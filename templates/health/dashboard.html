@@ -51,6 +51,53 @@
     </c-card>
   </div>
 
+  {% if reminders %}
+  <c-card icon="calendar-days" title="Upcoming reminders">
+    <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/reminders/">View all</c-button></c-slot>
+    {% for r in reminders %}
+    <c-rel-row name="{{ r.label }}" role="{{ r.date|date:'d M Y' }}" href="{{ ui_tenant_url }}{{ r.url }}">
+      <c-slot name="avatar"><c-avatar tint="{{ r.tint }}" size="sm" square><c-icon name="{{ r.glyph }}" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail">{% if r.days < 0 %}<c-badge variant="danger">Overdue</c-badge>{% elif r.days == 0 %}<c-badge variant="warning">Today</c-badge>{% elif r.days <= 14 %}<c-badge variant="warning">{{ r.days }}d</c-badge>{% else %}<c-badge variant="info">{{ r.days }}d</c-badge>{% endif %}</c-slot>
+    </c-rel-row>
+    {% endfor %}
+  </c-card>
+  {% endif %}
+
+  {% if hsa.count %}
+  <c-card icon="wallet" title="Health savings">
+    <c-slot name="actions"><c-money :amount="hsa.total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    {% for row in hsa.rows %}
+    <c-rel-row name="{{ row.account.nickname }}" role="{% if row.coverage %}{{ row.coverage }}{% else %}HSA{% endif %}{% if row.limit_row and row.limit_row.remaining %} · room {{ base.symbol }}{{ row.limit_row.remaining|floatformat:0 }} left this year{% endif %}">
+      <c-slot name="avatar"><c-avatar tint="emerald" size="sm" square><c-icon name="wallet" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail"><c-money :amount="row.balance" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+    </c-rel-row>
+    {% endfor %}
+  </c-card>
+  {% endif %}
+
+  {% if members %}
+  <c-card icon="users" title="By member">
+    <div class="stack-16">
+      {% for m in members %}
+      <div>
+        <div class="row wrap" style="justify-content:space-between; align-items:baseline;">
+          <span class="row"><c-avatar tint="{{ m.person.avatar_tint }}" size="sm">{{ m.person.initials }}</c-avatar> <span class="strong">{{ m.person.display_name }}</span> <span class="muted">{{ m.visits }} {{ m.visits|pluralize:'visit,visits' }}</span></span>
+          <span class="muted">billed <c-money :amount="m.responsibility" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> · paid <c-money :amount="m.paid" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> · <span class="strong">owing <c-money :amount="m.outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span></span>
+        </div>
+        {% if m.deductible %}
+        <div style="margin-top:8px;">
+          <c-meter :value="m.deductible.used" :max="m.deductible.limit" tint="{% if m.deductible.met %}success{% elif m.deductible.pct >= 80 %}warning{% endif %}">
+            <span>Deductible</span>
+            <span class="tnum"><c-money :amount="m.deductible.used" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> / <c-money :amount="m.deductible.limit" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span>
+          </c-meter>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </c-card>
+  {% endif %}
+
   {% if plan_cards %}
   <c-card icon="shield-check" title="Insurance & benefits">
     <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/plans/">Manage plans</c-button></c-slot>

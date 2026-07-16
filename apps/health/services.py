@@ -33,7 +33,9 @@ from apps.health.models import (
     EncounterType,
     Funding,
     InvoiceStatus,
+    Prescription,
     ProviderInvoice,
+    VisitStatus,
 )
 
 ZERO = Decimal("0")
@@ -463,7 +465,9 @@ def save_invoice(inv: ProviderInvoice, *, user=None, is_new=True) -> list[dict]:
         # accrue, but the invoice + its EOB charges are kept (they feed deductible/OOP tracking).
         if inv.bill_id is not None:
             _teardown_bill(inv, user=user)
-        if inv.status not in (InvoiceStatus.DISPUTED, InvoiceStatus.WRITTEN_OFF, InvoiceStatus.PAID):
+        if inv.status not in (
+            InvoiceStatus.DISPUTED, InvoiceStatus.WRITTEN_OFF, InvoiceStatus.PAID
+        ):
             inv.status = InvoiceStatus.PAID
             inv.save(update_fields=["status", "updated_at"])
         _recompute_encounter(inv.encounter)
@@ -698,6 +702,196 @@ def delete_invoice(inv: ProviderInvoice, *, user=None) -> None:
     _recompute_encounter(enc)
 
 
+# --- Prescriptions (P3 — a med fill; same locked-bill / partial-payment seams) ---------------
+
+def _prescription_ct():
+    from django.contrib.contenttypes.models import ContentType
+
+    return ContentType.objects.get_for_model(Prescription)
+
+
+def _prescription_expense_account(rx: Prescription):
+    """A prescription fill always books to Pharmacy / Prescriptions (5440), Expert-remappable."""
+    return resolve_posting_account(rx, "expense", "pharmacy_expense")
+
+
+def _ensure_pharmacy_vendor(rx: Prescription) -> None:
+    from apps.payables.services import ensure_vendor_profile
+
+    if rx.pharmacy_organization_id:
+        _ensure_vendor_category(rx.pharmacy_organization)
+        ensure_vendor_profile(organization=rx.pharmacy_organization)
+
+
+def _sync_prescription_bill(rx: Prescription, *, user=None):
+    """Create (or repost in place) the locked Payables bill backing this fill — a single expense
+    line for the fill cost to Pharmacy / Prescriptions, sourced from this prescription."""
+    from apps.payables.models import Bill, BillLine
+    from apps.payables.services import post_bill, repost_bill
+
+    bill = rx.bill or Bill(is_locked=True)
+    bill.vendor_organization = rx.pharmacy_organization
+    bill.vendor_person = None
+    bill.bill_date = rx.date
+    bill.due_date = rx.date
+    bill.currency = base_currency()
+    bill.vendor_ref = rx.reference
+    bill.notes = rx.memo
+    bill.is_locked = True
+    bill.source_content_type = _prescription_ct()
+    bill.source_object_id = rx.pk
+    bill.save()
+
+    bill.lines.all().delete()  # rewritten each save
+    BillLine.objects.create(
+        bill=bill, line_type=BillLine.LineType.EXPENSE, order=0,
+        description=rx.memo or f"{rx.drug_name} — fill",
+        account=_prescription_expense_account(rx),
+        quantity=Decimal("1"), unit_price=rx.cost,
+    )
+
+    if rx.bill_id is None:
+        post_bill(bill, user=user)
+        rx.bill = bill
+        rx.save(update_fields=["bill", "updated_at"])
+    else:
+        repost_bill(bill, user=user)
+    return bill
+
+
+def _recompute_prescription_status(rx: Prescription) -> None:
+    """Derive UNPAID / PARTIALLY_PAID / PAID / OVERPAID from the bill's allocations (net of any
+    refunds received) — the ProviderInvoice derivation, keyed on `cost`."""
+    paid = _allocated(rx)
+    total = rx.cost
+    refund_owed = ZERO
+    if paid <= ZERO:
+        status = InvoiceStatus.UNPAID
+    elif paid < total:
+        status = InvoiceStatus.PARTIALLY_PAID
+    elif paid == total:
+        status = InvoiceStatus.PAID
+    else:
+        refund_owed = paid - total - (rx.refunded or ZERO)
+        status = InvoiceStatus.OVERPAID if refund_owed > ZERO else InvoiceStatus.PAID
+        refund_owed = refund_owed if refund_owed > ZERO else ZERO
+    changed = []
+    if rx.status != status:
+        rx.status = status
+        changed.append("status")
+    if rx.refund_expected != refund_owed:
+        rx.refund_expected = refund_owed
+        changed.append("refund_expected")
+    if changed:
+        rx.save(update_fields=[*changed, "updated_at"])
+
+
+def _teardown_prescription_bill(rx: Prescription, *, user=None) -> None:
+    """Remove a prescription's locked bill (+ the module's own payments), refusing on a FOREIGN
+    payment allocation."""
+    from apps.payables.services import delete_bill
+
+    bill = rx.bill
+    module_pks = set(_module_rx_payments(rx).values_list("pk", flat=True))
+    _teardown_rx_payments(rx, user=user)
+    if bill is not None:
+        foreign = bill.allocations.exclude(payment_id__in=module_pks).exists()
+        if foreign:
+            raise ValueError(
+                "A Payables payment is allocated to this bill — remove it there first."
+            )
+        rx.bill = None
+        rx.save(update_fields=["bill", "updated_at"])
+        delete_bill(bill, user=user)
+        bill.hard_delete()
+
+
+@transaction.atomic
+def save_prescription(rx: Prescription, *, user=None, is_new=True):
+    """Persist a prescription and sync its locked bill. Posts the bill when the fill has a positive
+    cost and a pharmacy; a zero-cost fill (e.g. fully covered) accrues nothing but keeps the record
+    + refill tracking. The caller has saved the row (so it has a pk)."""
+    if rx.cost <= ZERO:
+        if rx.bill_id is not None:
+            _teardown_prescription_bill(rx, user=user)
+        if rx.status != InvoiceStatus.PAID:
+            rx.status = InvoiceStatus.PAID
+            rx.save(update_fields=["status", "updated_at"])
+        return rx
+    if rx.pharmacy_organization_id is None:
+        raise ValueError("Choose the pharmacy before posting the fill.")
+    _ensure_pharmacy_vendor(rx)
+    _sync_prescription_bill(rx, user=user)
+    _recompute_prescription_status(rx)
+    return rx
+
+
+def _module_rx_payments(rx: Prescription):
+    from apps.payables.models import Payment
+
+    return Payment.objects.filter(
+        source_content_type=_prescription_ct(), source_object_id=rx.pk
+    )
+
+
+def prescription_payments(rx: Prescription):
+    """The locked payments recorded against a prescription (content-type scoped), oldest first."""
+    return _module_rx_payments(rx).order_by("date", "id")
+
+
+def _teardown_rx_payments(rx: Prescription, *, user=None) -> None:
+    from apps.payables.services import delete_payment
+
+    for pay in list(_module_rx_payments(rx)):
+        delete_payment(pay, user=user)
+        pay.hard_delete()
+
+
+@transaction.atomic
+def record_prescription_payment(
+    rx: Prescription, *, amount, date, funding,
+    account=None, card=None, cash=None, hsa=None, user=None,
+):
+    """Record one locked payment against a posted prescription, allocated in full to its bill.
+    Repeated calls make partial payments; funding is bank / card / cash / HSA (HSA settles AP
+    straight from the health-savings account). Returns the created payment."""
+    from apps.payables.models import Payment
+    from apps.payables.services import apply_payment
+
+    if rx.bill_id is None:
+        raise ValueError("Post the prescription (a positive cost) before recording a payment.")
+    if funding == Funding.HSA and hsa is None:
+        raise ValueError("Choose the HSA to pay from.")
+    pay = Payment(
+        vendor_organization=rx.pharmacy_organization, date=date, amount=amount, is_locked=True,
+        source_content_type=_prescription_ct(), source_object_id=rx.pk, reference=rx.reference,
+    )
+    _apply_payment_funding(pay, funding, account=account, card=card, cash=cash, hsa=hsa)
+    pay.save()
+    apply_payment(pay, [(rx.bill, amount)], user=user)
+    _persist_last_funding(rx, funding, account=account, card=card, cash=cash, hsa=hsa)
+    _recompute_prescription_status(rx)
+    return pay
+
+
+@transaction.atomic
+def delete_prescription_payment(rx: Prescription, payment, *, user=None) -> None:
+    """Tear down one prescription payment (reverse its HSA / bank / card leg, reopen the bill)."""
+    from apps.payables.services import delete_payment
+
+    delete_payment(payment, user=user)
+    payment.hard_delete()
+    _recompute_prescription_status(rx)
+
+
+@transaction.atomic
+def delete_prescription(rx: Prescription, *, user=None) -> None:
+    """Hard-erase a prescription: delete its own payments, refuse on a FOREIGN allocation, then
+    erase the bill + entry + the prescription."""
+    _teardown_prescription_bill(rx, user=user)
+    rx.hard_delete()
+
+
 # --- Provider affiliation (persistent doctor ↔ business P2O link) -----------------------------
 
 def link_provider_affiliation(person, organization) -> None:
@@ -820,6 +1014,157 @@ def active_health_plans():
             status=PolicyStatus.ACTIVE, health_plan__isnull=False
         ).select_related("health_plan", "insurer_organization", "insurer_person")
     )
+
+
+# Prescription / refill glyph — a placeholder from the current sprite (the UI-gate sprite regen
+# swaps in a real `pill` mark, as with the encounter-type glyphs).
+PRESCRIPTION_GLYPH = "heart"
+
+
+def reminders_due(within_days: int = 90) -> list[dict]:
+    """One soonest-first health reminders feed (twin of `automobile.services.renewals_due`), pulled
+    from four sources within the horizon: unpaid / partially-paid invoices with a due date; upcoming
+    scheduled appointments; prescription refills coming due (while refills remain); and each active
+    plan's deductible / plan-year reset. Rows are `{record, kind, label, glyph, tint, date, days,
+    url}`. A pure read — posts nothing."""
+    today = datetime.date.today()
+    horizon = today + datetime.timedelta(days=within_days)
+    rows = []
+
+    for inv in ProviderInvoice.objects.filter(
+        status__in=list(OWED_STATUSES), due_date__isnull=False, due_date__lte=horizon
+    ).select_related("biller_person", "biller_organization", "bill"):
+        rows.append({
+            "record": inv, "kind": "invoice",
+            "label": f"Invoice due · {inv.biller_name}",
+            "glyph": "banknote", "tint": "rose",
+            "date": inv.due_date, "days": (inv.due_date - today).days,
+            "url": f"health/invoices/{inv.pk}/",
+        })
+
+    for enc in Encounter.objects.filter(
+        visit_status=VisitStatus.SCHEDULED, date__lte=horizon
+    ).select_related("patient", "facility"):
+        rows.append({
+            "record": enc, "kind": "appointment",
+            "label": f"{enc.type_label} appointment · {enc.patient_name}",
+            "glyph": "calendar-days", "tint": enc.type_tint,
+            "date": enc.date, "days": (enc.date - today).days,
+            "url": f"health/visits/{enc.pk}/",
+        })
+
+    for rx in Prescription.objects.filter(
+        next_refill_date__isnull=False, next_refill_date__lte=horizon, refills_remaining__gt=0
+    ).select_related("pharmacy_organization", "patient"):
+        rows.append({
+            "record": rx, "kind": "refill",
+            "label": f"Refill · {rx.display}",
+            "glyph": PRESCRIPTION_GLYPH, "tint": "teal",
+            "date": rx.next_refill_date, "days": (rx.next_refill_date - today).days,
+            "url": f"health/prescriptions/{rx.pk}/",
+        })
+
+    for policy in active_health_plans():
+        hp = getattr(policy, "health_plan", None)
+        if hp is None:
+            continue
+        _, end = hp.plan_year_window(today)
+        reset = end + datetime.timedelta(days=1)
+        if reset <= horizon:
+            rows.append({
+                "record": policy, "kind": "plan_year",
+                "label": f"Deductible resets · {policy.display}",
+                "glyph": "shield-check", "tint": "violet",
+                "date": reset, "days": (reset - today).days,
+                "url": f"health/plans/{policy.pk}/edit/",
+            })
+
+    rows.sort(key=lambda r: r["date"])
+    return rows
+
+
+def hsa_summary() -> dict:
+    """HSA balances + this-year contribution room, read from Investments (registration = HSA). The
+    balance is the GL node balance (cash for a cash-only HSA); contribution eligibility comes from
+    `investments.contribution_limit_status`. Returns `{rows, total, count}`; empty when there's no
+    HSA. A pure read."""
+    from apps.investments.models import InvestmentAccount, Registration
+    from apps.investments.services import contribution_limit_status
+
+    accts = list(
+        InvestmentAccount.objects.filter(registration=Registration.HSA, is_active=True)
+        .select_related("gl_account", "institution")
+    )
+    this_year = datetime.date.today().year
+    rows, total = [], ZERO
+    for a in accts:
+        bal = a.balance
+        total += bal
+        status = contribution_limit_status(a)
+        limit_row = None
+        if status:
+            limit_row = next((r for r in status["rows"] if r["year"] == this_year), None)
+        rows.append({
+            "account": a, "balance": bal,
+            "coverage": a.get_hsa_coverage_display() if a.hsa_coverage else "",
+            "limit_row": limit_row,
+        })
+    return {"rows": rows, "total": total, "count": len(rows)}
+
+
+def _deductible_by_person() -> dict:
+    """person_pk → an individual-deductible meter, aggregated from every active health plan."""
+    out = {}
+    for policy in active_health_plans():
+        status = deductible_oop_status(policy)
+        if not status:
+            continue
+        limit = status["plan"].deductible_individual or ZERO
+        if limit <= ZERO:
+            continue
+        for pr in status["persons"]:
+            out[pr["person"].pk] = _meter(
+                "Deductible", pr["deductible_used"], limit, person=pr["person"]
+            )
+    return out
+
+
+def member_rollups() -> list[dict]:
+    """Per-patient health rollups — billed / responsibility / paid / outstanding across a person's
+    encounters, with their individual-deductible meter when a plan covers them. Largest outstanding
+    first. A pure read (aggregates the encounter denorm caches)."""
+    from django.db.models import Count, Sum
+
+    from apps.contacts.models import Person
+
+    agg = list(
+        Encounter.objects.values("patient")
+        .annotate(
+            billed=Sum("total_billed"),
+            responsibility=Sum("total_patient_responsibility"),
+            paid=Sum("total_paid"),
+            outstanding=Sum("total_outstanding"),
+            visits=Count("id"),
+        )
+        .order_by("-outstanding", "-billed")
+    )
+    ded = _deductible_by_person()
+    people = {p.pk: p for p in Person.objects.filter(pk__in=[a["patient"] for a in agg])}
+    rows = []
+    for a in agg:
+        person = people.get(a["patient"])
+        if person is None:
+            continue
+        rows.append({
+            "person": person,
+            "billed": a["billed"] or ZERO,
+            "responsibility": a["responsibility"] or ZERO,
+            "paid": a["paid"] or ZERO,
+            "outstanding": a["outstanding"] or ZERO,
+            "visits": a["visits"],
+            "deductible": ded.get(person.pk),
+        })
+    return rows
 
 
 def launcher_counts() -> list[dict]:

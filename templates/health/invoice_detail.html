@@ -50,7 +50,7 @@
         <c-modal title="Record a payment">
           <c-slot name="trigger"><c-button variant="primary"><c-icon name="banknote" /> Pay</c-button></c-slot>
           <form method="post" action="{{ ui_tenant_url }}health/invoices/{{ invoice.pk }}/pay/" x-data="{ funding: '{{ invoice.funding_source|default:'bank' }}' }">{% csrf_token %}
-            {% include "health/partials/payment_fields.html" %}
+            {% include "health/partials/payment_fields.html" with obj=invoice %}
             <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Record payment</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
           </form>
         </c-modal>

@@ -16,7 +16,7 @@ from django.utils.dateparse import parse_date
 from apps.contacts.models import Person
 from apps.finance.models import Account, AccountType
 from apps.finance.services import base_currency
-from apps.health.forms import EncounterForm, InvoiceForm
+from apps.health.forms import EncounterForm, InvoiceForm, PrescriptionForm
 from apps.health.models import (
     DocumentType,
     Encounter,
@@ -27,6 +27,7 @@ from apps.health.models import (
     HealthDocument,
     InvoiceCharge,
     InvoiceStatus,
+    Prescription,
     ProviderInvoice,
     ProviderRole,
     VisitStatus,
@@ -37,14 +38,21 @@ from apps.health.services import (
     delete_document,
     delete_invoice,
     delete_invoice_payment,
+    delete_prescription,
+    delete_prescription_payment,
     dispute_invoice,
+    hsa_summary,
     link_provider_affiliation,
+    member_rollups,
     outstanding_by_provider,
     record_invoice_payment,
+    record_prescription_payment,
     record_refund,
+    reminders_due,
     resolve_dispute,
     save_encounter,
     save_invoice,
+    save_prescription,
     total_unpaid,
     write_off_invoice,
 )
@@ -74,6 +82,7 @@ def health_context(request, active, **extra):
         "is_owner": _is_owner(request),
         "nav_visits": Encounter.objects.count(),
         "nav_invoices": ProviderInvoice.objects.count(),
+        "nav_prescriptions": Prescription.objects.count(),
     }
     ctx.update(extra)
     return ctx
@@ -187,9 +196,23 @@ def dashboard(request):
     ]
     ctx = health_context(
         request, "dashboard", base=base_currency(),
-        recent_visits=recent_visits, overdue=overdue[:8], plan_cards=plan_cards, **stats,
+        recent_visits=recent_visits, overdue=overdue[:8], plan_cards=plan_cards,
+        hsa=hsa_summary(), members=member_rollups(), reminders=reminders_due(within_days=60)[:6],
+        **stats,
     )
     return render(request, "health/dashboard.html", ctx)
+
+
+# --- Reminders feed -------------------------------------------------------------------------
+
+def reminders(request):
+    rows = reminders_due(within_days=180)
+    ctx = health_context(
+        request, "reminders", base=base_currency(),
+        reminders=rows,
+        overdue_count=len([r for r in rows if r["days"] < 0]),
+    )
+    return render(request, "health/reminders.html", ctx)
 
 
 # --- Outstanding by provider ----------------------------------------------------------------
@@ -616,6 +639,145 @@ def invoice_refund(request, pk):
     return redirect(tenant_url(request, f"health/invoices/{pk}/"))
 
 
+# --- Prescriptions (P3) ---------------------------------------------------------------------
+
+def prescription_list(request):
+    qs = Prescription.objects.select_related(
+        "bill", "pharmacy_organization", "patient", "prescriber_person"
+    )
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(drug_name__icontains=q) | Q(dosage__icontains=q)
+            | Q(patient__first_name__icontains=q) | Q(patient__last_name__icontains=q)
+            | Q(pharmacy_organization__name__icontains=q)
+        ).distinct()
+    status = request.GET.get("status", "")
+    if status in InvoiceStatus.values:
+        qs = qs.filter(status=status)
+    qs = qs.order_by("-date", "-id")
+    total = Prescription.objects.count()
+    page = Paginator(qs, 15).get_page(request.GET.get("page"))
+    ctx = health_context(
+        request, "prescriptions", base=base_currency(),
+        page=page, prescriptions=list(page.object_list), q=q, status=status, total=total,
+    )
+    return render(request, "health/prescription_list.html", ctx)
+
+
+def _apply_prescription(request, rx):
+    date = parse_date(request.POST.get("date") or "")
+    patient = _resolve_person(request, "patient")
+    if date is None or patient is None:
+        return None
+    rx.patient = patient
+    rx.date = date
+    rx.drug_name = request.POST.get("drug_name", "").strip()
+    rx.dosage = request.POST.get("dosage", "").strip()
+    rx.prescriber_person = _resolve_person(request, "prescriber_person")
+    rx.pharmacy_organization = _resolve_org(request, "pharmacy_organization")
+    rx.cost = _decimal(request.POST.get("cost")) or Decimal("0")
+    rx.quantity = _int(request.POST.get("quantity"), None, lo=0)
+    rx.days_supply = _int(request.POST.get("days_supply"), None, lo=0)
+    rx.refills_remaining = _int(request.POST.get("refills_remaining"), 0, lo=0)
+    rx.reference = request.POST.get("reference", "").strip()
+    rx.memo = request.POST.get("memo", "").strip()
+    return rx
+
+
+def _prescription_form(request, rx, mode):
+    form = PrescriptionForm(request.POST or None, instance=rx)
+    error = ""
+    if request.method == "POST":
+        if form.is_valid():
+            rx = form.save(commit=False)
+            if _apply_prescription(request, rx) is None:
+                error = "Choose the patient and the fill date."
+            elif rx.cost > 0 and rx.pharmacy_organization is None:
+                error = "Choose the pharmacy, or set the cost to 0."
+            else:
+                rx.save()
+                save_prescription(rx, user=request.user, is_new=(mode == "create"))
+                return redirect(tenant_url(request, f"health/prescriptions/{rx.pk}/"))
+        else:
+            error = "Please complete the required fields."
+    ctx = health_context(
+        request, "prescriptions", mode=mode, form=form, prescription=rx, error=error,
+        **_form_context(request),
+    )
+    return render(request, "health/prescription_form.html", ctx)
+
+
+def prescription_create(request):
+    return _prescription_form(request, Prescription(), "create")
+
+
+def prescription_edit(request, pk):
+    return _prescription_form(request, get_object_or_404(Prescription, pk=pk), "edit")
+
+
+def prescription_detail(request, pk):
+    rx = get_object_or_404(
+        Prescription.objects.select_related(
+            "bill", "pharmacy_organization", "patient", "prescriber_person"
+        ),
+        pk=pk,
+    )
+    from apps.health.services import prescription_payments
+
+    payments = list(prescription_payments(rx)) if rx.bill_id is not None else []
+    ctx = health_context(
+        request, "prescriptions", prescription=rx,
+        payments=payments,
+        documents=list(rx.documents.all()),
+        history=rx.history.all()[:60],
+        **_form_context(request),
+    )
+    return render(request, "health/prescription_detail.html", ctx)
+
+
+def prescription_delete(request, pk):
+    rx = get_object_or_404(Prescription, pk=pk)
+    if request.method == "POST":
+        try:
+            delete_prescription(rx, user=request.user)
+        except ValueError:
+            return redirect(tenant_url(request, f"health/prescriptions/{pk}/"))
+    return redirect(tenant_url(request, "health/prescriptions/"))
+
+
+def prescription_pay(request, pk):
+    rx = get_object_or_404(Prescription, pk=pk)
+    if request.method == "POST":
+        amount = _decimal(request.POST.get("amount"))
+        date = parse_date(request.POST.get("date") or "")
+        funding = request.POST.get("funding") or Funding.BANK
+        if amount and amount > 0 and date and funding in Funding.values and rx.bill_id:
+            kw = _resolve_funding_target(request, funding)
+            try:
+                record_prescription_payment(rx, amount=amount, date=date, funding=funding,
+                                             user=request.user, **kw)
+            except ValueError:
+                pass
+    return redirect(tenant_url(request, f"health/prescriptions/{pk}/"))
+
+
+def prescription_payment_delete(request, pk, pay):
+    rx = get_object_or_404(Prescription, pk=pk)
+    from apps.health.services import prescription_payments
+
+    payment = get_object_or_404(prescription_payments(rx), pk=pay)
+    if request.method == "POST":
+        delete_prescription_payment(rx, payment, user=request.user)
+    return redirect(tenant_url(request, f"health/prescriptions/{pk}/"))
+
+
+def prescription_document_upload(request, pk):
+    rx = get_object_or_404(Prescription, pk=pk)
+    _upload_document(request, prescription=rx)
+    return redirect(tenant_url(request, f"health/prescriptions/{pk}/"))
+
+
 # --- Plans & benefits (P2) ------------------------------------------------------------------
 
 def _health_policy_types():
@@ -704,11 +866,11 @@ def _save_copay_rules(request, hp):
 
 # --- Documents ------------------------------------------------------------------------------
 
-def _upload_document(request, *, encounter=None, invoice=None):
+def _upload_document(request, *, encounter=None, invoice=None, prescription=None):
     if request.method == "POST" and "document" in request.FILES:
         dtype = request.POST.get("doc_type") or DocumentType.OTHER
         doc = HealthDocument(
-            encounter=encounter, invoice=invoice,
+            encounter=encounter, invoice=invoice, prescription=prescription,
             title=request.POST.get("title", "").strip() or request.FILES["document"].name,
             doc_type=dtype if dtype in DocumentType.values else DocumentType.OTHER,
             note=request.POST.get("note", "").strip(),
@@ -735,6 +897,8 @@ def document_delete(request, did):
         dest = f"health/visits/{doc.encounter_id}/"
     elif doc.invoice_id:
         dest = f"health/invoices/{doc.invoice_id}/"
+    elif doc.prescription_id:
+        dest = f"health/prescriptions/{doc.prescription_id}/"
     else:
         dest = "health/"
     if request.method == "POST":

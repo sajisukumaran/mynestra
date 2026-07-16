@@ -1,0 +1,30 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Reminders{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" /><span class="strong">Reminders</span></c-breadcrumb>
+
+<c-page-header title="Reminders" subtitle="Due invoices, upcoming appointments, refills and plan-year resets — soonest first." />
+
+<div class="stack-16">
+  {% if overdue_count %}<c-hint icon="triangle-alert" variant="warning">{{ overdue_count }} {{ overdue_count|pluralize:'item is,items are' }} past due.</c-hint>{% endif %}
+
+  <c-card flush icon="calendar-days" title="What's coming up">
+    {% if reminders %}
+    {% for r in reminders %}
+    <c-rel-row name="{{ r.label }}" role="{{ r.date|date:'d M Y' }}" href="{{ ui_tenant_url }}{{ r.url }}">
+      <c-slot name="avatar"><c-avatar tint="{{ r.tint }}" size="sm" square><c-icon name="{{ r.glyph }}" size="sm" /></c-avatar></c-slot>
+      <c-slot name="tail">
+        {% if r.days < 0 %}<c-badge variant="danger">{{ r.days|stringformat:'d'|cut:'-' }} {{ r.days|pluralize:'day,days' }} overdue</c-badge>
+        {% elif r.days == 0 %}<c-badge variant="warning">Today</c-badge>
+        {% elif r.days <= 14 %}<c-badge variant="warning">{{ r.days }} {{ r.days|pluralize:'day,days' }}</c-badge>
+        {% else %}<c-badge variant="info">{{ r.days }} days</c-badge>{% endif %}
+      </c-slot>
+    </c-rel-row>
+    {% endfor %}
+    {% else %}
+    <c-empty-state icon="circle-check" title="Nothing coming up" text="Due invoices, scheduled appointments, refills and plan-year resets appear here." />
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

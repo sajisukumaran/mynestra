@@ -497,16 +497,164 @@ class InvoiceCharge(TimeStampedModel):
         )
 
 
+class Prescription(SoftDeleteModel):
+    """One medication fill — a money event with refill tracking. Owns one locked `payables.Bill`
+    (a single line to `pharmacy_expense` 5440) and many locked payments (bank / card / cash / HSA),
+    exactly like `ProviderInvoice`: the pharmacy is the bill vendor, PAID / PARTIALLY_PAID derive
+    from the allocation totals, never the GL. `next_refill_date` (recomputed on save from
+    `date + days_supply`) feeds the reminders feed."""
+
+    patient = models.ForeignKey(
+        "contacts.Person", on_delete=models.PROTECT, related_name="health_prescriptions"
+    )
+    drug_name = models.CharField(max_length=160)
+    dosage = models.CharField(max_length=120, blank=True)  # e.g. "20 mg, 1 tablet daily"
+
+    # The doctor who wrote it (a Person) and the pharmacy that filled + billed it (the bill vendor).
+    prescriber_person = models.ForeignKey(
+        "contacts.Person", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="health_prescriptions_written",
+    )
+    pharmacy_organization = models.ForeignKey(
+        "organizations.Organization", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="health_prescriptions",
+    )
+
+    date = models.DateField()  # the fill date
+    cost = _money(default=ZERO)  # the patient's cost for this fill (the bill total)
+
+    quantity = models.PositiveIntegerField(null=True, blank=True)      # units dispensed
+    days_supply = models.PositiveIntegerField(null=True, blank=True)   # days the fill lasts
+    refills_remaining = models.PositiveIntegerField(default=0)
+    next_refill_date = models.DateField(null=True, blank=True)  # denorm: date + days_supply
+
+    status = models.CharField(
+        max_length=18, choices=InvoiceStatus.choices, default=InvoiceStatus.UNPAID
+    )
+
+    # The locked payables bill backing this fill (posted when the cost is positive). Payments are
+    # locked payables.Payments discovered via the source GFK.
+    bill = models.OneToOneField(
+        "payables.Bill", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="health_prescription",
+    )
+    refund_expected = _money(default=ZERO)
+    refunded = _money(default=ZERO)
+
+    # Last funding choice (prefills the payment modal); the authoritative funding lives on each
+    # locked Payment.
+    funding_source = models.CharField(max_length=8, choices=Funding.choices, blank=True)
+    funding_account = models.ForeignKey(
+        "banking.BankAccount", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    credit_card = models.ForeignKey(
+        "cards.CreditCard", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    cash_account = models.ForeignKey(
+        "finance.Account", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    hsa_account = models.ForeignKey(
+        "investments.InvestmentAccount", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+
+    reference = models.CharField(max_length=80, blank=True)  # Rx number → bill.vendor_ref
+    memo = models.CharField(max_length=255, blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(cost__gte=0), name="prescription_cost_nonneg"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.display
+
+    def _compute_next_refill(self):
+        """When it runs out: the fill date plus the days it lasts (else unknown)."""
+        if self.date and self.days_supply:
+            return self.date + datetime.timedelta(days=self.days_supply)
+        return None
+
+    def save(self, *args, **kwargs):
+        self.next_refill_date = self._compute_next_refill()
+        uf = kwargs.get("update_fields")
+        if uf is not None and "next_refill_date" not in uf:
+            kwargs["update_fields"] = [*uf, "next_refill_date"]
+        super().save(*args, **kwargs)
+
+    # --- labels / helpers ---
+    @property
+    def display(self) -> str:
+        return f"{self.drug_name} {self.dosage}".strip() if self.dosage else self.drug_name
+
+    @property
+    def pharmacy_name(self) -> str:
+        return _party_name(self.pharmacy_organization)
+
+    @property
+    def patient_name(self) -> str:
+        return _party_name(self.patient)
+
+    @property
+    def prescriber_name(self) -> str:
+        return _party_name(self.prescriber_person)
+
+    @property
+    def status_label(self) -> str:
+        return self.get_status_display()
+
+    @property
+    def amount_due(self):
+        """Alias so the shared bill-status derivation reads a prescription like an invoice."""
+        return self.cost
+
+    @property
+    def amount_paid(self):
+        if self.bill_id is None:
+            return ZERO
+        return self.bill.amount_paid
+
+    @property
+    def outstanding(self):
+        bal = self.cost - self.amount_paid
+        return bal if bal > ZERO else ZERO
+
+    @property
+    def is_settled(self) -> bool:
+        return self.status == InvoiceStatus.PAID
+
+    @property
+    def has_refills(self) -> bool:
+        return self.refills_remaining > 0
+
+    # Duck-typed hooks read by the Payables locked-bill/payment back-link.
+    @property
+    def managed_label(self) -> str:
+        return f"Health · Rx {self.drug_name}"
+
+    @property
+    def managed_url(self) -> str:
+        return f"health/prescriptions/{self.pk}/"
+
+
 class HealthDocument(TimeStampedModel):
-    """An uploaded file attached to exactly one Health owner (an encounter, an invoice, or a
-    person). No GL effect — a plain attachment; the row is schema-isolated like every tenant record.
-    (P2 adds a `plan` owner; P3 a `prescription` owner — each extends the exactly-one CHECK.)"""
+    """An uploaded file attached to exactly one Health owner (an encounter, an invoice, a
+    prescription, or a person). No GL effect — a plain attachment; the row is schema-isolated like
+    every tenant record."""
 
     encounter = models.ForeignKey(
         Encounter, on_delete=models.CASCADE, null=True, blank=True, related_name="documents"
     )
     invoice = models.ForeignKey(
         ProviderInvoice, on_delete=models.CASCADE, null=True, blank=True, related_name="documents"
+    )
+    prescription = models.ForeignKey(
+        Prescription, on_delete=models.CASCADE, null=True, blank=True, related_name="documents"
     )
     person = models.ForeignKey(
         "contacts.Person", on_delete=models.CASCADE, null=True, blank=True,
@@ -522,18 +670,17 @@ class HealthDocument(TimeStampedModel):
     class Meta:
         ordering = ["-created_at", "-id"]
         constraints = [
-            # Exactly one owner set (encounter XOR invoice XOR person).
+            # Exactly one owner set (encounter XOR invoice XOR prescription XOR person).
             models.CheckConstraint(
                 condition=(
-                    models.Q(
-                        encounter__isnull=False, invoice__isnull=True, person__isnull=True
-                    )
-                    | models.Q(
-                        encounter__isnull=True, invoice__isnull=False, person__isnull=True
-                    )
-                    | models.Q(
-                        encounter__isnull=True, invoice__isnull=True, person__isnull=False
-                    )
+                    models.Q(encounter__isnull=False, invoice__isnull=True,
+                             prescription__isnull=True, person__isnull=True)
+                    | models.Q(encounter__isnull=True, invoice__isnull=False,
+                               prescription__isnull=True, person__isnull=True)
+                    | models.Q(encounter__isnull=True, invoice__isnull=True,
+                               prescription__isnull=False, person__isnull=True)
+                    | models.Q(encounter__isnull=True, invoice__isnull=True,
+                               prescription__isnull=True, person__isnull=False)
                 ),
                 name="healthdocument_one_owner",
             ),

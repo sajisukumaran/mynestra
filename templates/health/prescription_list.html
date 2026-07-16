@@ -1,0 +1,66 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Prescriptions{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" /><span class="strong">Prescriptions</span></c-breadcrumb>
+
+<c-page-header title="Prescriptions" subtitle="{{ total }} total · med fills, costs & refill reminders">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}health/prescriptions/new/"><c-icon name="plus" /> New prescription</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap" style="gap:8px;">
+    <div class="control has-icon" style="max-width:320px;"><c-icon name="search" size="sm" class="subtle" /><input name="q" value="{{ q }}" placeholder="Search drug, patient or pharmacy" /></div>
+    <c-button type="submit" size="sm">Search</c-button>
+    {% if q %}<c-button size="sm" variant="ghost" href="{{ ui_tenant_url }}health/prescriptions/">Clear</c-button>{% endif %}
+  </form>
+
+  <c-card flush>
+    {% if prescriptions %}
+    <c-table>
+      <thead><tr><c-th>Medication</c-th><c-th>Patient</c-th><c-th>Pharmacy</c-th><c-th>Filled</c-th><c-th>Status</c-th><th class="col-num">Refills</th><th class="col-num">Cost</th><th class="col-num">Owing</th></tr></thead>
+      <tbody>
+        {% for rx in prescriptions %}
+        <tr>
+          <td>
+            <a href="{{ ui_tenant_url }}health/prescriptions/{{ rx.pk }}/" class="strong">{{ rx.drug_name }}</a>
+            {% if rx.dosage %}<div class="muted">{{ rx.dosage }}</div>{% endif %}
+          </td>
+          <td class="muted">{{ rx.patient_name }}</td>
+          <td class="muted">{{ rx.pharmacy_name|default:"—" }}</td>
+          <td class="tnum muted">{{ rx.date|date:'d M Y' }}</td>
+          <td>
+            {% if rx.status == 'paid' %}<c-badge variant="success">Paid</c-badge>
+            {% elif rx.status == 'partially_paid' %}<c-badge variant="warning">Part-paid</c-badge>
+            {% elif rx.status == 'overpaid' %}<c-badge variant="warning">Overpaid</c-badge>
+            {% else %}<c-badge variant="danger">Unpaid</c-badge>{% endif %}
+          </td>
+          <td class="col-num tnum">{{ rx.refills_remaining }}{% if rx.next_refill_date and rx.has_refills %}<div class="muted">by {{ rx.next_refill_date|date:'d M' }}</div>{% endif %}</td>
+          <td class="col-num"><c-money :amount="rx.cost" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+          <td class="col-num"><c-money :amount="rx.outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="heart"
+      title="{% if q %}No matching prescriptions{% else %}No prescriptions yet{% endif %}"
+      text="Add a medication fill — track its cost, payments and refill reminders.">
+      <c-button variant="primary" href="{{ ui_tenant_url }}health/prescriptions/new/"><c-icon name="plus" /> New prescription</c-button>
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

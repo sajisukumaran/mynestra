@@ -9,6 +9,7 @@ app_name = "health"
 urlpatterns = [
     path("", views.dashboard, name="dashboard"),
     path("providers/", views.providers, name="providers"),
+    path("reminders/", views.reminders, name="reminders"),
 
     # Plans & benefits (cost-sharing overlay on insurance policies)
     path("plans/", views.plans_list, name="plans"),
@@ -41,6 +42,18 @@ urlpatterns = [
     path("invoices/<int:pk>/refund/", views.invoice_refund, name="invoice-refund"),
     path("invoices/<int:pk>/documents/new/", views.invoice_document_upload,
          name="invoice-document-upload"),
+
+    # Prescriptions
+    path("prescriptions/", views.prescription_list, name="prescriptions"),
+    path("prescriptions/new/", views.prescription_create, name="prescription-create"),
+    path("prescriptions/<int:pk>/", views.prescription_detail, name="prescription-detail"),
+    path("prescriptions/<int:pk>/edit/", views.prescription_edit, name="prescription-edit"),
+    path("prescriptions/<int:pk>/delete/", views.prescription_delete, name="prescription-delete"),
+    path("prescriptions/<int:pk>/pay/", views.prescription_pay, name="prescription-pay"),
+    path("prescriptions/<int:pk>/payments/<int:pay>/delete/", views.prescription_payment_delete,
+         name="prescription-payment-delete"),
+    path("prescriptions/<int:pk>/documents/new/", views.prescription_document_upload,
+         name="prescription-document-upload"),
 
     # Documents
     path("documents/<int:did>/delete/", views.document_delete, name="document-delete"),

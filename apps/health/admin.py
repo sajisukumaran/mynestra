@@ -9,6 +9,7 @@ from apps.health.models import (
     HealthDocument,
     HealthPlan,
     InvoiceCharge,
+    Prescription,
     ProviderInvoice,
 )
 
@@ -48,6 +49,14 @@ class ProviderInvoiceAdmin(admin.ModelAdmin):
     list_filter = ("status",)
     date_hierarchy = "invoice_date"
     inlines = [InvoiceChargeInline]
+
+
+@admin.register(Prescription)
+class PrescriptionAdmin(admin.ModelAdmin):
+    list_display = ("drug_name", "patient", "pharmacy_name", "date", "status", "cost",
+                    "refills_remaining", "next_refill_date")
+    list_filter = ("status",)
+    date_hierarchy = "date"
 
 
 @admin.register(HealthDocument)

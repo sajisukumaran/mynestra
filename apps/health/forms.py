@@ -4,7 +4,7 @@ mirroring Insurance / Real Estate)."""
 
 from django import forms
 
-from apps.health.models import Encounter, ProviderInvoice
+from apps.health.models import Encounter, Prescription, ProviderInvoice
 
 
 class EncounterForm(forms.ModelForm):
@@ -22,4 +22,15 @@ class InvoiceForm(forms.ModelForm):
         fields = ["invoice_number", "reference", "memo"]
         widgets = {
             "invoice_number": forms.TextInput(attrs={"placeholder": "Statement #"}),
+        }
+
+
+class PrescriptionForm(forms.ModelForm):
+    class Meta:
+        model = Prescription
+        fields = ["drug_name", "dosage", "reference", "memo"]
+        widgets = {
+            "drug_name": forms.TextInput(attrs={"placeholder": "e.g. Atorvastatin"}),
+            "dosage": forms.TextInput(attrs={"placeholder": "e.g. 20 mg, 1 tablet daily"}),
+            "reference": forms.TextInput(attrs={"placeholder": "Rx number"}),
         }

@@ -1,0 +1,69 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}{% if mode == 'edit' %}Edit prescription{% else %}New prescription{% endif %}{% endblock %}
+
+{% block hl %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/prescriptions/">Prescriptions</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'edit' %}Edit{% else %}New{% endif %}</span>
+</c-breadcrumb>
+
+<c-page-header title="{% if mode == 'edit' %}Edit prescription{% else %}New prescription{% endif %}"
+               subtitle="A medication fill — the pharmacy bill posts to Pharmacy / Prescriptions; refills drive reminders. Set the cost to 0 for a fully-covered fill." />
+
+{% if error %}<c-hint icon="triangle-alert" variant="danger">{{ error }}</c-hint>{% endif %}
+
+<form method="post">{% csrf_token %}
+  <div class="stack-20">
+    <c-card icon="heart" title="Medication">
+      <div class="form-grid">
+        <c-field label="Patient" required>
+          <div class="control is-select">
+            <select name="patient"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if prescription.patient_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Fill date" required><div class="control"><input type="date" name="date" value="{% if prescription.pk %}{{ prescription.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Medication" required>{{ form.drug_name }}</c-field>
+        <c-field label="Dosage">{{ form.dosage }}</c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Prescriber" help="The doctor who wrote it (optional).">
+          <div class="control is-select">
+            <select name="prescriber_person"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if prescription.prescriber_person_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Pharmacy" help="The bill vendor — required for a paid fill.">
+          <div class="control is-select">
+            <select name="pharmacy_organization"><option value="">—</option>{% for o in organizations %}<option value="{{ o.pk }}"{% if prescription.pharmacy_organization_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+          <c-input name="pharmacy_organization_new_name" placeholder="…or type a new pharmacy name" />
+        </c-field>
+      </div>
+    </c-card>
+
+    <c-card icon="banknote" title="Cost & refills">
+      <div class="form-grid">
+        <c-field label="Cost" help="Your cost for this fill (the bill total)."><div class="control"><input name="cost" inputmode="decimal" placeholder="0.00" value="{% if prescription.pk %}{{ prescription.cost|floatformat:'-2' }}{% endif %}"></div></c-field>
+        <c-field label="Quantity" help="Units dispensed."><div class="control"><input name="quantity" inputmode="numeric" placeholder="e.g. 30" value="{% if prescription.quantity is not None %}{{ prescription.quantity }}{% endif %}"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Days supply" help="Drives the next-refill reminder."><div class="control"><input name="days_supply" inputmode="numeric" placeholder="e.g. 30" value="{% if prescription.days_supply is not None %}{{ prescription.days_supply }}{% endif %}"></div></c-field>
+        <c-field label="Refills remaining"><div class="control"><input name="refills_remaining" inputmode="numeric" placeholder="0" value="{{ prescription.refills_remaining|default:0 }}"></div></c-field>
+      </div>
+      <c-field label="Rx number">{{ form.reference }}</c-field>
+      <c-field label="Memo">{{ form.memo }}</c-field>
+    </c-card>
+
+    <div class="row">
+      <c-button type="submit" variant="primary">{% if mode == 'edit' %}Save changes{% else %}Create prescription{% endif %}</c-button>
+      <c-button variant="ghost" href="{{ ui_tenant_url }}health/prescriptions/">Cancel</c-button>
+    </div>
+  </div>
+</form>
+{% endblock %}
