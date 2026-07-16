@@ -1,0 +1,41 @@
+{% comment %}Payment modal fields (record one payment against an invoice). Expects the enclosing
+<form> to provide an Alpine scope: { funding }. `invoice` prefills the amount + last funding.{% endcomment %}
+<div class="stack-16">
+  <c-hint icon="info">Owing <c-money :amount="invoice.outstanding" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" />. Record a part-payment or pay in full.</c-hint>
+  <div class="form-grid">
+    <c-field label="Amount" required><div class="control"><input name="amount" inputmode="decimal" placeholder="0.00" value="{{ invoice.outstanding|floatformat:'-2' }}"></div></c-field>
+    <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% now 'Y-m-d' %}"></div></c-field>
+  </div>
+  <c-field label="Pay from">
+    <div class="control is-select">
+      <select name="funding" x-model="funding">
+        {% for val, label in fundings %}<option value="{{ val }}"{% if invoice.funding_source == val %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Bank account" x-show="funding === 'bank'" x-cloak>
+    <div class="control is-select">
+      <select name="funding_account"><option value="">—</option>{% for a in bank_accounts %}<option value="{{ a.pk }}"{% if invoice.funding_account_id == a.pk %} selected{% endif %}>{{ a.nickname }}</option>{% endfor %}</select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Credit card" x-show="funding === 'card'" x-cloak>
+    <div class="control is-select">
+      <select name="credit_card"><option value="">—</option>{% for c in credit_cards %}<option value="{{ c.pk }}"{% if invoice.credit_card_id == c.pk %} selected{% endif %}>{{ c.nickname }}</option>{% endfor %}</select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Cash account" x-show="funding === 'cash'" x-cloak>
+    <div class="control is-select">
+      <select name="cash_account"><option value="">Cash on hand</option>{% for a in cash_accounts %}<option value="{{ a.pk }}"{% if invoice.cash_account_id == a.pk %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}</select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="HSA" x-show="funding === 'hsa'" x-cloak help="Settles the bill straight from your health-savings account.">
+    <div class="control is-select">
+      <select name="hsa_account"><option value="">—</option>{% for a in hsa_accounts %}<option value="{{ a.pk }}"{% if invoice.hsa_account_id == a.pk %} selected{% endif %}>{{ a.nickname }}</option>{% endfor %}</select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+</div>

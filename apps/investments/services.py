@@ -1154,6 +1154,41 @@ def apply_transaction(txn, *, user=None, is_new=True):
     _resync_out_legs(result.resync_out_ids, user=user)
 
 
+def record_hsa_distribution(
+    account, *, amount, date, contra, payee_person=None, payee_organization=None, memo="", user=None
+):
+    """Post a WITHDRAWAL from an HSA `account` whose contra leg is `contra` (an Account or ref) —
+    `DR contra (payee-tagged) / CR the HSA node`, no `1150` hop. Used by Payables' HSA funding
+    branch to settle a medical bill's Accounts Payable directly from the HSA. Returns the
+    transaction, kept for teardown. Cash-only in the HSA (no lots), so the invariant still holds.
+    """
+    txn = InvestmentTransaction(
+        account=account, txn_type=InvTxnType.WITHDRAWAL, date=date, amount=amount,
+        category_account=resolve_account(contra),
+        payee_person=payee_person, payee_organization=payee_organization, memo=memo,
+    )
+    txn.save()
+    apply_transaction(txn, user=user, is_new=True)
+    return txn
+
+
+def record_hsa_return(
+    account, *, amount, date, contra, payee_person=None, payee_organization=None, memo="", user=None
+):
+    """Post a CONTRIBUTION into an HSA `account` whose contra leg is `contra` (an Account or ref) —
+    `DR the HSA node / CR contra (payee-tagged)`. The mirror of `record_hsa_distribution`, used when
+    an overpaid medical bill is refunded back into the HSA (contra = Accounts Payable). Returns the
+    transaction. Cash-only, so the invariant holds by construction."""
+    txn = InvestmentTransaction(
+        account=account, txn_type=InvTxnType.CONTRIBUTION, date=date, amount=amount,
+        category_account=resolve_account(contra),
+        payee_person=payee_person, payee_organization=payee_organization, memo=memo,
+    )
+    txn.save()
+    apply_transaction(txn, user=user, is_new=True)
+    return txn
+
+
 @transaction.atomic
 def remove_transaction(txn, *, user=None, seen=None):
     """Reverse + soft-delete a transaction, rebuild lots, re-post affected dispositions, sync any

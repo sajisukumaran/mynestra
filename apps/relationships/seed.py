@@ -63,6 +63,8 @@ P2O_TYPES = [
     ("insured", "Insured"),
     # Insurance (Plan B): a life-policy beneficiary's link to the insurer org.
     ("beneficiary", "Beneficiary"),
+    # Health (Plan D): a doctor's persistent affiliation with a practice / hospital / lab.
+    ("provider_affiliation", "Practices at"),
 ]
 
 

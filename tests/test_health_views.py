@@ -1,0 +1,193 @@
+"""Health screens (authenticated tenant client): dashboard / visits / providers / invoices render;
+creating a visit and a provider invoice through the locked-bill path; recording a payment (bank and
+HSA) through the pay view; the pending-insurance → confirm flow; and tenant isolation."""
+
+import datetime
+from decimal import Decimal
+
+from django_tenants.utils import schema_context
+
+from apps.tenants.models import Membership, Role
+
+D = Decimal
+
+
+def _owner(make_tenant, make_user, name="Health Household", email="owner@health.test"):
+    tenant = make_tenant(name=name)
+    owner = make_user(email)
+    Membership.objects.create(user=owner, tenant=tenant, role=Role.OWNER)
+    return tenant, owner
+
+
+def _c(tenant, path=""):
+    return f"/t/{tenant.schema_name}/{path}"
+
+
+def _org(name="City Hospital"):
+    from apps.organizations.models import Organization
+
+    return Organization.objects.create(name=name)
+
+
+def _person(first="Sam", last="Rivera"):
+    from apps.contacts.models import Person
+
+    return Person.objects.create(first_name=first, last_name=last)
+
+
+def _usd():
+    from apps.finance.models import Currency
+
+    return Currency.objects.get(code="USD")
+
+
+# --- screens render --------------------------------------------------------------------------
+
+def test_dashboard_and_lists_render(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    client.force_login(owner)
+    assert "Health" in client.get(_c(tenant, "health/")).content.decode()
+    assert "Visits" in client.get(_c(tenant, "health/visits/")).content.decode()
+    assert "provider" in client.get(_c(tenant, "health/providers/")).content.decode().lower()
+    assert "invoice" in client.get(_c(tenant, "health/invoices/")).content.decode().lower()
+    assert client.get(_c(tenant, "health/visits/new/")).status_code == 200
+    assert client.get(_c(tenant, "health/invoices/new/")).status_code == 200
+
+
+# --- create a visit + invoice, then pay ------------------------------------------------------
+
+def test_create_visit_invoice_and_pay(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        patient = _person()
+        biller = _org()
+        pid, bid = patient.pk, biller.pk
+    client.force_login(owner)
+
+    # Create the visit.
+    client.post(_c(tenant, "health/visits/new/"), {
+        "patient": pid, "date": "2026-02-01", "encounter_type": "medical",
+        "setting": "office", "visit_status": "completed", "reason": "Physical",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.health.models import Encounter
+
+        enc = Encounter.objects.get()
+        eid = enc.pk
+
+    # Add an unpaid provider invoice under the visit (posts the locked bill).
+    client.post(_c(tenant, f"health/visits/{eid}/invoices/new/"), {
+        "biller_organization": bid, "invoice_date": "2026-02-01", "status": "unpaid",
+        "amount_due": "250", "invoice_number": "H-1",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import account_balance
+        from apps.health.models import ProviderInvoice
+
+        inv = ProviderInvoice.objects.get()
+        assert inv.bill_id is not None
+        assert account_balance("medical_expense") == D("250")
+        iid = inv.pk
+
+    # Detail page renders and shows the biller.
+    detail = client.get(_c(tenant, f"health/invoices/{iid}/"))
+    assert detail.status_code == 200 and "City Hospital" in detail.content.decode()
+
+    # Pay it in full from cash → PAID, AP settled.
+    client.post(_c(tenant, f"health/invoices/{iid}/pay/"), {
+        "amount": "250", "date": "2026-02-05", "funding": "cash",
+    })
+    with schema_context(tenant.schema_name):
+        inv.refresh_from_db()
+        assert inv.status == "paid"
+        assert account_balance("accounts_payable") == D("0")
+
+
+def test_pay_from_hsa_via_view(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.investments.models import InvestmentAccount, InvestmentTransaction, InvTxnType
+        from apps.investments.services import apply_transaction, ensure_gl_account
+
+        biller = _org()
+        hsa = InvestmentAccount.objects.create(
+            institution=_org("HSA Bank"), nickname="Family HSA", registration="hsa",
+            currency=_usd(),
+        )
+        ensure_gl_account(hsa)
+        opening = InvestmentTransaction.objects.create(
+            account=hsa, txn_type=InvTxnType.OPENING, date=datetime.date(2026, 1, 1),
+            amount=D("3000"),
+        )
+        apply_transaction(opening, is_new=True)
+        bid, hid = biller.pk, hsa.pk
+
+    client.force_login(owner)
+    client.post(_c(tenant, "health/invoices/new/"), {
+        "biller_organization": bid, "invoice_date": "2026-02-01", "status": "unpaid",
+        "amount_due": "300",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.health.models import ProviderInvoice
+
+        iid = ProviderInvoice.objects.get().pk
+
+    client.post(_c(tenant, f"health/invoices/{iid}/pay/"), {
+        "amount": "300", "date": "2026-02-05", "funding": "hsa", "hsa_account": hid,
+    })
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import account_balance
+        from apps.health.models import ProviderInvoice
+
+        inv = ProviderInvoice.objects.get(pk=iid)
+        assert inv.status == "paid"
+        assert account_balance("accounts_payable") == D("0")
+        assert account_balance(hsa.gl_account) == D("2700")  # HSA dropped by 300
+
+
+def test_pending_then_confirm_flow(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        bid = _org().pk
+    client.force_login(owner)
+
+    client.post(_c(tenant, "health/invoices/new/"), {
+        "biller_organization": bid, "invoice_date": "2026-02-01",
+        "status": "pending_insurance", "amount_due": "0",
+    })
+    with schema_context(tenant.schema_name):
+        from apps.health.models import ProviderInvoice
+
+        inv = ProviderInvoice.objects.get()
+        assert inv.bill_id is None  # pending posts nothing
+        iid = inv.pk
+
+    client.post(_c(tenant, f"health/invoices/{iid}/confirm/"), {"amount_due": "180"})
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import account_balance
+
+        inv.refresh_from_db()
+        assert inv.status == "unpaid" and inv.bill_id is not None
+        assert account_balance("medical_expense") == D("180")
+
+
+# --- tenant isolation ------------------------------------------------------------------------
+
+def test_health_tenant_isolation(make_tenant, make_user, client):
+    a, owner_a = _owner(make_tenant, make_user, name="Alpha", email="a@h.test")
+    b, owner_b = _owner(make_tenant, make_user, name="Beta", email="b@h.test")
+    with schema_context(a.schema_name):
+        from apps.health.models import Encounter
+
+        enc = Encounter.objects.create(patient=_person("Alpha", "Only"), date="2026-01-01")
+        eid = enc.pk
+
+    client.force_login(owner_b)
+    assert "Alpha Only" not in client.get(_c(b, "health/visits/")).content.decode()
+    assert client.get(_c(b, f"health/visits/{eid}/")).status_code == 404
+    assert client.get(_c(a, "health/visits/")).status_code == 403  # not a member of A
+
+    client.force_login(owner_a)
+    assert client.get(_c(a, f"health/visits/{eid}/")).status_code == 200
+    with schema_context(b.schema_name):
+        assert Encounter.objects.count() == 0  # zero leak into B

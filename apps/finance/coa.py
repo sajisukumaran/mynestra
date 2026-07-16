@@ -145,7 +145,16 @@ CHART_OF_ACCOUNTS = [
     ("5340", "Vehicle Insurance", EXPENSE, "5300", True, "vehicle_insurance"),
     ("5350", "Vehicle Registration", EXPENSE, "5300", True, "vehicle_registration"),
     ("5360", "Vehicle Lease", EXPENSE, "5300", True, "vehicle_lease"),
-    ("5400", "Health & Medical", EXPENSE, "5000", True, ""),
+    # 5400 is a group header: the Health module posts each encounter's provider invoices to the
+    # child matching its encounter type (medical / dental / vision / hospital) and prescriptions to
+    # pharmacy. Per-type children give finer household reporting; all remappable per encounter in
+    # Expert mode.
+    ("5400", "Health & Medical", EXPENSE, "5000", False, "health_medical"),
+    ("5410", "Doctor / Medical", EXPENSE, "5400", True, "medical_expense"),
+    ("5420", "Dental", EXPENSE, "5400", True, "dental_expense"),
+    ("5430", "Vision", EXPENSE, "5400", True, "vision_expense"),
+    ("5440", "Pharmacy / Prescriptions", EXPENSE, "5400", True, "pharmacy_expense"),
+    ("5450", "Hospital", EXPENSE, "5400", True, "hospital_expense"),
     # 5500 is a group header: the Insurance module posts each policy's premiums to the child
     # matching its policy type (auto premiums keep their own 5340 home; home/renters use 5150 /
     # 5540). Per-type children give finer household reporting; all remappable per policy in Expert

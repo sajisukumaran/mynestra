@@ -1,0 +1,79 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Dashboard{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><span class="strong">Health</span></c-breadcrumb>
+
+<c-page-header title="Health" subtitle="Visits and medical bills — what's paid, what's owed, and to whom.">
+  <c-slot name="actions">
+    <c-button href="{{ ui_tenant_url }}health/invoices/new/"><c-icon name="plus" /> New invoice</c-button>
+    <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/new/"><c-icon name="plus" /> New visit</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-20">
+  <div class="stat-grid">
+    <c-stat-tile icon="banknote" tint="rose" value="" label="You owe">
+      <c-slot name="foot"><c-money :amount="total_owed" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /> across {{ owed_count }} {{ owed_count|pluralize:'invoice,invoices' }}</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="triangle-alert" tint="amber" value="{{ overdue_count }}" label="Overdue">
+      <c-slot name="foot"><c-money :amount="overdue_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> past due</c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="calendar-days" tint="sky" value="{{ encounters_count }}" label="Visits">
+      <c-slot name="foot"><a href="{{ ui_tenant_url }}health/visits/">View all</a></c-slot>
+    </c-stat-tile>
+    <c-stat-tile icon="file-text" tint="violet" value="{{ invoices_count }}" label="Invoices">
+      <c-slot name="foot"><a href="{{ ui_tenant_url }}health/invoices/">View all</a></c-slot>
+    </c-stat-tile>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="users" title="Outstanding by provider">
+      <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/providers/">View all</c-button></c-slot>
+      {% for r in by_provider %}
+      <c-rel-row name="{{ r.name }}" role="{{ r.count }} {{ r.count|pluralize:'invoice,invoices' }}{% if r.overdue %} · overdue{% endif %}">
+        <c-slot name="avatar"><c-avatar tint="slate" size="sm" square><c-icon name="landmark" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="r.outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="circle-check" title="Nothing outstanding" text="Bills you still owe show up here, grouped by provider." />
+      {% endfor %}
+    </c-card>
+    <c-card icon="triangle-alert" title="Overdue invoices">
+      {% for inv in overdue %}
+      <c-rel-row name="{{ inv.biller_name }}" role="Due {{ inv.due_date|date:'d M Y' }}{% if inv.invoice_number %} · #{{ inv.invoice_number }}{% endif %}" href="{{ ui_tenant_url }}health/invoices/{{ inv.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="amber" size="sm" square><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="inv.outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="circle-check" title="Nothing overdue" text="Owed invoices past their due date show up here." />
+      {% endfor %}
+    </c-card>
+  </div>
+
+  <div class="grid-2">
+    <c-card icon="clock" title="Recent visits">
+      {% for e in recent_visits %}
+      <c-rel-row name="{{ e.display }}" role="{{ e.patient_name }} · {{ e.date|date:'d M Y' }}" href="{{ ui_tenant_url }}health/visits/{{ e.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ e.type_tint }}" size="sm" square><c-icon name="{{ e.type_glyph }}" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-chip tint="{{ e.type_tint }}">{{ e.type_label }}</c-chip></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="calendar-days" title="No visits yet" text="Log a visit to start grouping its provider invoices.">
+        <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/new/"><c-icon name="plus" /> New visit</c-button>
+      </c-empty-state>
+      {% endfor %}
+    </c-card>
+    <c-card icon="banknote" title="Recently paid">
+      {% for p in recent_payments %}
+      <c-rel-row name="{{ p.vendor_name }}" role="{{ p.funding_label }} · {{ p.date|date:'d M Y' }}">
+        <c-slot name="avatar"><c-avatar tint="emerald" size="sm"><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="banknote" title="No payments yet" text="Payments you record on an invoice show up here." />
+      {% endfor %}
+    </c-card>
+  </div>
+</div>
+{% endblock %}

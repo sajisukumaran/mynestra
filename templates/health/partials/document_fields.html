@@ -1,0 +1,15 @@
+{% comment %}Upload-document modal fields. The enclosing <form> must set method="post"
+enctype="multipart/form-data".{% endcomment %}
+<div class="stack-16">
+  <c-field label="File" required><div class="control"><input type="file" name="document" required></div></c-field>
+  <c-field label="Title" help="Defaults to the file name."><c-input name="title" placeholder="e.g. EOB / itemized bill" /></c-field>
+  <c-field label="Type">
+    <div class="control is-select">
+      <select name="doc_type">
+        {% for val, label in document_types %}<option value="{{ val }}"{% if val == 'other' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <c-field label="Note"><c-input name="note" placeholder="Optional note" /></c-field>
+</div>

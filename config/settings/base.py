@@ -61,6 +61,7 @@ TENANT_APPS = [
     "apps.automobile",         # Vehicles: owned-at-cost + leased; costs → locked bills (module 8)
     "apps.insurance",          # Insurance: policies + premiums (→ locked bills) + claims (Plan B)
     "apps.realestate",         # Real Estate: owned property at cost; costs → locked bills (Plan C)
+    "apps.health",             # Health: visits + provider invoices (→ locked bills) + Rx (Plan D)
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [a for a in TENANT_APPS if a not in SHARED_APPS]

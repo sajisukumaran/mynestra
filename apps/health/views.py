@@ -1,0 +1,639 @@
+"""Health views (tenant-scoped, member-accessible). A dashboard (you-owe + overdue + recently paid +
+outstanding-by-provider), a visit register + detail (Invoices / People / Documents / History tabs),
+provider invoices (quick total or itemized EOB) with a partial-payment modal (bank / card / cash /
+HSA), the dispute / write-off / refund actions, and an outstanding-by-provider view. Every money
+movement goes through apps.health.services (locked payables bills / payments)."""
+
+import datetime
+from decimal import Decimal, InvalidOperation
+
+from django.core.paginator import Paginator
+from django.db import transaction
+from django.db.models import Q
+from django.shortcuts import get_object_or_404, redirect, render
+from django.utils.dateparse import parse_date
+
+from apps.contacts.models import Person
+from apps.finance.models import Account, AccountType
+from apps.finance.services import base_currency
+from apps.health.forms import EncounterForm, InvoiceForm
+from apps.health.models import (
+    DocumentType,
+    Encounter,
+    EncounterProvider,
+    EncounterSetting,
+    EncounterType,
+    Funding,
+    HealthDocument,
+    InvoiceCharge,
+    InvoiceStatus,
+    ProviderInvoice,
+    ProviderRole,
+    VisitStatus,
+)
+from apps.health.services import (
+    confirm_invoice,
+    dashboard_stats,
+    delete_document,
+    delete_invoice,
+    delete_invoice_payment,
+    dispute_invoice,
+    link_provider_affiliation,
+    outstanding_by_provider,
+    record_invoice_payment,
+    record_refund,
+    resolve_dispute,
+    save_encounter,
+    save_invoice,
+    total_unpaid,
+    write_off_invoice,
+)
+from apps.organizations.models import Organization
+from apps.tenants.models import Membership, Role
+
+ENCOUNTER_SORTS = {
+    "added": ("-id",),
+    "date": ("date", "id"),
+    "-date": ("-date", "-id"),
+}
+
+
+def tenant_url(request, path=""):
+    return f"/t/{request.tenant.schema_name}/{path}"
+
+
+def _is_owner(request) -> bool:
+    return Membership.objects.filter(
+        user=request.user, tenant=request.tenant, role=Role.OWNER
+    ).exists()
+
+
+def health_context(request, active, **extra):
+    ctx = {
+        "active": active,
+        "is_owner": _is_owner(request),
+        "nav_visits": Encounter.objects.count(),
+        "nav_invoices": ProviderInvoice.objects.count(),
+    }
+    ctx.update(extra)
+    return ctx
+
+
+def _decimal(raw):
+    try:
+        return Decimal((raw or "").strip())
+    except (InvalidOperation, TypeError):
+        return None
+
+
+# --- shared pick-lists -----------------------------------------------------------------------
+
+def _people():
+    return Person.objects.all().order_by("last_name", "first_name")
+
+
+def _organizations():
+    return Organization.objects.all().order_by("name")
+
+
+def _bank_accounts():
+    from apps.banking.models import BankAccount
+
+    return BankAccount.objects.select_related("bank").all()
+
+
+def _credit_cards():
+    from apps.cards.models import CreditCard
+
+    return CreditCard.objects.all()
+
+
+def _cash_accounts():
+    return Account.objects.filter(type=AccountType.ASSET, is_postable=True).order_by("code")
+
+
+def _hsa_accounts():
+    from apps.investments.models import InvestmentAccount
+
+    return InvestmentAccount.objects.filter(registration="hsa", is_active=True).order_by("nickname")
+
+
+def _resolve_org(request, field):
+    """A picked org id or an inline-created org by name (mirrors realestate / payables)."""
+    new_name = request.POST.get(f"{field}_new_name", "").strip()
+    if new_name:
+        return Organization.objects.create(name=new_name)
+    oid = request.POST.get(field) or 0
+    return Organization.objects.filter(pk=oid).first()
+
+
+def _resolve_person(request, field):
+    pid = request.POST.get(field) or 0
+    return Person.objects.filter(pk=pid).first()
+
+
+def _form_context(request, **extra):
+    ctx = {
+        "people": _people(),
+        "organizations": _organizations(),
+        "encounter_types": EncounterType.choices,
+        "settings": EncounterSetting.choices,
+        "visit_statuses": VisitStatus.choices,
+        "provider_roles": ProviderRole.choices,
+        "invoice_statuses": InvoiceStatus.choices,
+        "fundings": Funding.choices,
+        "document_types": DocumentType.choices,
+        "bank_accounts": _bank_accounts(),
+        "credit_cards": _credit_cards(),
+        "cash_accounts": _cash_accounts(),
+        "hsa_accounts": _hsa_accounts(),
+        "base": base_currency(),
+        "today": datetime.date.today(),
+    }
+    ctx.update(extra)
+    return ctx
+
+
+# --- Dashboard ------------------------------------------------------------------------------
+
+def dashboard(request):
+    stats = dashboard_stats()
+    recent_visits = list(
+        Encounter.objects.select_related("patient", "facility").order_by("-date", "-id")[:8]
+    )
+    overdue = [
+        inv for inv in ProviderInvoice.objects.select_related(
+            "biller_person", "biller_organization", "bill"
+        )
+        if inv.is_overdue
+    ]
+    overdue.sort(key=lambda i: i.due_date)
+    ctx = health_context(
+        request, "dashboard", base=base_currency(),
+        recent_visits=recent_visits, overdue=overdue[:8], **stats,
+    )
+    return render(request, "health/dashboard.html", ctx)
+
+
+# --- Outstanding by provider ----------------------------------------------------------------
+
+def providers(request):
+    rows = outstanding_by_provider()
+    ctx = health_context(
+        request, "providers", base=base_currency(),
+        rows=rows, total=total_unpaid(),
+    )
+    return render(request, "health/providers.html", ctx)
+
+
+# --- Encounter register ---------------------------------------------------------------------
+
+def encounter_list(request):
+    qs = Encounter.objects.select_related("patient", "facility", "primary_provider")
+    q = request.GET.get("q", "").strip()
+    if q:
+        qs = qs.filter(
+            Q(reason__icontains=q) | Q(notes__icontains=q)
+            | Q(patient__first_name__icontains=q) | Q(patient__last_name__icontains=q)
+            | Q(facility__name__icontains=q)
+        ).distinct()
+    etype = request.GET.get("type", "")
+    if etype in EncounterType.values:
+        qs = qs.filter(encounter_type=etype)
+    sort = request.GET.get("sort", "-date")
+    if sort not in ENCOUNTER_SORTS:
+        sort = "-date"
+    qs = qs.order_by(*ENCOUNTER_SORTS[sort])
+
+    total = Encounter.objects.count()
+    type_chips = [
+        {"val": val, "label": label,
+         "count": Encounter.objects.filter(encounter_type=val).count()}
+        for val, label in EncounterType.choices
+    ]
+    page = Paginator(qs, 12).get_page(request.GET.get("page"))
+    ctx = health_context(
+        request, "visits", base=base_currency(),
+        page=page, encounters=list(page.object_list), q=q, type=etype, sort=sort,
+        total=total, type_chips=type_chips,
+    )
+    return render(request, "health/encounter_list.html", ctx)
+
+
+def encounter_create(request):
+    return _encounter_form(request, Encounter(), "create")
+
+
+def encounter_edit(request, pk):
+    return _encounter_form(request, get_object_or_404(Encounter, pk=pk), "edit")
+
+
+def _apply_encounter(request, enc):
+    etype = request.POST.get("encounter_type") or EncounterType.MEDICAL
+    setting = request.POST.get("setting") or EncounterSetting.OFFICE
+    vstatus = request.POST.get("visit_status") or VisitStatus.COMPLETED
+    date = parse_date(request.POST.get("date") or "")
+    patient = _resolve_person(request, "patient")
+    if date is None or patient is None:
+        return None
+    enc.patient = patient
+    enc.encounter_type = etype if etype in EncounterType.values else EncounterType.MEDICAL
+    enc.setting = setting if setting in EncounterSetting.values else EncounterSetting.OFFICE
+    enc.visit_status = vstatus if vstatus in VisitStatus.values else VisitStatus.COMPLETED
+    enc.date = date
+    enc.facility = _resolve_org(request, "facility")
+    enc.primary_provider = _resolve_person(request, "primary_provider")
+    enc.reason = request.POST.get("reason", "").strip()
+    enc.notes = request.POST.get("notes", "").strip()
+    return enc
+
+
+def _save_roster(request, enc):
+    pids = request.POST.getlist("provider_person")
+    roles = request.POST.getlist("provider_role")
+    orgs = request.POST.getlist("provider_org")
+    notes = request.POST.getlist("provider_note")
+    enc.providers.all().delete()
+    seen = set()
+    order = 0
+    for i, pid in enumerate(pids):
+        role = roles[i] if i < len(roles) else ProviderRole.ATTENDING
+        role = role if role in ProviderRole.values else ProviderRole.ATTENDING
+        key = (pid, role)
+        if not pid or key in seen:
+            continue
+        person = Person.objects.filter(pk=pid).first()
+        if person is None:
+            continue
+        seen.add(key)
+        org = Organization.objects.filter(pk=orgs[i] if i < len(orgs) else 0).first()
+        EncounterProvider.objects.create(
+            encounter=enc, person=person, role=role, organization=org,
+            note=(notes[i] if i < len(notes) else "").strip(), order=order,
+        )
+        order += 1
+        if org is not None:  # persist the doctor ↔ business affiliation
+            link_provider_affiliation(person, org)
+
+
+def _encounter_form(request, enc, mode):
+    form = EncounterForm(request.POST or None, instance=enc)
+    error = ""
+    if request.method == "POST":
+        if form.is_valid():
+            enc = form.save(commit=False)
+            if _apply_encounter(request, enc) is not None:
+                enc.save()
+                _save_roster(request, enc)
+                save_encounter(enc, user=request.user, is_new=(mode == "create"))
+                return redirect(tenant_url(request, f"health/visits/{enc.pk}/"))
+            error = "Choose the patient and the visit date."
+        else:
+            error = "Please complete the required fields."
+    ctx = health_context(
+        request, "visits", mode=mode, form=form, encounter=enc, error=error,
+        roster=list(enc.providers.select_related("person", "organization").all()) if enc.pk else [],
+        **_form_context(request),
+    )
+    return render(request, "health/encounter_form.html", ctx)
+
+
+def encounter_delete(request, pk):
+    enc = get_object_or_404(Encounter, pk=pk)
+    if request.method == "POST":
+        # Refuse if any invoice has a foreign Payables payment; otherwise erase its invoices' bills.
+        try:
+            with transaction.atomic():
+                for inv in list(enc.invoices.all()):
+                    delete_invoice(inv, user=request.user)
+                enc.hard_delete()
+        except ValueError:
+            return redirect(tenant_url(request, f"health/visits/{pk}/"))
+    return redirect(tenant_url(request, "health/visits/"))
+
+
+# --- Encounter detail -----------------------------------------------------------------------
+
+def encounter_detail(request, pk):
+    enc = get_object_or_404(
+        Encounter.objects.select_related("patient", "facility", "primary_provider"), pk=pk
+    )
+    invoices = list(
+        enc.invoices.select_related("bill", "biller_person", "biller_organization",
+                                    "rendering_provider").order_by("-invoice_date", "-id")
+    )
+    ctx = health_context(
+        request, "visits", encounter=enc,
+        invoices=invoices,
+        roster=list(enc.providers.select_related("person", "organization").all()),
+        documents=list(enc.documents.all()),
+        history=enc.history.all()[:60],
+        **_form_context(request),
+    )
+    return render(request, "health/encounter_detail.html", ctx)
+
+
+# --- Invoices -------------------------------------------------------------------------------
+
+def invoice_list(request):
+    qs = ProviderInvoice.objects.select_related(
+        "bill", "biller_person", "biller_organization", "encounter"
+    )
+    status = request.GET.get("status", "")
+    if status in InvoiceStatus.values:
+        qs = qs.filter(status=status)
+    qs = qs.order_by("-invoice_date", "-id")
+    total = ProviderInvoice.objects.count()
+    status_chips = [
+        {"val": val, "label": label,
+         "count": ProviderInvoice.objects.filter(status=val).count()}
+        for val, label in InvoiceStatus.choices
+    ]
+    page = Paginator(qs, 15).get_page(request.GET.get("page"))
+    ctx = health_context(
+        request, "invoices", base=base_currency(),
+        page=page, invoices=list(page.object_list), status=status, total=total,
+        status_chips=status_chips, total_owed=total_unpaid(),
+    )
+    return render(request, "health/invoice_list.html", ctx)
+
+
+def _resolve_biller(request, inv):
+    """Biller = an organization (search-select + inline-create) OR a person (select)."""
+    org = _resolve_org(request, "biller_organization")
+    if org is not None:
+        inv.biller_organization = org
+        inv.biller_person = None
+        return
+    person = _resolve_person(request, "biller_person")
+    inv.biller_organization = None
+    inv.biller_person = person
+
+
+def _apply_invoice(request, inv):
+    idate = parse_date(request.POST.get("invoice_date") or "")
+    if idate is None:
+        return None
+    inv.invoice_date = idate
+    inv.due_date = parse_date(request.POST.get("due_date") or "") or None
+    status = request.POST.get("status") or InvoiceStatus.UNPAID
+    inv.status = status if status in InvoiceStatus.values else InvoiceStatus.UNPAID
+    inv.invoice_number = request.POST.get("invoice_number", "").strip()
+    inv.reference = request.POST.get("reference", "").strip()
+    inv.memo = request.POST.get("memo", "").strip()
+    inv.amount_due = _decimal(request.POST.get("amount_due")) or Decimal("0")
+    _resolve_biller(request, inv)
+    inv.rendering_provider = _resolve_person(request, "rendering_provider")
+    return inv
+
+
+def _save_charges(request, inv):
+    descs = request.POST.getlist("charge_description")
+    if not any(d.strip() for d in descs):
+        return  # no itemization supplied — keep the bare amount_due
+    codes = request.POST.getlist("charge_code")
+    billed = request.POST.getlist("charge_billed")
+    allowed = request.POST.getlist("charge_allowed")
+    ins_paid = request.POST.getlist("charge_insurance_paid")
+    deduct = request.POST.getlist("charge_deductible")
+    copay = request.POST.getlist("charge_copay")
+    coins = request.POST.getlist("charge_coinsurance")
+    noncov = request.POST.getlist("charge_noncovered")
+    inv.charges.all().delete()
+
+    def _d(lst, i):
+        return _decimal(lst[i] if i < len(lst) else "") or Decimal("0")
+
+    order = 0
+    for i, desc in enumerate(descs):
+        if not desc.strip():
+            continue
+        InvoiceCharge.objects.create(
+            invoice=inv, description=desc.strip(), order=order,
+            service_code=(codes[i] if i < len(codes) else "").strip(),
+            billed=_d(billed, i), allowed=_d(allowed, i), insurance_paid=_d(ins_paid, i),
+            deductible_amount=_d(deduct, i), copay_amount=_d(copay, i),
+            coinsurance_amount=_d(coins, i), noncovered_amount=_d(noncov, i),
+        )
+        order += 1
+
+
+def _invoice_form(request, inv, mode, *, encounter=None):
+    form = InvoiceForm(request.POST or None, instance=inv)
+    error = ""
+    if request.method == "POST":
+        if form.is_valid():
+            inv = form.save(commit=False)
+            if encounter is not None:
+                inv.encounter = encounter
+            if _apply_invoice(request, inv) is None:
+                error = "Enter the invoice date."
+            elif inv.status != InvoiceStatus.PENDING_INSURANCE and inv.biller is None:
+                # A posted invoice needs a biller (the bill's vendor); don't persist an orphan row.
+                error = "Choose the biller, or set the status to Pending insurance."
+            else:
+                inv.save()
+                _save_charges(request, inv)
+                save_invoice(inv, user=request.user, is_new=(mode == "create"))
+                return redirect(tenant_url(request, f"health/invoices/{inv.pk}/"))
+        else:
+            error = "Please complete the required fields."
+    ctx = health_context(
+        request, "invoices", mode=mode, form=form, invoice=inv, encounter=encounter,
+        error=error, charges=list(inv.charges.all()) if inv.pk else [],
+        **_form_context(request),
+    )
+    return render(request, "health/invoice_form.html", ctx)
+
+
+def invoice_create(request):
+    return _invoice_form(request, ProviderInvoice(), "create")
+
+
+def invoice_create_for_visit(request, pk):
+    enc = get_object_or_404(Encounter, pk=pk)
+    return _invoice_form(request, ProviderInvoice(encounter=enc), "create", encounter=enc)
+
+
+def invoice_edit(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    return _invoice_form(request, inv, "edit", encounter=inv.encounter)
+
+
+def invoice_detail(request, pk):
+    inv = get_object_or_404(
+        ProviderInvoice.objects.select_related(
+            "bill", "biller_person", "biller_organization", "rendering_provider", "encounter"
+        ),
+        pk=pk,
+    )
+    from apps.health.services import duplicate_warnings, invoice_payments
+
+    payments = list(invoice_payments(inv)) if inv.bill_id is not None else []
+
+    ctx = health_context(
+        request, "invoices", invoice=inv,
+        charges=list(inv.charges.all()),
+        payments=payments,
+        documents=list(inv.documents.all()),
+        history=inv.history.all()[:60],
+        warnings=duplicate_warnings(inv),
+        **_form_context(request),
+    )
+    return render(request, "health/invoice_detail.html", ctx)
+
+
+def invoice_delete(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    enc_id = inv.encounter_id
+    if request.method == "POST":
+        try:
+            delete_invoice(inv, user=request.user)
+        except ValueError:
+            return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+    dest = f"health/visits/{enc_id}/" if enc_id else "health/invoices/"
+    return redirect(tenant_url(request, dest))
+
+
+def invoice_confirm(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    if request.method == "POST":
+        amount = _decimal(request.POST.get("amount_due"))
+        if amount is not None:
+            inv.amount_due = amount
+            inv.save(update_fields=["amount_due", "updated_at"])
+        confirm_invoice(inv, user=request.user)
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+# --- Payments -------------------------------------------------------------------------------
+
+def _resolve_funding_target(request, funding):
+    if funding == Funding.BANK:
+        return {"account": _bank_accounts().filter(pk=request.POST.get("funding_account") or 0)
+                .first()}
+    if funding == Funding.CARD:
+        return {"card": _credit_cards().filter(pk=request.POST.get("credit_card") or 0).first()}
+    if funding == Funding.CASH:
+        return {"cash": Account.objects.filter(
+            pk=request.POST.get("cash_account") or 0, is_postable=True).first()}
+    if funding == Funding.HSA:
+        return {"hsa": _hsa_accounts().filter(pk=request.POST.get("hsa_account") or 0).first()}
+    return {}
+
+
+def invoice_pay(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    if request.method == "POST":
+        amount = _decimal(request.POST.get("amount"))
+        date = parse_date(request.POST.get("date") or "")
+        funding = request.POST.get("funding") or Funding.BANK
+        if amount and amount > 0 and date and funding in Funding.values and inv.bill_id:
+            kw = _resolve_funding_target(request, funding)
+            try:
+                record_invoice_payment(inv, amount=amount, date=date, funding=funding,
+                                       user=request.user, **kw)
+            except ValueError:
+                pass  # e.g. HSA chosen without an account — surface via the detail page
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+def invoice_payment_delete(request, pk, pay):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    from apps.health.services import invoice_payments
+
+    payment = get_object_or_404(invoice_payments(inv), pk=pay)
+    if request.method == "POST":
+        delete_invoice_payment(inv, payment, user=request.user)
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+# --- Write-off / dispute / refund -----------------------------------------------------------
+
+def invoice_writeoff(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    if request.method == "POST":
+        new_total = _decimal(request.POST.get("new_total")) or Decimal("0")
+        try:
+            write_off_invoice(inv, new_total=new_total, user=request.user)
+        except ValueError:
+            pass
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+def invoice_dispute(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    if request.method == "POST":
+        dispute_invoice(inv, user=request.user)
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+def invoice_resolve(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    if request.method == "POST":
+        resolve_dispute(inv, user=request.user)
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+def invoice_refund(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    if request.method == "POST":
+        amount = _decimal(request.POST.get("amount"))
+        date = parse_date(request.POST.get("date") or "") or datetime.date.today()
+        dest = request.POST.get("dest") or Funding.BANK
+        if amount and amount > 0 and dest in Funding.values:
+            kw = _resolve_funding_target(request, dest)
+            mapped = {
+                "account": "bank", "card": None, "cash": "cash", "hsa": "hsa",
+            }
+            call_kw = {}
+            for k, v in kw.items():
+                target = mapped.get(k)
+                if target:
+                    call_kw[target] = v
+            try:
+                record_refund(inv, amount=amount, dest=dest, date=date, user=request.user,
+                              **call_kw)
+            except ValueError:
+                pass
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+# --- Documents ------------------------------------------------------------------------------
+
+def _upload_document(request, *, encounter=None, invoice=None):
+    if request.method == "POST" and "document" in request.FILES:
+        dtype = request.POST.get("doc_type") or DocumentType.OTHER
+        doc = HealthDocument(
+            encounter=encounter, invoice=invoice,
+            title=request.POST.get("title", "").strip() or request.FILES["document"].name,
+            doc_type=dtype if dtype in DocumentType.values else DocumentType.OTHER,
+            note=request.POST.get("note", "").strip(),
+            file=request.FILES["document"],
+        )
+        doc.save()
+
+
+def encounter_document_upload(request, pk):
+    enc = get_object_or_404(Encounter, pk=pk)
+    _upload_document(request, encounter=enc)
+    return redirect(tenant_url(request, f"health/visits/{pk}/"))
+
+
+def invoice_document_upload(request, pk):
+    inv = get_object_or_404(ProviderInvoice, pk=pk)
+    _upload_document(request, invoice=inv)
+    return redirect(tenant_url(request, f"health/invoices/{pk}/"))
+
+
+def document_delete(request, did):
+    doc = get_object_or_404(HealthDocument, pk=did)
+    if doc.encounter_id:
+        dest = f"health/visits/{doc.encounter_id}/"
+    elif doc.invoice_id:
+        dest = f"health/invoices/{doc.invoice_id}/"
+    else:
+        dest = "health/"
+    if request.method == "POST":
+        delete_document(doc)
+    return redirect(tenant_url(request, dest))

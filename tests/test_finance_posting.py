@@ -99,7 +99,7 @@ def test_repost_entry_edits_in_place_without_reversal(make_tenant):
         repost_entry(
             entry,
             lines=[
-                LineInput("5400", debit=D("150")),
+                LineInput("5410", debit=D("150")),
                 LineInput("2300", credit=D("150")),
             ],
             description="Grocery bill (fixed)",
@@ -112,7 +112,7 @@ def test_repost_entry_edits_in_place_without_reversal(make_tenant):
         assert entry.external_key == "test:bill:1:v1"
         assert entry.lines.count() == 2
         assert account_balance("2300") == D("150")  # AP (credit-normal) reflects the new total
-        assert account_balance("5400") == D("150")
+        assert account_balance("5410") == D("150")
         assert account_balance("5200") == D("0")  # old expense line gone
 
 
@@ -343,17 +343,17 @@ def test_line_carries_optional_counterparty(make_tenant):
         entry = post_entry(
             date=JAN,
             lines=[
-                LineInput("5400", debit=D("60"), person=person),  # Health expense to Dr Smith
+                LineInput("5410", debit=D("60"), person=person),  # Health expense to Dr Smith
                 LineInput("1110", credit=D("60")),
             ],
         )
-        assert entry.lines.get(account__code="5400").person_id == person.pk
+        assert entry.lines.get(account__code="5410").person_id == person.pk
         org = Organization.objects.create(name="Clinic")
         with pytest.raises(InvalidLine):  # at most one counterparty
             post_entry(
                 date=JAN,
                 lines=[
-                    LineInput("5400", debit=D("10"), person=person, organization=org),
+                    LineInput("5410", debit=D("10"), person=person, organization=org),
                     LineInput("1110", credit=D("10")),
                 ],
             )

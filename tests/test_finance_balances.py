@@ -236,14 +236,14 @@ def test_party_balance_aggregates_counterparty(make_tenant):
         post_entry(
             date=JAN,
             lines=[
-                LineInput("5400", debit=D("60"), person=person),
+                LineInput("5410", debit=D("60"), person=person),
                 LineInput("1110", credit=D("60")),
             ],
         )
         post_entry(
             date=JAN,
             lines=[
-                LineInput("5400", debit=D("40"), person=person),
+                LineInput("5410", debit=D("40"), person=person),
                 LineInput("1110", credit=D("40")),
             ],
         )

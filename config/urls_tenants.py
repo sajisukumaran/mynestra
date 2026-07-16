@@ -23,6 +23,7 @@ urlpatterns = [
     path("automobile/", include("apps.automobile.urls")),
     path("insurance/", include("apps.insurance.urls")),
     path("realestate/", include("apps.realestate.urls")),
+    path("health/", include("apps.health.urls")),
     path("setup/", include("apps.setup.urls")),
     # Legacy P1 invite route; invitations now live in Setup → Members (P3).
     path(
@@ -30,7 +31,9 @@ urlpatterns = [
         RedirectView.as_view(url="../setup/members/", permanent=False),
         name="invite-create",
     ),
-    path("health/", health, name="tenant-health"),
+    # Tenant uptime probe. Renamed from `health/` to `healthz/` so the Health module (Plan D) can
+    # own the `health/` mount above; the public `/health/` uptime route is unaffected.
+    path("healthz/", health, name="tenant-health"),
 ]
 
 # Error handlers must be defined on the tenant urlconf: django-tenants' urlconf wrapper raises

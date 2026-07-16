@@ -104,7 +104,7 @@ def test_finance_ledger_source_and_party_are_isolated(make_tenant):
             date=datetime.date(2026, 1, 5),
             source=org,
             lines=[
-                LineInput("5400", debit=Decimal("100"), person=person),
+                LineInput("5410", debit=Decimal("100"), person=person),
                 LineInput("1110", credit=Decimal("100")),
             ],
         )

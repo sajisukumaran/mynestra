@@ -1,0 +1,92 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}{% if mode == 'edit' %}Edit visit{% else %}New visit{% endif %}{% endblock %}
+
+{% block hl %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/visits/">Visits</a><c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'edit' %}{{ encounter.display }}{% else %}New{% endif %}</span>
+</c-breadcrumb>
+
+<c-page-header title="{% if mode == 'edit' %}Edit visit{% else %}New visit{% endif %}"
+               subtitle="Record who you saw, where, and everyone involved." />
+
+{% if error %}<c-hint icon="triangle-alert" variant="danger">{{ error }}</c-hint>{% endif %}
+
+<form method="post"
+      x-data="{ roster: [] }">{% csrf_token %}
+  <div class="stack-20">
+    <c-card icon="info" title="Visit">
+      <div class="form-grid">
+        <c-field label="Patient" required>
+          <div class="control is-select">
+            <select name="patient">
+              <option value="">—</option>
+              {% for p in people %}<option value="{{ p.pk }}"{% if encounter.patient_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}
+            </select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+        <c-field label="Date" required><div class="control"><input type="date" name="date" value="{% if encounter.pk %}{{ encounter.date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+        <c-field label="Type" required>
+          <c-select name="encounter_type">{% for val, label in encounter_types %}<option value="{{ val }}"{% if encounter.encounter_type == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Setting">
+          <c-select name="setting">{% for val, label in settings %}<option value="{{ val }}"{% if encounter.setting == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Visit status">
+          <c-select name="visit_status">{% for val, label in visit_statuses %}<option value="{{ val }}"{% if encounter.visit_status == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+      </div>
+      <div class="form-grid" style="margin-top:12px;">
+        <c-field label="Facility" help="Where the visit happened.">
+          <div class="control is-select">
+            <select name="facility"><option value="">—</option>{% for o in organizations %}<option value="{{ o.pk }}"{% if encounter.facility_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+          <c-input name="facility_new_name" placeholder="…or type a new facility name" />
+        </c-field>
+        <c-field label="Primary provider" help="The main doctor you saw.">
+          <div class="control is-select">
+            <select name="primary_provider"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if encounter.primary_provider_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+      </div>
+      <c-field label="Reason" style="margin-top:12px;">{{ form.reason }}</c-field>
+      <c-field label="Notes">{{ form.notes }}</c-field>
+    </c-card>
+
+    <c-card icon="users" title="Everyone involved">
+      <c-slot name="actions"><c-button type="button" size="sm" @click="roster.push({ person:'', role:'other', org:'', note:'' })"><c-icon name="plus" size="sm" /> Add person</c-button></c-slot>
+      {% if roster %}
+      {# Existing roster rows (rendered server-side for edit) #}
+      {% for r in roster %}
+      <div class="form-grid" style="margin-bottom:8px;">
+        <div class="control is-select"><select name="provider_person"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if r.person_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select><c-icon name="chevron-down" size="sm" class="subtle" /></div>
+        <div class="control is-select"><select name="provider_role">{% for val, label in provider_roles %}<option value="{{ val }}"{% if r.role == val %} selected{% endif %}>{{ label }}</option>{% endfor %}</select><c-icon name="chevron-down" size="sm" class="subtle" /></div>
+        <div class="control is-select"><select name="provider_org"><option value="">— affiliation —</option>{% for o in organizations %}<option value="{{ o.pk }}"{% if r.organization_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select><c-icon name="chevron-down" size="sm" class="subtle" /></div>
+        <input name="provider_note" value="{{ r.note }}" placeholder="Note">
+      </div>
+      {% endfor %}
+      {% endif %}
+      {# New rows (Alpine) #}
+      <template x-for="(row, i) in roster" :key="i">
+        <div class="form-grid" style="margin-bottom:8px;">
+          <div class="control is-select"><select name="provider_person" x-model="row.person"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}">{{ p.display_name }}</option>{% endfor %}</select><c-icon name="chevron-down" size="sm" class="subtle" /></div>
+          <div class="control is-select"><select name="provider_role" x-model="row.role">{% for val, label in provider_roles %}<option value="{{ val }}">{{ label }}</option>{% endfor %}</select><c-icon name="chevron-down" size="sm" class="subtle" /></div>
+          <div class="control is-select"><select name="provider_org" x-model="row.org"><option value="">— affiliation —</option>{% for o in organizations %}<option value="{{ o.pk }}">{{ o.display }}</option>{% endfor %}</select><c-icon name="chevron-down" size="sm" class="subtle" /></div>
+          <div class="row"><input name="provider_note" x-model="row.note" placeholder="Note"><c-button type="button" icon_only size="sm" variant="ghost" @click="roster.splice(i,1)"><c-icon name="x" size="sm" /></c-button></div>
+        </div>
+      </template>
+      <p class="subtle">Adding a person with an affiliation records a persistent “practices at” link in Contacts.</p>
+    </c-card>
+
+    <div class="row">
+      <c-button type="submit" variant="primary">{% if mode == 'edit' %}Save changes{% else %}Create visit{% endif %}</c-button>
+      <c-button variant="ghost" href="{{ ui_tenant_url }}health/visits/">Cancel</c-button>
+    </div>
+  </div>
+</form>
+{% endblock %}

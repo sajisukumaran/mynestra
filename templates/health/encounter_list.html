@@ -1,0 +1,65 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}Visits{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" /><span class="strong">Visits</span></c-breadcrumb>
+
+<c-page-header title="Visits" subtitle="{{ total }} {{ total|pluralize:'visit,visits' }}">
+  <c-slot name="actions">
+    <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/new/"><c-icon name="plus" /> New visit</c-button>
+  </c-slot>
+</c-page-header>
+
+<div class="stack-16">
+  <form method="get" class="row wrap">
+    <label class="search"><c-icon name="search" size="sm" /><input name="q" value="{{ q }}" placeholder="Search by patient, facility or reason…"></label>
+    {% if type %}<input type="hidden" name="type" value="{{ type }}">{% endif %}
+    {% if q %}<c-button href="{{ ui_tenant_url }}health/visits/">Clear</c-button>{% endif %}
+  </form>
+
+  <div class="row wrap">
+    <a class="fchip{% if not type %} active{% endif %}" href="{% querystring type=None page=None %}">All <span class="cnt tnum">{{ total }}</span></a>
+    {% for chip in type_chips %}
+    <a class="fchip{% if type == chip.val %} active{% endif %}" href="{% querystring type=chip.val page=None %}">{{ chip.label }} <span class="cnt tnum">{{ chip.count }}</span></a>
+    {% endfor %}
+  </div>
+
+  <c-card flush>
+    {% if encounters %}
+    <c-table>
+      <thead><tr><c-th>Visit</c-th><c-th>Patient</c-th><c-th>Type</c-th><c-th>Status</c-th><th class="col-num">Outstanding</th></tr></thead>
+      <tbody>
+        {% for e in encounters %}
+        <tr>
+          <td>
+            <a href="{{ ui_tenant_url }}health/visits/{{ e.pk }}/" class="strong">{{ e.display }}</a>
+            <div class="muted tnum">{{ e.date|date:'d M Y' }}{% if e.reason %} · {{ e.reason }}{% endif %}</div>
+          </td>
+          <td class="muted">{{ e.patient_name }}</td>
+          <td><c-chip tint="{{ e.type_tint }}">{{ e.type_label }}</c-chip></td>
+          <td>{% if e.is_scheduled %}<c-badge variant="info">Scheduled</c-badge>{% else %}<c-badge>{{ e.status_label }}</c-badge>{% endif %}</td>
+          <td class="col-num"><c-money :amount="e.total_outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    <c-slot name="foot">
+      <span class="subtle">Showing <span class="strong tnum">{{ page.start_index }}–{{ page.end_index }}</span> of <span class="strong tnum">{{ total }}</span></span>
+      {% if page.paginator.num_pages > 1 %}
+      <c-pagination class="ml-auto">
+        {% if page.has_previous %}<a class="pg" href="{% querystring page=page.previous_page_number %}"><c-icon name="chevron-left" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-left" size="sm" /></span>{% endif %}
+        {% for n in page.paginator.page_range %}<a class="pg{% if n == page.number %} active{% endif %}" href="{% querystring page=n %}">{{ n }}</a>{% endfor %}
+        {% if page.has_next %}<a class="pg" href="{% querystring page=page.next_page_number %}"><c-icon name="chevron-right" size="sm" /></a>{% else %}<span class="pg disabled"><c-icon name="chevron-right" size="sm" /></span>{% endif %}
+      </c-pagination>
+      {% endif %}
+    </c-slot>
+    {% else %}
+    <c-empty-state icon="calendar-days"
+      title="{% if q or type %}No visits match{% else %}No visits yet{% endif %}"
+      text="{% if q or type %}Try a different search or filter.{% else %}Log a doctor / dental / vision / hospital visit to group its provider invoices.{% endif %}">
+      {% if not q and not type %}<c-button variant="primary" href="{{ ui_tenant_url }}health/visits/new/"><c-icon name="plus" /> New visit</c-button>{% endif %}
+    </c-empty-state>
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}By provider{% endblock %}
+
+{% block hl %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" /><span class="strong">By provider</span></c-breadcrumb>
+
+<c-page-header title="Outstanding by provider" subtitle="Who you still owe, largest balance first.">
+  <c-slot name="actions">
+    <span class="row"><span class="muted">Total owed</span> <c-money :amount="total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /></span>
+  </c-slot>
+</c-page-header>
+
+<c-card flush>
+  {% if rows %}
+  <c-table>
+    <thead><tr><c-th>Provider</c-th><c-th>Invoices</c-th><c-th>Status</c-th><th class="col-num">Outstanding</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="strong">{{ r.name }}</td>
+        <td class="muted">{{ r.count }} {{ r.count|pluralize:'invoice,invoices' }}</td>
+        <td>{% if r.overdue %}<c-badge variant="danger">Overdue</c-badge>{% else %}<c-badge variant="info">Open</c-badge>{% endif %}</td>
+        <td class="col-num strong"><c-money :amount="r.outstanding" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </c-table>
+  {% else %}
+  <c-empty-state icon="circle-check" title="Nothing outstanding" text="When you owe a provider, their running balance shows up here." />
+  {% endif %}
+</c-card>
+{% endblock %}

@@ -294,6 +294,18 @@ def apply_payment(payment, allocations, *, user=None):
         )
         loan_post(loan_txn, user=user)
         payment.loan_txn = loan_txn
+    elif payment.funding_kind == Payment.Funding.HSA and payment.hsa_account_id:
+        # HSA-funded (a medical bill): an Investments WITHDRAWAL posts Dr AP (tagged the biller) /
+        # Cr the HSA node. No cash/bank leg — the bill still flips PAID via the allocation loop
+        # below (status derives from PaymentAllocation, never the GL). Analog of the LOAN branch.
+        from apps.investments.services import record_hsa_distribution
+
+        hsa_txn = record_hsa_distribution(
+            payment.hsa_account, amount=payment.amount, date=payment.date, contra=ap,
+            payee_person=payment.vendor_person, payee_organization=payment.vendor_organization,
+            user=user,
+        )
+        payment.hsa_txn = hsa_txn
     else:
         cash = payment.cash_account or resolve_account("1110")
         entry = post_entry(
@@ -333,6 +345,10 @@ def delete_payment(payment, *, user=None):
         from apps.loans.services import delete_transaction as loan_delete
 
         loan_delete(payment.loan_txn, user=user)
+    elif payment.hsa_txn_id:
+        from apps.investments.services import remove_transaction as inv_remove
+
+        inv_remove(payment.hsa_txn, user=user)
     elif payment.journal_entry_id:
         payment.journal_entry.hard_delete()
     for bill in bills:
@@ -360,6 +376,11 @@ def repost_payment(payment, allocations, *, user=None):
 
         loan_delete(payment.loan_txn, user=user)
         payment.loan_txn = None
+    elif payment.hsa_txn_id:
+        from apps.investments.services import remove_transaction as inv_remove
+
+        inv_remove(payment.hsa_txn, user=user)
+        payment.hsa_txn = None
     elif payment.journal_entry_id:
         payment.journal_entry.hard_delete()
         payment.journal_entry = None

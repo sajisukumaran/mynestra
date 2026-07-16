@@ -403,6 +403,8 @@ img { max-width:100%; display:block; }
 :root[data-theme="dark"] .tile-glyph.insurance { background:rgba(20,184,166,.18); color:#5eead4; }
 .tile-glyph.realestate { background:#d1fae5; color:#065f46; }
 :root[data-theme="dark"] .tile-glyph.realestate { background:rgba(16,185,129,.18); color:#6ee7b7; }
+.tile-glyph.health { background:#ffe4e6; color:#be123c; }
+:root[data-theme="dark"] .tile-glyph.health { background:rgba(244,63,94,.18); color:#fda4af; }
 .tile-glyph.soon { background:var(--surface-3); color:var(--text-subtle); }
 
 /* Meter — a thin utilization/progress bar (c-meter), e.g. credit-limit usage. */

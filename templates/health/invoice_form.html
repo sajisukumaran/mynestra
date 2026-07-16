@@ -1,0 +1,106 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}{% if mode == 'edit' %}Edit invoice{% else %}New invoice{% endif %}{% endblock %}
+
+{% block hl %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" />
+  {% if encounter %}<a href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/">{{ encounter.display }}</a>{% else %}<a href="{{ ui_tenant_url }}health/invoices/">Invoices</a>{% endif %}<c-icon name="chevron-right" />
+  <span class="strong">{% if mode == 'edit' %}Edit{% else %}New invoice{% endif %}</span>
+</c-breadcrumb>
+
+<c-page-header title="{% if mode == 'edit' %}Edit invoice{% else %}New provider invoice{% endif %}"
+               subtitle="Log a bare total fast, or itemize the EOB. Pending-insurance invoices post nothing until confirmed." />
+
+{% if error %}<c-hint icon="triangle-alert" variant="danger">{{ error }}</c-hint>{% endif %}
+
+<form method="post"
+      x-data="{ billerKind: '{% if invoice.biller_person_id %}person{% else %}org{% endif %}', itemized: {% if charges %}true{% else %}false{% endif %}, charges: [] }">{% csrf_token %}
+  <div class="stack-20">
+    <c-card icon="banknote" title="Invoice">
+      <c-field label="Biller" required help="The billing entity — often a hospital, practice or lab; independent of the doctors seen.">
+        <div class="row wrap" style="margin-bottom:8px;">
+          <label class="row"><input type="radio" name="_bk" value="org" x-model="billerKind"> Organization</label>
+          <label class="row"><input type="radio" name="_bk" value="person" x-model="billerKind"> Person</label>
+        </div>
+        <div x-show="billerKind === 'org'">
+          <div class="control is-select">
+            <select name="biller_organization"><option value="">—</option>{% for o in organizations %}<option value="{{ o.pk }}"{% if invoice.biller_organization_id == o.pk %} selected{% endif %}>{{ o.display }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+          <c-input name="biller_organization_new_name" placeholder="…or type a new biller name" />
+        </div>
+        <div x-show="billerKind === 'person'" x-cloak>
+          <div class="control is-select">
+            <select name="biller_person"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if invoice.biller_person_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </div>
+      </c-field>
+
+      <div class="form-grid">
+        <c-field label="Invoice #">{{ form.invoice_number }}</c-field>
+        <c-field label="Invoice date" required><div class="control"><input type="date" name="invoice_date" value="{% if invoice.pk %}{{ invoice.invoice_date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+        <c-field label="Due date" help="For an unpaid bill."><div class="control"><input type="date" name="due_date" value="{% if invoice.due_date %}{{ invoice.due_date|date:'Y-m-d' }}{% endif %}"></div></c-field>
+      </div>
+      <div class="form-grid">
+        <c-field label="Status" required>
+          <c-select name="status">{% for val, label in invoice_statuses %}<option value="{{ val }}"{% if invoice.status == val %} selected{% elif not invoice.pk and val == 'unpaid' %} selected{% endif %}>{{ label }}</option>{% endfor %}</c-select>
+        </c-field>
+        <c-field label="Rendering provider" help="The doctor whose service this covers (optional).">
+          <div class="control is-select">
+            <select name="rendering_provider"><option value="">—</option>{% for p in people %}<option value="{{ p.pk }}"{% if invoice.rendering_provider_id == p.pk %} selected{% endif %}>{{ p.display_name }}</option>{% endfor %}</select>
+            <c-icon name="chevron-down" size="sm" class="subtle" />
+          </div>
+        </c-field>
+      </div>
+      <c-field label="Amount due" help="The bare total (ignored when you itemize the EOB below)." x-show="!itemized">
+        <div class="control"><input name="amount_due" inputmode="decimal" placeholder="0.00" value="{% if invoice.pk %}{{ invoice.amount_due|floatformat:'-2' }}{% endif %}"></div>
+      </c-field>
+      <c-field label="Memo">{{ form.memo }}</c-field>
+      <c-field label="Reference">{{ form.reference }}</c-field>
+    </c-card>
+
+    <c-card icon="file-text" title="Itemize the EOB">
+      <c-slot name="actions">
+        <label class="row"><input type="checkbox" x-model="itemized"> Itemize service lines</label>
+      </c-slot>
+      <div x-show="itemized" x-cloak class="stack-8">
+        <c-hint icon="info">Each service line's patient responsibility (deductible + copay + coinsurance + non-covered) sets the amount you owe; insurance-paid is an overlay that posts nothing.</c-hint>
+        {% for c in charges %}
+        <div style="display:grid; grid-template-columns:2fr 1fr repeat(7,1fr); gap:6px; margin-bottom:6px; overflow-x:auto;">
+          <input name="charge_description" value="{{ c.description }}" placeholder="Service">
+          <input name="charge_code" value="{{ c.service_code }}" placeholder="Code">
+          <input name="charge_billed" value="{{ c.billed|floatformat:'-2' }}" inputmode="decimal" placeholder="Billed">
+          <input name="charge_allowed" value="{{ c.allowed|floatformat:'-2' }}" inputmode="decimal" placeholder="Allowed">
+          <input name="charge_insurance_paid" value="{{ c.insurance_paid|floatformat:'-2' }}" inputmode="decimal" placeholder="Ins. paid">
+          <input name="charge_deductible" value="{{ c.deductible_amount|floatformat:'-2' }}" inputmode="decimal" placeholder="Deductible">
+          <input name="charge_copay" value="{{ c.copay_amount|floatformat:'-2' }}" inputmode="decimal" placeholder="Copay">
+          <input name="charge_coinsurance" value="{{ c.coinsurance_amount|floatformat:'-2' }}" inputmode="decimal" placeholder="Coins.">
+          <input name="charge_noncovered" value="{{ c.noncovered_amount|floatformat:'-2' }}" inputmode="decimal" placeholder="Non-cov.">
+        </div>
+        {% endfor %}
+        <template x-for="(row, i) in charges" :key="i">
+          <div style="display:grid; grid-template-columns:2fr 1fr repeat(7,1fr); gap:6px; margin-bottom:6px; overflow-x:auto;">
+            <input name="charge_description" x-model="row.description" placeholder="Service">
+            <input name="charge_code" x-model="row.code" placeholder="Code">
+            <input name="charge_billed" x-model="row.billed" inputmode="decimal" placeholder="Billed">
+            <input name="charge_allowed" x-model="row.allowed" inputmode="decimal" placeholder="Allowed">
+            <input name="charge_insurance_paid" x-model="row.insurance_paid" inputmode="decimal" placeholder="Ins. paid">
+            <input name="charge_deductible" x-model="row.deductible" inputmode="decimal" placeholder="Deductible">
+            <input name="charge_copay" x-model="row.copay" inputmode="decimal" placeholder="Copay">
+            <input name="charge_coinsurance" x-model="row.coinsurance" inputmode="decimal" placeholder="Coins.">
+            <input name="charge_noncovered" x-model="row.noncovered" inputmode="decimal" placeholder="Non-cov.">
+          </div>
+        </template>
+        <c-button type="button" size="sm" @click="charges.push({description:'',code:'',billed:'',allowed:'',insurance_paid:'',deductible:'',copay:'',coinsurance:'',noncovered:''})"><c-icon name="plus" size="sm" /> Add line</c-button>
+      </div>
+    </c-card>
+
+    <div class="row">
+      <c-button type="submit" variant="primary">{% if mode == 'edit' %}Save changes{% else %}Create invoice{% endif %}</c-button>
+      <c-button variant="ghost" href="{% if encounter %}{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/{% else %}{{ ui_tenant_url }}health/invoices/{% endif %}">Cancel</c-button>
+    </div>
+  </div>
+</form>
+{% endblock %}

@@ -13,7 +13,6 @@ from django.apps import apps as django_apps
 
 # Known-but-not-yet-built modules → muted launcher tiles (DESIGN §7.4), in display order.
 COMING_SOON = [
-    {"name": "Health", "description": "Records, visits & medications", "glyph": "activity"},
     {"name": "Documents", "description": "Files, IDs & certificates", "glyph": "file-text"},
     {"name": "Reminders", "description": "Tasks & important dates", "glyph": "calendar-days"},
     {"name": "Travel", "description": "Trips, bookings & documents", "glyph": "plane"},

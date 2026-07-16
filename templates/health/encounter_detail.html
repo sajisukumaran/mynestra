@@ -1,0 +1,141 @@
+{% extends "health/base.html" %}
+{% block hl_heading %}{{ encounter.display }}{% endblock %}
+
+{% block hl %}
+<c-breadcrumb>
+  <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/">Health</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}health/visits/">Visits</a><c-icon name="chevron-right" />
+  <span class="strong">{{ encounter.display }}</span>
+</c-breadcrumb>
+
+<div class="stack-20">
+  {# Identity header #}
+  <c-card>
+    <div class="person-head">
+      <c-avatar size="xl" square tint="{{ encounter.type_tint }}"><c-icon name="{{ encounter.type_glyph }}" size="xl" /></c-avatar>
+      <div class="ph-main">
+        <div class="row wrap">
+          <h1 class="ph-name">{{ encounter.display }}</h1>
+          <c-chip tint="{{ encounter.type_tint }}">{{ encounter.type_label }}</c-chip>
+          {% if encounter.is_scheduled %}<c-badge variant="info">Scheduled</c-badge>{% else %}<c-badge>{{ encounter.status_label }}</c-badge>{% endif %}
+        </div>
+        <div class="muted">
+          {{ encounter.patient_name }} · {{ encounter.date|date:'d M Y' }} · {{ encounter.setting_label }}
+          {% if encounter.primary_provider_id %} · Dr {{ encounter.primary_provider.display_name }}{% endif %}
+        </div>
+        <div class="ph-meta">
+          <span class="row"><c-icon name="banknote" size="sm" class="subtle" /><span class="strong"><c-money :amount="encounter.total_patient_responsibility" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> your total</span>
+          <span class="row"><c-icon name="circle-check" size="sm" class="subtle" /><c-money :amount="encounter.total_paid" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /> paid</span>
+          <span class="row"><c-icon name="triangle-alert" size="sm" class="subtle" /><span class="strong"><c-money :amount="encounter.total_outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></span> outstanding</span>
+        </div>
+      </div>
+      <div class="row">
+        <c-confirm-dialog title="Delete this visit?" message="Also erases its invoices' locked bills / payments. Refused if a Payables payment is attached.">
+          <c-slot name="trigger"><c-button icon_only variant="default" title="Delete"><c-icon name="trash-2" /></c-button></c-slot>
+          <c-slot name="confirm">
+            <form method="post" action="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/delete/">{% csrf_token %}
+              <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+            </form>
+          </c-slot>
+        </c-confirm-dialog>
+        <c-button href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/edit/"><c-icon name="pencil" /> Edit</c-button>
+      </div>
+    </div>
+    {% if encounter.reason %}<p class="muted" style="margin-top:12px;">{{ encounter.reason }}</p>{% endif %}
+  </c-card>
+
+  <div x-data="{ tab: 'invoices' }">
+    <c-tabs>
+      <button type="button" class="tab" :class="{ active: tab === 'invoices' }" @click="tab = 'invoices'"><c-icon name="banknote" size="sm" /> Invoices {% if invoices %}<span class="tcount tnum">{{ invoices|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'people' }" @click="tab = 'people'"><c-icon name="users" size="sm" /> People {% if roster %}<span class="tcount tnum">{{ roster|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'documents' }" @click="tab = 'documents'"><c-icon name="file-text" size="sm" /> Documents {% if documents %}<span class="tcount tnum">{{ documents|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
+    </c-tabs>
+
+    {# Invoices #}
+    <div x-show="tab === 'invoices'" style="margin-top:16px;">
+      <c-card flush icon="banknote" title="Provider invoices">
+        <c-slot name="actions">
+          <c-button size="sm" variant="primary" href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/invoices/new/"><c-icon name="plus" size="sm" /> Add invoice</c-button>
+        </c-slot>
+        {% if invoices %}
+        <c-table>
+          <thead><tr><c-th>Biller</c-th><c-th>Rendering</c-th><c-th>Status</c-th><th class="col-num">Total</th><th class="col-num">Owing</th></tr></thead>
+          <tbody>
+            {% for inv in invoices %}
+            <tr>
+              <td><a href="{{ ui_tenant_url }}health/invoices/{{ inv.pk }}/" class="strong">{{ inv.biller_name }}</a>{% if inv.invoice_number %}<div class="muted">#{{ inv.invoice_number }}</div>{% endif %}</td>
+              <td class="muted">{% if inv.rendering_provider_id %}Dr {{ inv.rendering_provider.display_name }}{% else %}—{% endif %}</td>
+              <td>
+                {% if inv.status == 'paid' %}<c-badge variant="success">Paid</c-badge>
+                {% elif inv.status == 'partially_paid' %}<c-badge variant="warning">Part-paid</c-badge>
+                {% elif inv.status == 'pending_insurance' %}<c-badge variant="info">Pending</c-badge>
+                {% elif inv.status == 'disputed' %}<c-badge variant="danger">Disputed</c-badge>
+                {% elif inv.status == 'written_off' %}<c-badge>Written off</c-badge>
+                {% elif inv.status == 'overpaid' %}<c-badge variant="warning">Overpaid</c-badge>
+                {% else %}<c-badge variant="danger">Unpaid</c-badge>{% endif %}
+              </td>
+              <td class="col-num"><c-money :amount="inv.amount_due" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+              <td class="col-num"><c-money :amount="inv.outstanding" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" /></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="banknote" title="No invoices yet" text="Add the provider invoices for this visit — facility, physician, radiology, lab. Each becomes a locked bill in Payables.">
+          <c-button variant="primary" href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/invoices/new/"><c-icon name="plus" /> Add invoice</c-button>
+        </c-empty-state>
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# People #}
+    <div x-show="tab === 'people'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="users" title="Everyone involved">
+        <c-slot name="actions"><c-button size="sm" href="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/edit/"><c-icon name="pencil" size="sm" /> Edit roster</c-button></c-slot>
+        {% if roster %}
+        {% for r in roster %}
+        <c-rel-row name="{{ r.person_name }}" role="{{ r.role_label }}{% if r.organization_id %} · {{ r.organization.display }}{% endif %}{% if r.note %} · {{ r.note }}{% endif %}">
+          <c-slot name="avatar"><c-avatar tint="{{ r.person.avatar_tint }}" size="sm">{{ r.person.initials }}</c-avatar></c-slot>
+        </c-rel-row>
+        {% endfor %}
+        {% else %}
+        <c-empty-state icon="users" title="No roster yet" text="Edit the visit to add the doctors, nurses and technicians involved." />
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Documents #}
+    <div x-show="tab === 'documents'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="file-text" title="Documents">
+        <c-slot name="actions">
+          <c-modal title="Upload a document">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="upload" size="sm" /> Upload</c-button></c-slot>
+            <form method="post" enctype="multipart/form-data" action="{{ ui_tenant_url }}health/visits/{{ encounter.pk }}/documents/new/">{% csrf_token %}
+              {% include "health/partials/document_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Upload</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% include "health/partials/document_table.html" %}
+      </c-card>
+    </div>
+
+    {# History #}
+    <div x-show="tab === 'history'" x-cloak style="margin-top:16px;">
+      <c-card flush>
+        {% if history %}
+        <c-timeline>
+          {% for h in history %}
+          <c-tl-item><span class="strong">{{ h.get_history_type_display }}</span><span class="muted">· {{ h.history_date|date:'d M Y H:i' }}{% if h.history_user %} · {{ h.history_user }}{% endif %}</span></c-tl-item>
+          {% endfor %}
+        </c-timeline>
+        {% else %}
+        <c-empty-state icon="clock" title="No history yet" />
+        {% endif %}
+      </c-card>
+    </div>
+  </div>
+</div>
+{% endblock %}

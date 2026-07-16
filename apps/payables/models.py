@@ -553,6 +553,9 @@ class Payment(SoftDeleteModel):
         # Settled by loan proceeds (a financed purchase): the payment posts a loan DISBURSEMENT
         # that debits AP directly (no bank/card/cash leg). Used by the Automobile module.
         LOAN = "loan", "Loan proceeds"
+        # Settled from a health-savings account (a medical bill): the payment posts an Investments
+        # WITHDRAWAL that debits AP directly (no bank/card/cash leg). Used by the Health module.
+        HSA = "hsa", "HSA"
 
     vendor_person = models.ForeignKey(
         "contacts.Person", on_delete=models.PROTECT, null=True, blank=True, related_name="payments"
@@ -592,6 +595,16 @@ class Payment(SoftDeleteModel):
     )
     loan_txn = models.ForeignKey(
         "loans.LoanTransaction", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    # HSA funding: the health-savings account the payment draws from + the Investments WITHDRAWAL it
+    # created (Dr AP / Cr the HSA node, no cash leg). Torn down / rebuilt with the payment.
+    hsa_account = models.ForeignKey(
+        "investments.InvestmentAccount", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    hsa_txn = models.ForeignKey(
+        "investments.InvestmentTransaction", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
     )
     journal_entry = models.ForeignKey(
         "finance.JournalEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
@@ -657,6 +670,8 @@ class Payment(SoftDeleteModel):
             return self.credit_card.nickname
         if self.funding_kind == self.Funding.LOAN:
             return self.loan.nickname if self.loan_id else "Loan proceeds"
+        if self.funding_kind == self.Funding.HSA:
+            return self.hsa_account.nickname if self.hsa_account_id else "HSA"
         return "Cash / other"
 
 

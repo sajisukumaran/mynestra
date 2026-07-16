@@ -154,8 +154,10 @@ def test_launcher_renders_enabled_and_coming_soon_tiles(make_tenant, make_user, 
     tenant, owner = _owner(make_tenant, make_user)
     client.force_login(owner)
     body = client.get(f"/t/{tenant.schema_name}/").content.decode()
-    # Enabled tiles (+ their live counts) and a still-coming-soon tile (Health).
-    for label in ("Contacts", "Organizations", "People", "Branches", "Key people", "Health"):
+    # Enabled tiles (+ their live counts, incl. the now-live Health module) and a still-coming-soon
+    # tile (Documents).
+    for label in ("Contacts", "Organizations", "People", "Branches", "Key people", "Health",
+                  "Documents"):
         assert label in body
 
 

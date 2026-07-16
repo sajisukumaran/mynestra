@@ -1,0 +1,653 @@
+"""Health service layer — the only sanctioned GL path for the Health module.
+
+An encounter posts nothing. Each provider invoice routes through Payables as a locked bill (+ zero
+or more locked partial payments), exactly like the Insurance module's premiums: a `ProviderInvoice`
+materializes a `payables.Bill` (`is_locked=True`, `source=<invoice>`, one expense line per EOB
+charge — or a single `amount_due` line — to the encounter-type expense account under the 5400
+header) via `payables.services.post_bill`; payments are locked `payables.Payment`s allocated to that
+bill. The vendor on both is the invoice's biller.
+
+The one novel cross-module piece is HSA funding: a payment funded from an HSA settles Accounts
+Payable straight from the health-savings account (an Investments WITHDRAWAL, `contra=AP`), the
+direct analog of the Payables LOAN branch — no cash leg, the bill still flips PAID via allocations.
+"""
+
+from __future__ import annotations
+
+import datetime
+from decimal import Decimal
+
+from django.db import transaction
+
+from apps.finance.services import (
+    LineInput,
+    base_currency,
+    post_entry,
+    resolve_account,
+    resolve_posting_account,
+)
+from apps.health.models import (
+    ENCOUNTER_TYPE_ACCOUNT,
+    OWED_STATUSES,
+    Encounter,
+    EncounterType,
+    Funding,
+    InvoiceStatus,
+    ProviderInvoice,
+)
+
+ZERO = Decimal("0")
+
+# The single Expert-mode remappable activity per invoice (the medical-expense home). The default is
+# resolved from the encounter type; Expert users can remap per invoice via a PostingMap.
+POSTING_ACTIVITIES = [
+    {"key": "expense", "label": "Medical expense", "kind": "expense", "default": "medical_expense"},
+]
+
+
+# --- Expense home resolution -----------------------------------------------------------------
+
+def _invoice_encounter_type(inv: ProviderInvoice) -> str:
+    return inv.encounter.encounter_type if inv.encounter_id else EncounterType.MEDICAL
+
+
+def _expense_account(inv: ProviderInvoice):
+    """The GL account a provider invoice's bill line posts to — the encounter-type default (under
+    the 5400 header), overridable per invoice in Expert mode via a PostingMap."""
+    etype = _invoice_encounter_type(inv)
+    default = ENCOUNTER_TYPE_ACCOUNT.get(etype, "medical_expense")
+    return resolve_posting_account(inv, "expense", default)
+
+
+# --- Vendor tagging (reuse the Payables catalog) ---------------------------------------------
+
+def _ensure_vendor_category(org) -> None:
+    from apps.setup.models import Category
+
+    cat = Category.objects.filter(kind=Category.Kind.ORG, name="Vendor").first()
+    if cat:
+        org.categories.add(cat)
+
+
+def _ensure_vendor_profile(inv: ProviderInvoice) -> None:
+    from apps.payables.services import ensure_vendor_profile
+
+    if inv.biller_organization_id:
+        _ensure_vendor_category(inv.biller_organization)
+        ensure_vendor_profile(organization=inv.biller_organization)
+    elif inv.biller_person_id:
+        ensure_vendor_profile(person=inv.biller_person)
+
+
+# --- Locked bill sync ------------------------------------------------------------------------
+
+def _invoice_ct():
+    from django.contrib.contenttypes.models import ContentType
+
+    return ContentType.objects.get_for_model(ProviderInvoice)
+
+
+def _recompute_amount_due(inv: ProviderInvoice) -> None:
+    """When EOB charges are present, `amount_due` = Σ their patient responsibility (else the user's
+    bare total is kept)."""
+    charges = list(inv.charges.all())
+    if not charges:
+        return
+    total = sum((c.patient_responsibility for c in charges), ZERO)
+    if inv.amount_due != total:
+        inv.amount_due = total
+        inv.save(update_fields=["amount_due", "updated_at"])
+
+
+def _single_line_desc(inv: ProviderInvoice) -> str:
+    return inv.memo or f"{inv.biller_name} — statement"
+
+
+def _sync_bill(inv: ProviderInvoice, *, user=None):
+    """Create (or repost in place) the locked Payables bill backing this invoice — one expense line
+    per EOB charge (else a single `amount_due` line) to the encounter-type account, tagged as
+    sourced from this invoice. A written-off invoice collapses to a single adjusted-total line."""
+    from apps.payables.models import Bill, BillLine
+    from apps.payables.services import post_bill, repost_bill
+
+    bill = inv.bill or Bill(is_locked=True)
+    bill.vendor_person = inv.biller_person
+    bill.vendor_organization = inv.biller_organization
+    bill.bill_date = inv.invoice_date
+    bill.due_date = inv.due_date or inv.invoice_date
+    bill.currency = base_currency()
+    bill.vendor_ref = inv.invoice_number or inv.reference
+    bill.notes = inv.memo
+    bill.is_locked = True
+    bill.source_content_type = _invoice_ct()
+    bill.source_object_id = inv.pk
+    bill.save()
+
+    bill.lines.all().delete()  # rewritten each save
+    account = _expense_account(inv)
+    charges = [c for c in inv.charges.all() if c.patient_responsibility > ZERO]
+    use_charges = bool(charges) and inv.status != InvoiceStatus.WRITTEN_OFF
+    if use_charges:
+        for order, ch in enumerate(charges):
+            BillLine.objects.create(
+                bill=bill, line_type=BillLine.LineType.EXPENSE, order=order,
+                description=ch.description or "Service", account=account,
+                quantity=Decimal("1"), unit_price=ch.patient_responsibility,
+            )
+    else:
+        BillLine.objects.create(
+            bill=bill, line_type=BillLine.LineType.EXPENSE, order=0,
+            description=_single_line_desc(inv), account=account,
+            quantity=Decimal("1"), unit_price=inv.amount_due,
+        )
+
+    if inv.bill_id is None:
+        post_bill(bill, user=user)
+        inv.bill = bill
+        inv.save(update_fields=["bill", "updated_at"])
+    else:
+        repost_bill(bill, user=user)
+    return bill
+
+
+# --- Status / rollup derivation --------------------------------------------------------------
+
+def _allocated(inv: ProviderInvoice) -> Decimal:
+    """Total allocated against this invoice's locked bill (drives its paid status)."""
+    if inv.bill_id is None:
+        return ZERO
+    from apps.payables.models import PaymentAllocation
+
+    return sum(
+        (a.amount for a in PaymentAllocation.objects.filter(bill_id=inv.bill_id)), ZERO
+    )
+
+
+def _recompute_invoice_status(inv: ProviderInvoice) -> None:
+    """Derive UNPAID / PARTIALLY_PAID / PAID / OVERPAID from the bill's allocations (and refunds
+    already received). PENDING_INSURANCE / DISPUTED / WRITTEN_OFF are sticky manual states."""
+    if inv.status in (
+        InvoiceStatus.PENDING_INSURANCE, InvoiceStatus.DISPUTED, InvoiceStatus.WRITTEN_OFF
+    ):
+        return
+    paid = _allocated(inv)
+    total = inv.amount_due
+    refund_owed = ZERO
+    if paid <= ZERO:
+        status = InvoiceStatus.UNPAID
+    elif paid < total:
+        status = InvoiceStatus.PARTIALLY_PAID
+    elif paid == total:
+        status = InvoiceStatus.PAID
+    else:  # overpaid — net of refunds already received
+        refund_owed = paid - total - (inv.refunded or ZERO)
+        if refund_owed > ZERO:
+            status = InvoiceStatus.OVERPAID
+        else:
+            status, refund_owed = InvoiceStatus.PAID, ZERO
+    changed = []
+    if inv.status != status:
+        inv.status = status
+        changed.append("status")
+    if inv.refund_expected != refund_owed:
+        inv.refund_expected = refund_owed
+        changed.append("refund_expected")
+    if changed:
+        inv.save(update_fields=[*changed, "updated_at"])
+
+
+def _invoice_billed(inv: ProviderInvoice) -> Decimal:
+    """The provider's gross charge (Σ EOB `billed` if itemized, else the patient total)."""
+    charges = list(inv.charges.all())
+    if charges:
+        return sum((c.billed or ZERO for c in charges), ZERO)
+    return inv.amount_due
+
+
+def _recompute_encounter(enc: Encounter | None) -> None:
+    """Recompute an encounter's denormalized rollups from its invoices (a pure read cache)."""
+    if enc is None:
+        return
+    invoices = list(enc.invoices.all())
+    billed = sum((_invoice_billed(inv) for inv in invoices), ZERO)
+    responsibility = sum((inv.amount_due for inv in invoices), ZERO)
+    paid = sum((_allocated(inv) for inv in invoices), ZERO)
+    outstanding = sum(
+        (inv.amount_due - _allocated(inv) for inv in invoices if inv.status in OWED_STATUSES), ZERO
+    )
+    fields = {
+        "total_billed": billed,
+        "total_patient_responsibility": responsibility,
+        "total_paid": paid,
+        "total_outstanding": outstanding if outstanding > ZERO else ZERO,
+    }
+    dirty = [k for k, v in fields.items() if getattr(enc, k) != v]
+    if dirty:
+        for k in dirty:
+            setattr(enc, k, fields[k])
+        enc.save(update_fields=[*dirty, "updated_at"])
+
+
+# --- Encounter orchestration -----------------------------------------------------------------
+
+@transaction.atomic
+def save_encounter(enc: Encounter, *, user=None, is_new=True):
+    """Persist a visit and refresh its rollups. The caller has saved the encounter row (so it has a
+    pk); this recomputes the denormalized totals from whatever invoices it currently groups."""
+    _recompute_encounter(enc)
+    return enc
+
+
+# --- Duplicate detection ---------------------------------------------------------------------
+
+def duplicate_warnings(inv: ProviderInvoice) -> list[dict]:
+    """Warn (not block) when this invoice looks like a duplicate of an existing one: same biller +
+    invoice number, or same biller + amount + invoice date. Returns a list of {invoice, reason}."""
+    if inv.biller is None:
+        return []
+    base = ProviderInvoice.objects.exclude(pk=inv.pk or 0)
+    base = (
+        base.filter(biller_person=inv.biller_person)
+        if inv.biller_person_id
+        else base.filter(biller_organization=inv.biller_organization)
+    )
+    warnings, seen = [], set()
+    if inv.invoice_number:
+        for other in base.filter(invoice_number=inv.invoice_number):
+            if other.pk not in seen:
+                warnings.append({"invoice": other, "reason": "same biller and invoice number"})
+                seen.add(other.pk)
+    for other in base.filter(amount_due=inv.amount_due, invoice_date=inv.invoice_date):
+        if other.pk not in seen:
+            warnings.append({"invoice": other, "reason": "same biller, amount and date"})
+            seen.add(other.pk)
+    return warnings
+
+
+# --- Invoice orchestration -------------------------------------------------------------------
+
+def _teardown_bill(inv: ProviderInvoice, *, user=None) -> None:
+    """Remove an invoice's locked bill (and the module's own payments), refusing if a FOREIGN
+    payment is allocated. Used when an invoice returns to Pending-insurance or is deleted."""
+    from apps.payables.services import delete_bill
+
+    bill = inv.bill
+    module_pks = set(_module_payments(inv).values_list("pk", flat=True))
+    _teardown_module_payments(inv, user=user)
+    if bill is not None:
+        foreign = bill.allocations.exclude(payment_id__in=module_pks).exists()
+        if foreign:
+            raise ValueError(
+                "A Payables payment is allocated to this bill — remove it there first."
+            )
+        inv.bill = None
+        inv.save(update_fields=["bill", "updated_at"])
+        delete_bill(bill, user=user)
+        bill.hard_delete()
+
+
+@transaction.atomic
+def save_invoice(inv: ProviderInvoice, *, user=None, is_new=True) -> list[dict]:
+    """Persist a provider invoice and sync its locked bill. Posts the bill only when the invoice has
+    left Pending-insurance (and has a biller); Pending-insurance posts nothing. Recomputes
+    amount_due from any EOB charges, the invoice status, and the encounter rollups. Returns
+    duplicate warnings (informational — never blocks). The caller has saved the row (so it has a
+    pk)."""
+    _recompute_amount_due(inv)
+    warnings = duplicate_warnings(inv)
+
+    if inv.status == InvoiceStatus.PENDING_INSURANCE:
+        # Not on the books yet — tear down any prior accrual (only if no foreign payment).
+        if inv.bill_id is not None:
+            _teardown_bill(inv, user=user)
+        _recompute_encounter(inv.encounter)
+        return warnings
+
+    if inv.biller is None:
+        raise ValueError("Set the invoice's biller before posting it.")
+    _ensure_vendor_profile(inv)
+    _sync_bill(inv, user=user)
+    _recompute_invoice_status(inv)
+    _recompute_encounter(inv.encounter)
+    return warnings
+
+
+@transaction.atomic
+def confirm_invoice(inv: ProviderInvoice, *, user=None) -> ProviderInvoice:
+    """Confirm a Pending-insurance invoice (the amount is now final): flip it to Unpaid and post its
+    bill. The caller has already applied the confirmed amount / charges to the row."""
+    inv.status = InvoiceStatus.UNPAID
+    inv.save(update_fields=["status", "updated_at"])
+    save_invoice(inv, user=user, is_new=False)
+    return inv
+
+
+# --- Payments (partial-payment friendly) -----------------------------------------------------
+
+def _module_payments(inv: ProviderInvoice):
+    from apps.payables.models import Payment
+
+    return Payment.objects.filter(source_content_type=_invoice_ct(), source_object_id=inv.pk)
+
+
+def invoice_payments(inv: ProviderInvoice):
+    """The locked payments recorded against an invoice (exact content-type scoped), oldest first."""
+    return _module_payments(inv).order_by("date", "id")
+
+
+def _teardown_module_payments(inv: ProviderInvoice, *, user=None) -> None:
+    from apps.payables.services import delete_payment
+
+    for pay in list(_module_payments(inv)):
+        delete_payment(pay, user=user)
+        pay.hard_delete()
+
+
+def _payment_funding_kind(funding: str):
+    from apps.payables.models import Payment
+
+    return {
+        Funding.BANK: Payment.Funding.BANK,
+        Funding.CARD: Payment.Funding.CARD,
+        Funding.CASH: Payment.Funding.CASH,
+        Funding.HSA: Payment.Funding.HSA,
+    }[funding]
+
+
+def _apply_payment_funding(pay, funding, *, account=None, card=None, cash=None, hsa=None) -> None:
+    pay.funding_kind = _payment_funding_kind(funding)
+    pay.bank_account = account if funding == Funding.BANK else None
+    pay.credit_card = card if funding == Funding.CARD else None
+    pay.cash_account = cash if funding == Funding.CASH else None
+    pay.hsa_account = hsa if funding == Funding.HSA else None
+
+
+def _persist_last_funding(inv, funding, *, account=None, card=None, cash=None, hsa=None) -> None:
+    inv.funding_source = funding
+    inv.funding_account = account if funding == Funding.BANK else None
+    inv.credit_card = card if funding == Funding.CARD else None
+    inv.cash_account = cash if funding == Funding.CASH else None
+    inv.hsa_account = hsa if funding == Funding.HSA else None
+    inv.save(update_fields=[
+        "funding_source", "funding_account", "credit_card", "cash_account", "hsa_account",
+        "updated_at",
+    ])
+
+
+@transaction.atomic
+def record_invoice_payment(
+    inv: ProviderInvoice, *, amount, date, funding,
+    account=None, card=None, cash=None, hsa=None, user=None,
+):
+    """Record one locked payment against a confirmed invoice, allocated in full to its bill.
+    Repeated calls make partial payments (a payment plan); the bill's PAID / PARTIALLY_PAID status
+    derives from the allocation totals. Funding is bank / card / cash / HSA (HSA settles AP straight
+    from the health-savings account, no cash leg). Returns the created payment."""
+    from apps.payables.models import Payment
+    from apps.payables.services import apply_payment
+
+    if inv.bill_id is None:
+        raise ValueError("Confirm the invoice before recording a payment.")
+    if funding == Funding.HSA and hsa is None:
+        raise ValueError("Choose the HSA to pay from.")
+    pay = Payment(
+        vendor_person=inv.biller_person, vendor_organization=inv.biller_organization,
+        date=date, amount=amount, is_locked=True,
+        source_content_type=_invoice_ct(), source_object_id=inv.pk,
+        reference=inv.reference,
+    )
+    _apply_payment_funding(pay, funding, account=account, card=card, cash=cash, hsa=hsa)
+    pay.save()
+    apply_payment(pay, [(inv.bill, amount)], user=user)
+    _persist_last_funding(inv, funding, account=account, card=card, cash=cash, hsa=hsa)
+    _recompute_invoice_status(inv)
+    _recompute_encounter(inv.encounter)
+    return pay
+
+
+@transaction.atomic
+def delete_invoice_payment(inv: ProviderInvoice, payment, *, user=None) -> None:
+    """Tear down one payment (reverse its HSA / bank / card / cash leg, reopen the bill) and refresh
+    the invoice + encounter."""
+    from apps.payables.services import delete_payment
+
+    delete_payment(payment, user=user)
+    payment.hard_delete()
+    _recompute_invoice_status(inv)
+    _recompute_encounter(inv.encounter)
+
+
+# --- Write-off / dispute / refund ------------------------------------------------------------
+
+@transaction.atomic
+def write_off_invoice(inv: ProviderInvoice, *, new_total=ZERO, user=None) -> ProviderInvoice:
+    """Adjust an invoice down to a confirmed lower total (write-off / adjustment). Reposts its bill
+    in place at the new total (expense + AP drop); a full write-off with nothing paid unposts the
+    bill entirely. Refuses to go below what's already been paid."""
+    new_total = new_total if new_total is not None else ZERO
+    paid = _allocated(inv)
+    if new_total < paid:
+        raise ValueError("The adjusted total can't be less than what's already been paid.")
+    inv.amount_due = new_total
+    inv.status = InvoiceStatus.WRITTEN_OFF
+    inv.save(update_fields=["amount_due", "status", "updated_at"])
+    if inv.bill_id is not None:
+        if new_total <= ZERO and paid <= ZERO:
+            from apps.payables.services import unpost_bill
+
+            unpost_bill(inv.bill, user=user)
+        else:
+            _sync_bill(inv, user=user)  # single adjusted-total line, reposted in place
+    _recompute_encounter(inv.encounter)
+    return inv
+
+
+@transaction.atomic
+def dispute_invoice(inv: ProviderInvoice, *, user=None) -> ProviderInvoice:
+    """Flag an invoice Disputed — it stays accrued (no GL change) but drops out of the you-owe /
+    overdue totals until resolved."""
+    inv.status = InvoiceStatus.DISPUTED
+    inv.save(update_fields=["status", "updated_at"])
+    _recompute_encounter(inv.encounter)
+    return inv
+
+
+@transaction.atomic
+def resolve_dispute(inv: ProviderInvoice, *, user=None) -> ProviderInvoice:
+    """Clear the Disputed flag — the status returns to whatever the allocations imply."""
+    inv.status = InvoiceStatus.UNPAID  # provisional; _recompute derives the real status
+    inv.save(update_fields=["status", "updated_at"])
+    _recompute_invoice_status(inv)
+    _recompute_encounter(inv.encounter)
+    return inv
+
+
+@transaction.atomic
+def record_refund(
+    inv: ProviderInvoice, *, amount, dest, date, bank=None, cash=None, hsa=None, user=None
+):
+    """Clear (part of) an overpayment credit: bring money back into `dest` and debit it out of
+    Accounts Payable (the biller owes you). Bank routes through a native banking DEPOSIT categorized
+    to AP (register-truthful); cash posts a direct entry `DR cash / CR AP`; HSA posts an Investments
+    CONTRIBUTION with `contra=AP` (funds returning to the HSA). Accumulates into `refunded` and
+    re-derives the status."""
+    amount = Decimal(amount)
+    if amount <= ZERO:
+        raise ValueError("A refund amount must be positive.")
+    ap = resolve_account("accounts_payable")
+    party = {"person": inv.biller_person, "organization": inv.biller_organization}
+
+    if dest == Funding.HSA:
+        if hsa is None:
+            raise ValueError("Choose the HSA the refund returns to.")
+        from apps.investments.services import record_hsa_return
+
+        record_hsa_return(
+            hsa, amount=amount, date=date, contra=ap,
+            payee_person=inv.biller_person, payee_organization=inv.biller_organization,
+            memo=f"Refund from {inv.biller_name}", user=user,
+        )
+    elif dest == Funding.BANK:
+        if bank is None:
+            raise ValueError("Choose the bank account the refund lands in.")
+        from apps.banking.models import BankTransaction
+        from apps.banking.models import TxnType as BankTxnType
+        from apps.banking.services import post_transaction as bank_post
+
+        leg = BankTransaction.objects.create(
+            account=bank, txn_type=BankTxnType.DEPOSIT, date=date, amount=amount,
+            category_account=ap,
+            payee_person=inv.biller_person, payee_organization=inv.biller_organization,
+            counter_external=f"Refund from {inv.biller_name}",
+        )
+        bank_post(leg, user=user)
+    else:  # cash
+        cash_leg = cash or resolve_account("1110")
+        cur = base_currency()
+        post_entry(
+            date=date,
+            lines=[
+                LineInput(cash_leg, debit=amount, currency=cur),
+                LineInput(ap, credit=amount, currency=cur, **party),
+            ],
+            description=f"{inv.biller_name}: medical refund",
+            memo=inv.memo,
+            user=user,
+        )
+
+    inv.refunded = (inv.refunded or ZERO) + amount
+    inv.save(update_fields=["refunded", "updated_at"])
+    _recompute_invoice_status(inv)
+    _recompute_encounter(inv.encounter)
+    return inv
+
+
+@transaction.atomic
+def delete_invoice(inv: ProviderInvoice, *, user=None) -> None:
+    """Hard-erase an invoice: delete the module's own payments first, refuse if a FOREIGN payment is
+    allocated to the bill, then erase the bill + entry + the invoice. Refreshes the encounter."""
+    enc = inv.encounter
+    _teardown_bill(inv, user=user)  # tears down module payments, refuses on a foreign allocation
+    inv.hard_delete()
+    _recompute_encounter(enc)
+
+
+# --- Provider affiliation (persistent doctor ↔ business P2O link) -----------------------------
+
+def link_provider_affiliation(person, organization) -> None:
+    """Persist a `provider_affiliation` P2O link (doctor ↔ practice / hospital / lab). Add-only;
+    no-ops when the type isn't seeded or either side is missing."""
+    if person is None or organization is None:
+        return
+    from apps.relationships.models import PersonOrgRelationship, PersonOrgRelationshipType
+
+    rel_type = PersonOrgRelationshipType.objects.filter(code="provider_affiliation").first()
+    if rel_type is None:
+        return
+    PersonOrgRelationship.objects.get_or_create(
+        person=person, organization=organization, type=rel_type
+    )
+
+
+def provider_affiliations(person):
+    """Organizations a doctor is affiliated with (drives the picker's practice suggestions)."""
+    from apps.relationships.models import PersonOrgRelationship
+
+    return PersonOrgRelationship.objects.filter(
+        person=person, type__code="provider_affiliation"
+    ).select_related("organization")
+
+
+# --- Documents -------------------------------------------------------------------------------
+
+def delete_document(doc) -> None:
+    """Remove a health document — delete the stored file, then the row (a plain attachment)."""
+    if doc.file:
+        doc.file.delete(save=False)
+    doc.delete()
+
+
+# --- Read models (pure; post nothing) --------------------------------------------------------
+
+def _owed_invoices():
+    """Invoices that count as owed now (unpaid / partially paid), with their bill preloaded."""
+    return ProviderInvoice.objects.filter(status__in=list(OWED_STATUSES)).select_related(
+        "bill", "biller_person", "biller_organization", "encounter"
+    )
+
+
+def outstanding_by_provider() -> list[dict]:
+    """Outstanding balance grouped by biller, largest first — the core 'who do I still owe' view."""
+    groups: dict = {}
+    for inv in _owed_invoices():
+        biller = inv.biller
+        key = (inv.biller_kind, biller.pk if biller else 0)
+        row = groups.setdefault(
+            key,
+            {
+                "biller": biller,
+                "name": inv.biller_name or "—",
+                "kind": inv.biller_kind,
+                "outstanding": ZERO,
+                "count": 0,
+                "overdue": False,
+            },
+        )
+        row["outstanding"] += inv.outstanding
+        row["count"] += 1
+        row["overdue"] = row["overdue"] or inv.is_overdue
+    rows = [r for r in groups.values() if r["outstanding"] > ZERO]
+    rows.sort(key=lambda r: r["outstanding"], reverse=True)
+    return rows
+
+
+def total_unpaid() -> Decimal:
+    """Total you currently owe across all providers (unpaid + partially paid, excludes disputed)."""
+    return sum((inv.outstanding for inv in _owed_invoices()), ZERO)
+
+
+def overdue_invoices():
+    """Owed invoices past their due date, soonest-due first — drives the overdue reminder card."""
+    today = datetime.date.today()
+    rows = [inv for inv in _owed_invoices() if inv.due_date and inv.due_date < today]
+    rows.sort(key=lambda inv: inv.due_date)
+    return rows
+
+
+def recent_payments(limit: int = 8):
+    """The household's most recent Health-sourced payments (dashboard 'recently paid')."""
+    from apps.payables.models import Payment
+
+    return list(
+        Payment.objects.filter(source_content_type=_invoice_ct())
+        .select_related("vendor_person", "vendor_organization")
+        .order_by("-date", "-id")[:limit]
+    )
+
+
+def dashboard_stats() -> dict:
+    """Headline figures for the Health dashboard."""
+    encounters = Encounter.objects.count()
+    owed = list(_owed_invoices())
+    total_owed = sum((inv.outstanding for inv in owed), ZERO)
+    overdue = [inv for inv in owed if inv.is_overdue]
+    overdue_total = sum((inv.outstanding for inv in overdue), ZERO)
+    return {
+        "encounters_count": encounters,
+        "invoices_count": ProviderInvoice.objects.count(),
+        "total_owed": total_owed,
+        "owed_count": len(owed),
+        "overdue_total": overdue_total,
+        "overdue_count": len(overdue),
+        "by_provider": outstanding_by_provider(),
+        "recent_payments": recent_payments(),
+    }
+
+
+def launcher_counts() -> list[dict]:
+    """Live counts for the launcher tile: encounters / invoices / amount you owe."""
+    return [
+        {"n": Encounter.objects.count(), "label": "Visits"},
+        {"n": ProviderInvoice.objects.count(), "label": "Invoices"},
+        {"n": total_unpaid(), "label": "You owe"},
+    ]
