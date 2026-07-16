@@ -122,12 +122,9 @@
         {% if holdings %}
         <c-table>
           <thead><tr>
-            <c-th>Security</c-th>
-            <th class="col-num">Quantity</th>
-            <th class="col-num">Avg cost</th>
-            <th class="col-num">Price</th>
-            <th class="col-num">Market value</th>
-            <th class="col-num">Unrealized</th>
+            {% for h in holdings_headers %}
+            <th class="sortable{% if h.num %} col-num{% endif %}{% if h.active %} sorted{% endif %}"><span class="th-in"><a href="{% querystring tab='holdings' hsort=h.key hdir=h.dir %}">{{ h.label }}</a>{% if h.active %} <c-icon name="arrow-{{ h.arrow }}" size="sm" />{% endif %}</span></th>
+            {% endfor %}
           </tr></thead>
           <tbody>
             {% for h in holdings %}
@@ -156,7 +153,7 @@
     {# PERFORMANCE #}
     <div x-show="tab === 'performance'" x-cloak>
       <c-card flush>
-        {% include "investments/partials/performance_table.html" with rows=performance.rows totals=performance.totals acct=account sym=account.currency.symbol dp=account.currency.decimal_places %}
+        {% include "investments/partials/performance_table.html" with rows=performance.rows totals=performance.totals acct=account sym=account.currency.symbol dp=account.currency.decimal_places sortable=True headers=perf_headers %}
       </c-card>
     </div>
 

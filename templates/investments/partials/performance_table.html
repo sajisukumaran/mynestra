@@ -1,9 +1,16 @@
 {% comment %}Per-instrument performance table. Include with: rows, totals, acct (for holding
 links), sym (currency symbol), dp (decimal places). Shared by the account + institution
-Performance tabs. Wide by design — c-table scrolls horizontally.{% endcomment %}
+Performance tabs. Pass `sortable=True headers=<perf_headers>` for click-to-sort column headers
+(the account tab); omit both for plain headers (the institution tab, grouped by account). Wide by
+design — c-table scrolls horizontally.{% endcomment %}
 {% if rows %}
 <c-table>
   <thead><tr>
+    {% if sortable %}
+    {% for h in headers %}
+    <th class="sortable{% if h.num %} col-num{% endif %}{% if h.active %} sorted{% endif %}"><span class="th-in"><a href="{% querystring tab='performance' psort=h.key pdir=h.dir %}">{{ h.label }}</a>{% if h.active %} <c-icon name="arrow-{{ h.arrow }}" size="sm" />{% endif %}</span></th>
+    {% endfor %}
+    {% else %}
     <c-th>Instrument</c-th>
     <th class="col-num">Bought</th>
     <th class="col-num">Sold</th>
@@ -17,6 +24,7 @@ Performance tabs. Wide by design — c-table scrolls horizontally.{% endcomment 
     <th class="col-num">Gain</th>
     <th class="col-num">Total return</th>
     <th class="col-num">Return %</th>
+    {% endif %}
   </tr></thead>
   <tbody>
     {% for r in rows %}

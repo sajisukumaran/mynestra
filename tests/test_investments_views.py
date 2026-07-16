@@ -351,6 +351,69 @@ def test_register_is_paginated_and_sortable(make_tenant, make_user, client):
     assert "pager" in body           # pagination control rendered
     assert "tab=register" in body    # sort/page links carry the active tab
     assert ">120<" in body           # the Register tab badge shows the TOTAL, not the page size
+    # The headers are real, clickable sort links with a direction arrow — regression guard for the
+    # cotton parser mangling {% if %} inside <c-th> (which dropped the link + arrow to plain text).
+    reg_html = body[body.index('x-show="tab === \'register\'"'):
+                    body.index('x-show="tab === \'holders\'"')]
+    assert "sort=date" in reg_html and "sort=cash" in reg_html  # header links present
+    assert "#i-arrow-down" in reg_html   # the active column (date, desc) shows its arrow
+    assert "{% if" not in reg_html       # no leaked template tag — headers rendered cleanly
+
+
+def test_holdings_and_performance_headers_are_sortable(make_tenant, make_user, client):
+    """The (un-paginated) Holdings and Performance tables sort by clicking a column header —
+    server-side, mirroring the register. The sort rides in per-table params (hsort/psort) next to
+    ?tab= so it returns to the right tab and leaves the other table's sort alone. Default order is
+    unchanged (holdings by market value, high → low)."""
+    import datetime
+    from decimal import Decimal
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.models import SecurityPrice
+        from apps.investments.services import ensure_gl_account
+        usd = Currency.objects.get(code="USD")
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable", registration="taxable_individual",
+            currency=usd)
+        ensure_gl_account(acct)
+        d = datetime.date(2020, 1, 1)
+        # AAA: many shares, small value. BBB: few shares, large value — so quantity and market value
+        # order the two rows oppositely, and a re-sort visibly changes the row order.
+        aaa = Security.objects.create(symbol="AAA", name="Alpha", currency=usd)
+        bbb = Security.objects.create(symbol="BBB", name="Beta", currency=usd)
+        for sec, qty, cost, price in ((aaa, "100", "100", "1"), (bbb, "5", "40", "50")):
+            Lot.objects.create(
+                account=acct, security=sec, acquired_date=d,
+                original_quantity=Decimal(qty), remaining_quantity=Decimal(qty),
+                original_cost=Decimal(cost), cost_basis=Decimal(cost), open=True)
+            SecurityPrice.objects.create(security=sec, as_of=d, price=Decimal(price))
+        aid = acct.pk
+
+    client.force_login(owner)
+
+    def _holdings(body):  # isolate the Holdings tab's HTML (its content div → the Performance one)
+        return body[body.index('x-show="tab === \'holdings\'"'):
+                    body.index('x-show="tab === \'performance\'"')]
+
+    body = client.get(_url(tenant, f"accounts/{aid}/")).content.decode()
+    hbody = _holdings(body)
+    assert "sortable" in hbody                       # click-to-sort headers rendered
+    assert "hsort=quantity" in hbody and "tab=holdings" in hbody  # links carry the tab + param
+    assert hbody.index("BBB") < hbody.index("AAA")   # default: market value high → low (250 > 100)
+
+    # Sort by quantity, descending → AAA (100 sh) now precedes BBB (5 sh), and the active header
+    # shows its down-arrow.
+    body2 = client.get(
+        _url(tenant, f"accounts/{aid}/?tab=holdings&hsort=quantity&hdir=desc")
+    ).content.decode()
+    hbody2 = _holdings(body2)
+    assert hbody2.index("AAA") < hbody2.index("BBB")
+    assert "arrow-down" in hbody2
+
+    # The Performance tab is sortable too (the shared partial's sortable branch), on its own param.
+    assert "psort=gain" in body2 and "tab=performance" in body2
 
 
 def test_transaction_form_validates_exotic_types_client_side(make_tenant, make_user, client):

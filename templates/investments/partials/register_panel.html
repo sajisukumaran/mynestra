@@ -6,13 +6,14 @@ Alpine state (window.txnFormError, held-qty map).{% endcomment %}
 {% if register.total %}
 <c-card flush>
   <c-table>
+    {# Sortable headers are plain <th>, not <c-th>: cotton's parser mangles conditional attributes inside a component tag, dropping the sort link + arrow. #}
     <thead><tr>
-      <c-th sortable {% if register_cols.date.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='date' dir=register_cols.date.dir page=1 %}">Date</a></c-th>
-      <c-th sortable {% if register_cols.type.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='type' dir=register_cols.type.dir page=1 %}">Type</a></c-th>
+      <th class="sortable{% if register_cols.date.active %} sorted{% endif %}"><span class="th-in"><a href="{% querystring tab='register' sort='date' dir=register_cols.date.dir page=1 %}">Date</a>{% if register_cols.date.active %} <c-icon name="arrow-{{ register_arrow }}" size="sm" />{% endif %}</span></th>
+      <th class="sortable{% if register_cols.type.active %} sorted{% endif %}"><span class="th-in"><a href="{% querystring tab='register' sort='type' dir=register_cols.type.dir page=1 %}">Type</a>{% if register_cols.type.active %} <c-icon name="arrow-{{ register_arrow }}" size="sm" />{% endif %}</span></th>
       <c-th>Details</c-th>
       <c-th>Cleared</c-th>
-      <c-th sortable class="col-num" {% if register_cols.cash.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='cash' dir=register_cols.cash.dir page=1 %}">Cash</a></c-th>
-      <c-th sortable class="col-num" {% if register_cols.balance.active %}sorted dir="{% if register.direction == 'asc' %}up{% else %}down{% endif %}"{% endif %}><a href="{% querystring tab='register' sort='balance' dir=register_cols.balance.dir page=1 %}">Balance</a></c-th>
+      <th class="sortable col-num{% if register_cols.cash.active %} sorted{% endif %}"><span class="th-in"><a href="{% querystring tab='register' sort='cash' dir=register_cols.cash.dir page=1 %}">Cash</a>{% if register_cols.cash.active %} <c-icon name="arrow-{{ register_arrow }}" size="sm" />{% endif %}</span></th>
+      <th class="sortable col-num{% if register_cols.balance.active %} sorted{% endif %}"><span class="th-in"><a href="{% querystring tab='register' sort='balance' dir=register_cols.balance.dir page=1 %}">Balance</a>{% if register_cols.balance.active %} <c-icon name="arrow-{{ register_arrow }}" size="sm" />{% endif %}</span></th>
       <th></th>
     </tr></thead>
     <tbody>

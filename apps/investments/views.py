@@ -460,6 +460,90 @@ def _register_sort_cols(sort, direction):
     return cols
 
 
+# Server-side header sorting for the fully-rendered (un-paginated) Holdings + Performance tables —
+# same click-to-sort UX as the register, without its pagination. Each spec is (key, label, is_text);
+# text columns default ascending, numeric columns descending. The `?tab=` + per-table sort params
+# (hsort/hdir, psort/pdir) are carried on the header links so a sort returns to the right tab and
+# never disturbs the other table's sort.
+_HOLDINGS_SORT = (
+    ("security", "Security", True),
+    ("quantity", "Quantity", False),
+    ("avg_cost", "Avg cost", False),
+    ("price", "Price", False),
+    ("market_value", "Market value", False),
+    ("unrealized", "Unrealized", False),
+)
+_HOLDINGS_KEY = {
+    "security": lambda h: (h.security.display or "").lower(),
+    "quantity": lambda h: h.quantity,
+    "avg_cost": lambda h: h.avg_cost,
+    "price": lambda h: h.price,               # None (no quote) → sorts last, both directions
+    "market_value": lambda h: h.market_value,
+    "unrealized": lambda h: h.unrealized_gain,
+}
+_PERF_SORT = (
+    ("instrument", "Instrument", True),
+    ("bought", "Bought", False),
+    ("sold", "Sold", False),
+    ("qty", "Qty", False),
+    ("cost", "Cost", False),
+    ("fees", "Fees", False),
+    ("dividends", "Dividends", False),
+    ("interest", "Interest", False),
+    ("amount_sold", "Amount sold", False),
+    ("price", "Price", False),
+    ("gain", "Gain", False),
+    ("total_return", "Total return", False),
+    ("return_pct", "Return %", False),
+)
+_PERF_KEY = {
+    "instrument": lambda r: (r.security.display or "").lower(),
+    "bought": lambda r: r.qty_bought,
+    "sold": lambda r: r.qty_sold,
+    "qty": lambda r: r.current_qty,
+    "cost": lambda r: r.cost_basis,
+    "fees": lambda r: r.fees,
+    "dividends": lambda r: r.dividends,
+    "interest": lambda r: r.interest,
+    "amount_sold": lambda r: r.amount_sold,
+    "price": lambda r: r.price,               # None → last
+    "gain": lambda r: r.gain,
+    "total_return": lambda r: r.total_return,
+    "return_pct": lambda r: r.return_pct,     # None (income-only rows) → last
+}
+
+
+def _table_sort(specs, sort, direction, default):
+    """Resolve a requested (sort, direction) against `specs` and build the header rows for the
+    template. Falls back to `default` (its natural direction) when the column is unknown. Returns
+    (sort, direction, headers) where each header carries its label, numeric flag, whether it's the
+    active sort, the direction a click applies next, and the current-sort arrow."""
+    columns = {key for key, _label, _text in specs}
+    text_cols = {key for key, _label, is_text in specs if is_text}
+    if sort not in columns:
+        sort, direction = default, None
+    if direction not in ("asc", "desc"):
+        direction = "asc" if sort in text_cols else "desc"
+    headers = []
+    for key, label, is_text in specs:
+        active = key == sort
+        headers.append({
+            "key": key, "label": label, "num": not is_text, "active": active,
+            "dir": ("asc" if direction == "desc" else "desc") if active
+                   else ("asc" if is_text else "desc"),
+            "arrow": ("up" if direction == "asc" else "down") if active else "",
+        })
+    return sort, direction, headers
+
+
+def _apply_sort(rows, keyfn, direction):
+    """Stable sort of `rows` by `keyfn`; None keys always sort last (both directions)."""
+    present = [r for r in rows if keyfn(r) is not None]
+    missing = [r for r in rows if keyfn(r) is None]
+    present.sort(key=keyfn, reverse=(direction == "desc"))
+    return present + missing
+
+
 def account_detail(request, pk):
     account = get_object_or_404(
         InvestmentAccount.objects.select_related("institution", "branch", "currency", "gl_account"),
@@ -468,6 +552,11 @@ def account_detail(request, pk):
     attach_account_totals([account])  # header stats read stamped figures, not one query each
     hold = holdings(account)
     market = sum((h.market_value for h in hold), Decimal("0"))
+    # Holdings table: server-side header sort (defaults to market value, high → low, as before).
+    hsort, _hdir, holdings_headers = _table_sort(
+        _HOLDINGS_SORT, request.GET.get("hsort"), request.GET.get("hdir"), "market_value"
+    )
+    hold = _apply_sort(hold, _HOLDINGS_KEY[hsort], _hdir)
     vesting_rows, vesting_totals = vesting_summary(account)
     # Securities this account has ever transacted (held now or previously) — scopes the register's
     # Security picker for income / holding operations (dividend, sell, split, …) so it isn't the
@@ -487,15 +576,23 @@ def account_detail(request, pk):
     tab = request.GET.get("tab", "holdings")
     if tab not in ("holdings", "register", "performance", "holders", "vesting", "history"):
         tab = "holdings"
+    # Performance table: server-side header sort (defaults to best % return first, as before).
+    perf = security_performance(account)
+    psort, _pdir, perf_headers = _table_sort(
+        _PERF_SORT, request.GET.get("psort"), request.GET.get("pdir"), "return_pct"
+    )
+    perf["rows"] = _apply_sort(perf["rows"], _PERF_KEY[psort], _pdir)
     ctx = inv_context(
         request, "accounts",
         account=account,
         holdings=hold,
+        holdings_headers=holdings_headers,
         vesting_rows=vesting_rows,
         vesting_totals=vesting_totals,
         market_total=market,
         register=reg,
         register_cols=_register_sort_cols(reg["sort"], reg["direction"]),
+        register_arrow="up" if reg["direction"] == "asc" else "down",
         active_tab=tab,
         holders=list(account.holders.select_related("person").all()),
         history=account.history.all()[:60],
@@ -513,7 +610,8 @@ def account_detail(request, pk):
         limit_status=contribution_limit_status(account),
         income=income_summary(account),
         transfers=transfer_totals(account),
-        performance=security_performance(account),
+        performance=perf,
+        perf_headers=perf_headers,
     )
     return render(request, "investments/account_detail.html", ctx)
 
