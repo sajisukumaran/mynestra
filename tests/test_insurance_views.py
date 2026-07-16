@@ -187,6 +187,64 @@ def test_record_bank_funded_premium(make_tenant, make_user, client):
         assert account_balance("vehicle_insurance") == D("1200")
 
 
+# --- claims via the client -------------------------------------------------------------------
+
+def test_record_reimbursement_claim_via_client(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import LineInput, post_entry, resolve_account
+        from apps.insurance.models import InsurancePolicy, PolicyType
+
+        # Book a $5,000 loss the claim will reimburse.
+        post_entry(
+            date=datetime.date(2026, 1, 15),
+            lines=[
+                LineInput("5320", debit=D("5000")),
+                LineInput("accounts_payable", credit=D("5000")),
+            ],
+        )
+        policy = InsurancePolicy.objects.create(
+            policy_type=PolicyType.AUTO, insurer_organization=_org(), currency=_usd()
+        )
+        bank = _bank()
+        pid, bank_id, loss_id = policy.pk, bank.pk, resolve_account("5320").pk
+    client.force_login(owner)
+    resp = client.post(
+        f"/t/{tenant.schema_name}/insurance/policies/{pid}/claims/new/",
+        {
+            "loss_date": "2026-02-01", "status": "paid", "settlement_kind": "reimbursement",
+            "claim_number": "CLM-1", "payout_amount": "4500", "deductible_amount": "500",
+            "payout_date": "2026-02-10", "payout_destination": "bank",
+            "bank_account": str(bank_id), "loss_expense_account": str(loss_id),
+        },
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.finance.services import account_balance
+        from apps.insurance.models import Claim
+
+        claim = Claim.objects.get(policy_id=pid)
+        assert claim.journal_entry_id is not None and claim.bank_txn_id is not None
+        assert account_balance("5320") == D("500")  # net retained = deductible
+
+
+def test_claims_list_renders(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import Claim, InsurancePolicy, PolicyType
+
+        policy = InsurancePolicy.objects.create(
+            policy_type=PolicyType.HEALTH, insurer_organization=_org("Blue Shield"),
+            currency=_usd(), nickname="Family Health",
+        )
+        Claim.objects.create(
+            policy=policy, loss_date=datetime.date(2026, 1, 1), claim_number="CLM-9"
+        )
+    client.force_login(owner)
+    body = client.get(f"/t/{tenant.schema_name}/insurance/claims/").content.decode()
+    assert "Claims" in body and "CLM-9" in body and "Family Health" in body
+
+
 # --- payables read-only guards (the lock seam) -----------------------------------------------
 
 def test_locked_bill_and_payment_are_readonly_in_payables(make_tenant, make_user, client):

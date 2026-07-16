@@ -11,6 +11,7 @@
     <c-sidebar title="Insurance" subtitle="{{ ui_tenant_name }}" glyph="shield-check">
       <c-sidebar-item label="Dashboard" icon="layout-grid" href="{{ ui_tenant_url }}insurance/" {% if active == 'dashboard' %}active="true"{% endif %} />
       <c-sidebar-item label="Policies" icon="shield-check" count="{{ nav_policies }}" href="{{ ui_tenant_url }}insurance/policies/" {% if active == 'policies' %}active="true"{% endif %} />
+      <c-sidebar-item label="Claims" icon="triangle-alert" count="{{ nav_claims }}" href="{{ ui_tenant_url }}insurance/claims/" {% if active == 'claims' %}active="true"{% endif %} />
       <c-slot name="foot">
         <c-sidebar-item label="All apps" icon="layout-grid" href="{{ ui_tenant_url }}" />
         {% if is_owner %}<c-sidebar-item label="Setup" icon="settings" href="{{ ui_tenant_url }}setup/" />{% endif %}

@@ -21,6 +21,9 @@
     <c-stat-tile icon="calendar-days" tint="amber" value="{{ renewals|length }}" label="Renewals due">
       <c-slot name="foot">next 90 days</c-slot>
     </c-stat-tile>
+    <c-stat-tile icon="triangle-alert" tint="rose" value="{{ open_claims_count }}" label="Open claims">
+      <c-slot name="foot"><a href="{{ ui_tenant_url }}insurance/claims/">View all</a></c-slot>
+    </c-stat-tile>
   </div>
 
   <div class="grid-2">
@@ -47,15 +50,27 @@
     </c-card>
   </div>
 
-  <c-card icon="clock" title="Recent premiums">
-    {% for p in recent %}
-    <c-rel-row name="{{ p.policy.display }}" role="Premium{% if p.memo %} · {{ p.memo }}{% endif %} · {{ p.date|date:'d M Y' }}" href="{{ ui_tenant_url }}insurance/policies/{{ p.policy_id }}/">
-      <c-slot name="avatar"><c-avatar tint="{{ p.policy.type_tint }}" size="sm"><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
-      <c-slot name="tail"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
-    </c-rel-row>
-    {% empty %}
-    <c-empty-state icon="clock" title="No premiums yet" text="Premiums you record on a policy show up here." />
-    {% endfor %}
-  </c-card>
+  <div class="grid-2">
+    <c-card icon="clock" title="Recent premiums">
+      {% for p in recent %}
+      <c-rel-row name="{{ p.policy.display }}" role="Premium{% if p.memo %} · {{ p.memo }}{% endif %} · {{ p.date|date:'d M Y' }}" href="{{ ui_tenant_url }}insurance/policies/{{ p.policy_id }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ p.policy.type_tint }}" size="sm"><c-icon name="banknote" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail"><c-money :amount="p.amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" /></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="clock" title="No premiums yet" text="Premiums you record on a policy show up here." />
+      {% endfor %}
+    </c-card>
+    <c-card icon="triangle-alert" title="Recent claims">
+      {% for c in recent_claims %}
+      <c-rel-row name="{{ c.policy.display }}" role="{{ c.settlement_label }} · {{ c.loss_date|date:'d M Y' }}" href="{{ ui_tenant_url }}insurance/policies/{{ c.policy_id }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ c.policy.type_tint }}" size="sm"><c-icon name="triangle-alert" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail">{% if c.payout_amount %}<c-money :amount="c.payout_amount" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}<span class="muted">—</span>{% endif %}</c-slot>
+      </c-rel-row>
+      {% empty %}
+      <c-empty-state icon="triangle-alert" title="No claims yet" text="Claims you file on a policy show up here." />
+      {% endfor %}
+    </c-card>
+  </div>
 </div>
 {% endblock %}

@@ -3,6 +3,7 @@
 from django.contrib import admin
 
 from apps.insurance.models import (
+    Claim,
     InsurancePolicy,
     InsurancePremium,
     PolicyCoverage,
@@ -33,3 +34,10 @@ class InsurancePremiumAdmin(admin.ModelAdmin):
     list_display = ("policy", "date", "amount", "funding_source")
     list_filter = ("funding_source",)
     date_hierarchy = "date"
+
+
+@admin.register(Claim)
+class ClaimAdmin(admin.ModelAdmin):
+    list_display = ("policy", "loss_date", "settlement_kind", "status", "payout_amount")
+    list_filter = ("settlement_kind", "status")
+    date_hierarchy = "loss_date"

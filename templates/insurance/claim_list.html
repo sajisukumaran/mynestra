@@ -1,0 +1,40 @@
+{% extends "insurance/base.html" %}
+{% block ins_heading %}Claims{% endblock %}
+
+{% block ins %}
+<c-breadcrumb><a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" /><a href="{{ ui_tenant_url }}insurance/">Insurance</a><c-icon name="chevron-right" /><span class="strong">Claims</span></c-breadcrumb>
+
+<c-page-header title="Claims" subtitle="{{ claims|length }} total · {{ open_count }} open" />
+
+<div class="stack-16">
+  <c-card flush>
+    {% if claims %}
+    <c-table>
+      <thead><tr><c-th>Loss date</c-th><c-th>Policy</c-th><c-th>Claim #</c-th><c-th>Settlement</c-th><c-th>Status</c-th><th class="col-num">Deductible</th><th class="col-num">Payout</th></tr></thead>
+      <tbody>
+        {% for c in claims %}
+        <tr>
+          <td class="tnum">{{ c.loss_date|date:'d M Y' }}</td>
+          <td><a href="{{ ui_tenant_url }}insurance/policies/{{ c.policy_id }}/" class="strong">{{ c.policy.display }}</a> <c-chip tint="{{ c.policy.type_tint }}">{{ c.policy.type_label }}</c-chip></td>
+          <td class="muted">{{ c.claim_number|default:"—" }}</td>
+          <td><c-chip>{{ c.settlement_label }}</c-chip>{% if c.asset_label %} <span class="muted">· {{ c.asset_label }}</span>{% endif %}</td>
+          <td>
+            {% if c.status == 'paid' %}<c-badge variant="success">Paid</c-badge>
+            {% elif c.status == 'denied' %}<c-badge variant="danger">Denied</c-badge>
+            {% elif c.status == 'approved' %}<c-badge variant="accent">Approved</c-badge>
+            {% elif c.status == 'submitted' %}<c-badge variant="info">Submitted</c-badge>
+            {% elif c.status == 'closed' %}<c-chip>Closed</c-chip>
+            {% else %}<c-badge variant="warning">Open</c-badge>{% endif %}
+          </td>
+          <td class="col-num">{% if c.deductible_amount %}<c-money :amount="c.deductible_amount" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+          <td class="col-num">{% if c.payout_amount %}<c-money :amount="c.payout_amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </c-table>
+    {% else %}
+    <c-empty-state icon="triangle-alert" title="No claims yet" text="Claims filed on any policy show up here. Open a policy to record one." />
+    {% endif %}
+  </c-card>
+</div>
+{% endblock %}

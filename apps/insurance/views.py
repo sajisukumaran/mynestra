@@ -8,6 +8,7 @@ import datetime
 from decimal import Decimal, InvalidOperation
 
 from django.core.paginator import Paginator
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
@@ -18,22 +19,31 @@ from apps.finance.services import base_currency
 from apps.insurance.forms import PolicyForm
 from apps.insurance.models import (
     POLICY_TYPE_TINT,
+    Claim,
+    ClaimStatus,
     Funding,
     InsurancePolicy,
     InsurancePremium,
     MemberRole,
+    PayoutDestination,
     PolicyCoverage,
     PolicyMember,
     PolicyStatus,
     PolicyType,
     PremiumFrequency,
+    SettlementKind,
 )
 from apps.insurance.services import (
+    claims_overview,
     dashboard_stats,
+    delete_claim,
     delete_premium,
+    save_claim,
     save_premium,
+    set_claim_vehicle,
     set_covered_vehicles,
     sync_policy_p2o,
+    void_claim,
 )
 from apps.organizations.models import Organization
 from apps.tenants.models import Membership, Role
@@ -60,6 +70,7 @@ def insurance_context(request, active, **extra):
         "active": active,
         "is_owner": _is_owner(request),
         "nav_policies": InsurancePolicy.objects.count(),
+        "nav_claims": Claim.objects.count(),
     }
     ctx.update(extra)
     return ctx
@@ -98,6 +109,26 @@ def _vehicles():
     from apps.automobile.models import Vehicle
 
     return Vehicle.objects.filter(is_active=True).order_by("nickname")
+
+
+def _expense_accounts():
+    """Postable expense accounts — the loss-expense home a reimbursement credits."""
+    from apps.finance.models import AccountType
+
+    return Account.objects.filter(type=AccountType.EXPENSE, is_postable=True).order_by("code")
+
+
+def _covered_vehicles(policy):
+    """Vehicles this policy covers (incl. already-disposed ones, for editing a total-loss claim)."""
+    from django.contrib.contenttypes.models import ContentType
+
+    from apps.automobile.models import Vehicle
+
+    ct = ContentType.objects.get_for_model(Vehicle)
+    ids = list(policy.assets.filter(content_type=ct).values_list("object_id", flat=True))
+    if not ids:
+        return Vehicle.objects.none()
+    return Vehicle.objects.filter(pk__in=ids).order_by("nickname")
 
 
 def _resolve_org(request, field):
@@ -317,6 +348,11 @@ def policy_detail(request, pk):
         policy.premiums.select_related("bill", "payment").order_by("-date", "-id")
     )
     assets = list(policy.assets.select_related("content_type").all())
+    claims = list(
+        policy.claims.select_related("disposal", "journal_entry", "loss_expense_account")
+        .order_by("-loss_date", "-id")
+    )
+    covered_vehicles = list(_covered_vehicles(policy))
     ctx = insurance_context(
         request, "policies",
         policy=policy, base=base_currency(),
@@ -324,12 +360,19 @@ def policy_detail(request, pk):
         members=sorted(policy.members.select_related("person").all(), key=lambda m: m.role),
         assets=assets,
         premiums=premiums,
+        claims=claims,
         history=policy.history.all()[:60],
         frequencies=PremiumFrequency.choices,
         fundings=Funding.choices,
         bank_accounts=_bank_accounts(),
         credit_cards=_credit_cards(),
         cash_accounts=_cash_accounts(),
+        expense_accounts=_expense_accounts(),
+        covered_vehicles=covered_vehicles,
+        can_total_loss=bool(covered_vehicles),
+        claim_statuses=ClaimStatus.choices,
+        settlement_kinds=SettlementKind.choices,
+        payout_destinations=PayoutDestination.choices,
         today=datetime.date.today(),
     )
     return render(request, "insurance/policy_detail.html", ctx)
@@ -402,6 +445,113 @@ def premium_delete(request, pk, prem):
         except ValueError:
             pass  # a foreign payables payment is allocated — leave it, surface via the detail page
     return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
+
+
+# --- Claims ---------------------------------------------------------------------------------
+
+def _apply_claim_payout_dest(request, claim):
+    dest = request.POST.get("payout_destination") or PayoutDestination.NONE
+    claim.payout_destination = dest if dest in PayoutDestination.values else PayoutDestination.NONE
+    claim.bank_account = claim.cash_account = None
+    if claim.payout_destination == PayoutDestination.BANK:
+        claim.bank_account = _bank_accounts().filter(
+            pk=request.POST.get("bank_account") or 0
+        ).first()
+        if claim.bank_account is None:
+            claim.payout_destination = PayoutDestination.NONE
+    elif claim.payout_destination == PayoutDestination.CASH:
+        # None cash account → the direct entry falls back to Cash on Hand (1110).
+        claim.cash_account = Account.objects.filter(
+            pk=request.POST.get("cash_account") or 0, is_postable=True
+        ).first()
+
+
+def _build_claim(request, claim, policy):
+    """Populate a Claim from POST (does NOT save). `settlement_kind` is fixed after creation.
+    Returns None if the required loss date is missing."""
+    loss_date = parse_date(request.POST.get("loss_date") or "")
+    if loss_date is None:
+        return None
+    claim.loss_date = loss_date
+    claim.claim_number = request.POST.get("claim_number", "").strip()
+    claim.reported_date = parse_date(request.POST.get("reported_date") or "") or None
+    status = request.POST.get("status") or ClaimStatus.OPEN
+    claim.status = status if status in ClaimStatus.values else ClaimStatus.OPEN
+    if claim.pk is None:
+        sk = request.POST.get("settlement_kind") or SettlementKind.REIMBURSEMENT
+        claim.settlement_kind = sk if sk in SettlementKind.values else SettlementKind.REIMBURSEMENT
+    claim.deductible_amount = _decimal(request.POST.get("deductible_amount")) or Decimal("0")
+    claim.payout_amount = _decimal(request.POST.get("payout_amount")) or Decimal("0")
+    claim.payout_date = parse_date(request.POST.get("payout_date") or "") or None
+    claim.notes = request.POST.get("notes", "").strip()
+    _apply_claim_payout_dest(request, claim)
+    if claim.is_total_loss:
+        claim.loss_expense_account = None
+    else:
+        claim.loss_expense_account = _expense_accounts().filter(
+            pk=request.POST.get("loss_expense_account") or 0
+        ).first()
+    vid = request.POST.get("claimed_vehicle") or 0
+    vehicle = _covered_vehicles(policy).filter(pk=vid).first() if vid else None
+    set_claim_vehicle(claim, vehicle)
+    return claim
+
+
+def claim_create(request, pk):
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    if request.method == "POST":
+        claim = _build_claim(request, Claim(policy=policy), policy)
+        if claim is not None:
+            try:
+                with transaction.atomic():
+                    claim.save()
+                    save_claim(claim, user=request.user, is_new=True)
+            except ValueError:
+                pass  # invalid (e.g. total-loss without an available vehicle) — nothing persisted
+    return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
+
+
+def claim_edit(request, pk, cid):
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    claim = get_object_or_404(Claim, pk=cid, policy=policy)
+    if request.method == "POST":
+        built = _build_claim(request, claim, policy)
+        if built is not None:
+            try:
+                with transaction.atomic():
+                    claim.save()
+                    save_claim(claim, user=request.user, is_new=False)
+            except ValueError:
+                pass
+    return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
+
+
+def claim_void(request, pk, cid):
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    claim = get_object_or_404(Claim, pk=cid, policy=policy)
+    if request.method == "POST":
+        void_claim(claim, user=request.user)
+    return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
+
+
+def claim_delete(request, pk, cid):
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    claim = get_object_or_404(Claim, pk=cid, policy=policy)
+    if request.method == "POST":
+        delete_claim(claim, user=request.user)
+    return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
+
+
+def claim_list(request):
+    claims = list(claims_overview())
+    ctx = insurance_context(
+        request, "claims",
+        claims=claims, base=base_currency(),
+        open_count=sum(1 for c in claims if c.status in (
+            ClaimStatus.OPEN, ClaimStatus.SUBMITTED, ClaimStatus.APPROVED
+        )),
+    )
+    return render(request, "insurance/claim_list.html", ctx)
 
 
 # --- htmx fragments -------------------------------------------------------------------------

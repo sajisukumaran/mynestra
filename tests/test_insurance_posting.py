@@ -221,3 +221,228 @@ def test_sync_policy_p2o_links_insured_idempotently(make_tenant):
             person=person, organization=policy.insurer_organization, type__code="insured"
         )
         assert links.count() == 1
+
+
+# --- Claims (Phase 2) ------------------------------------------------------------------------
+
+def _resolve(code):
+    from apps.finance.services import resolve_account
+
+    return resolve_account(code)
+
+
+def _book_loss(amount, *, account="5320", date=JAN):
+    """Book a loss to an expense account (Dr expense / Cr AP) — the thing a claim reimburses."""
+    from apps.finance.services import LineInput, post_entry
+
+    post_entry(
+        date=date,
+        lines=[
+            LineInput(account, debit=D(amount)),
+            LineInput("accounts_payable", credit=D(amount)),
+        ],
+        description="Repair loss",
+    )
+
+
+def _assert_balanced():
+    from django.db.models import Sum
+
+    from apps.finance.models import JournalEntry, JournalLine
+
+    agg = JournalLine.objects.filter(entry__status=JournalEntry.Status.POSTED).aggregate(
+        d=Sum("base_debit"), c=Sum("base_credit")
+    )
+    assert agg["d"] == agg["c"], (agg["d"], agg["c"])
+
+
+def _owned_vehicle(cost="30000"):
+    from apps.automobile.models import CostKind, OwnershipMode, Vehicle, VehicleCostEvent
+    from apps.automobile.services import save_cost_event
+
+    v = Vehicle.objects.create(
+        nickname="Family SUV", ownership_mode=OwnershipMode.OWNED_CASH, currency=_usd()
+    )
+    ev = VehicleCostEvent(
+        vehicle=v, kind=CostKind.PURCHASE, date=JAN, amount=D(cost),
+        vendor_organization=_org("Dealer"),
+    )
+    ev.save()
+    save_cost_event(ev, is_new=True)
+    v.refresh_from_db()
+    return v
+
+
+def _claim(policy, *, settlement="reimbursement", payout="0", deductible="0", destination="none",
+           bank=None, cash=None, loss_account=None, vehicle=None, status="open",
+           loss_date=JAN, payout_date=JAN, save=True):
+    from apps.insurance.models import Claim
+    from apps.insurance.services import save_claim, set_claim_vehicle
+
+    claim = Claim(
+        policy=policy, loss_date=loss_date, status=status, settlement_kind=settlement,
+        deductible_amount=D(deductible), payout_amount=D(payout), payout_date=payout_date,
+        payout_destination=destination, bank_account=bank, cash_account=cash,
+        loss_expense_account=loss_account,
+    )
+    if vehicle is not None:
+        set_claim_vehicle(claim, vehicle)
+    claim.save()
+    if save:
+        save_claim(claim, is_new=True)
+    return claim
+
+
+def test_reimbursement_bank_nets_loss_expense_to_deductible(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.banking.models import BankTransaction, TxnType
+
+        bank = _bank()
+        _book_loss("5000")
+        assert account_balance("5320") == D("5000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(
+            policy, payout="4500", deductible="500", destination="bank",
+            bank=bank, loss_account=_resolve("5320"),
+        )
+        assert claim.journal_entry_id is not None
+        # The payout credits the loss expense → net retained expense = the deductible.
+        assert account_balance("5320") == D("500")
+        # Bank money-in routes via 1150 (nets to zero) + a native deposit in the register.
+        assert account_balance("transfer_clearing") == ZERO
+        assert claim.bank_txn_id is not None
+        assert BankTransaction.objects.filter(
+            account=bank, txn_type=TxnType.TRANSFER_IN, amount=D("4500")
+        ).exists()
+        _assert_balanced()
+
+
+def test_reimbursement_cash_credits_expense_directly(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        _book_loss("3000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(
+            policy, payout="2500", deductible="500", destination="cash",
+            loss_account=_resolve("5320"),
+        )
+        assert claim.journal_entry_id is not None and claim.bank_txn_id is None
+        assert account_balance("5320") == D("500")
+        assert account_balance("1110") == D("2500")  # cash on hand rose by the payout
+        _assert_balanced()
+
+
+def test_open_claim_without_payout_posts_nothing(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        policy = _policy(PolicyType.HEALTH)
+        claim = _claim(policy, payout="0", loss_account=_resolve("5320"), payout_date=None)
+        assert claim.journal_entry_id is None
+        assert JournalEntry.objects.count() == 0
+        assert net_worth() == ZERO
+
+
+def test_total_loss_creates_disposal_and_books_gain_loss(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        bank = _bank()
+        vehicle = _owned_vehicle("30000")
+        assert account_balance(vehicle.gl_account) == D("30000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(
+            policy, settlement="total_loss", payout="20000", deductible="1000",
+            destination="bank", bank=bank, vehicle=vehicle,
+        )
+        # The disposal owns the entry; the claim posts nothing of its own (double-book guard).
+        assert claim.disposal_id is not None and claim.journal_entry_id is None
+        vehicle.refresh_from_db()
+        assert vehicle.is_active is False               # flipped disposed
+        assert account_balance(vehicle.gl_account) == ZERO  # node derecognized
+        assert claim.gain_loss == D("-10000")           # 20000 proceeds − 30000 cost = loss
+        assert account_balance("transfer_clearing") == ZERO
+        _assert_balanced()
+
+
+def test_reimbursement_edit_reposts_to_new_amount(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.insurance.services import save_claim
+
+        _book_loss("5000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(policy, payout="4500", destination="cash", loss_account=_resolve("5320"))
+        assert account_balance("5320") == D("500")
+        claim.payout_amount = D("4000")
+        claim.save()
+        save_claim(claim, is_new=False)
+        claim.refresh_from_db()
+        assert claim.posting_version == 2
+        assert account_balance("5320") == D("1000")     # 5000 − 4000
+        _assert_balanced()
+
+
+def test_void_reimbursement_reverses_but_keeps_record(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import Claim
+        from apps.insurance.services import void_claim
+
+        _book_loss("5000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(policy, payout="4500", destination="bank", bank=_bank(),
+                       loss_account=_resolve("5320"))
+        void_claim(claim)
+        assert account_balance("5320") == D("5000")      # payout undone
+        assert account_balance("transfer_clearing") == ZERO
+        assert Claim.objects.filter(pk=claim.pk).exists()  # record kept
+
+
+def test_delete_reimbursement_hard_erases(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import Claim
+        from apps.insurance.services import delete_claim
+
+        _book_loss("5000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(policy, payout="4500", destination="cash", loss_account=_resolve("5320"))
+        delete_claim(claim)
+        assert Claim.objects.count() == 0
+        assert account_balance("5320") == D("5000")      # only the original loss remains
+        _assert_balanced()
+
+
+def test_void_total_loss_restores_vehicle(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import Claim
+        from apps.insurance.services import void_claim
+
+        vehicle = _owned_vehicle("30000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(policy, settlement="total_loss", payout="20000", vehicle=vehicle)
+        void_claim(claim)
+        vehicle.refresh_from_db()
+        assert vehicle.is_active is True                 # restored
+        assert account_balance(vehicle.gl_account) == D("30000")  # cost re-recognized
+        assert Claim.objects.filter(pk=claim.pk).exists()
+
+
+def test_delete_total_loss_erases_disposal_and_restores_vehicle(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.automobile.models import VehicleDisposal
+        from apps.insurance.models import Claim
+        from apps.insurance.services import delete_claim
+
+        vehicle = _owned_vehicle("30000")
+        policy = _policy(PolicyType.AUTO)
+        claim = _claim(policy, settlement="total_loss", payout="20000", vehicle=vehicle)
+        delete_claim(claim)
+        vehicle.refresh_from_db()
+        assert vehicle.is_active is True
+        assert account_balance(vehicle.gl_account) == D("30000")
+        assert Claim.objects.count() == 0
+        assert VehicleDisposal.objects.count() == 0
+        _assert_balanced()

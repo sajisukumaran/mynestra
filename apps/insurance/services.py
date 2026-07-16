@@ -16,17 +16,30 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from apps.finance.models import ZERO
-from apps.finance.services import base_currency, resolve_posting_account
+from apps.finance.models import ZERO, JournalEntry
+from apps.finance.services import (
+    LineInput,
+    base_currency,
+    post_entry,
+    resolve_posting_account,
+    reverse_entry,
+)
 from apps.insurance.models import (
     COVERED_ROLES,
+    OPEN_CLAIM_STATUSES,
+    Claim,
     Funding,
     InsurancePolicy,
     InsurancePremium,
+    PayoutDestination,
     PolicyAsset,
     PolicyStatus,
     PolicyType,
 )
+
+# Fixed structural legs for claim payouts (resolved by stable system_key / code — never remappable).
+TRANSFER_CLEARING = "transfer_clearing"  # 1150 — routes bank money-in via a native TRANSFER_IN
+CASH_ON_HAND = "1110"
 
 # PolicyType → the Standard-mode default premium expense account (a stable system_key). Auto keeps
 # its own 5340 (continuity with the Automobile module); home/renters use the escrow / renters homes;
@@ -261,6 +274,216 @@ def void_premium(premium: InsurancePremium, *, user=None):
         unpost_bill(premium.bill, user=user)
 
 
+# --- Claims (Phase 2) ------------------------------------------------------------------------
+# Two posting paths, both through existing service layers (never hand-written ledger rows):
+#   * REIMBURSEMENT — a direct finance entry crediting the loss expense account (the payout offsets
+#     the already-booked loss; net retained expense = the deductible). Bank payout routes via 1150 +
+#     a native banking TRANSFER_IN (register-truthful); cash debits the chosen cash account / 1110.
+#   * TOTAL_LOSS (auto) — delegates entirely to automobile.post_disposal (method=TOTAL_LOSS,
+#     proceeds=payout); the claim posts NOTHING of its own (the disposal owns the 4930 entry).
+# Cross-module imports (automobile / banking) stay lazy.
+
+def _claim_key(claim: Claim) -> str:
+    return f"insurance:claim:{claim.pk}:v{claim.posting_version}"
+
+
+def _claim_vehicle(claim: Claim):
+    """The covered Vehicle this claim concerns, if its `claimed_asset` is one (else None)."""
+    from apps.automobile.models import Vehicle
+
+    asset = claim.claimed_asset
+    return asset if isinstance(asset, Vehicle) else None
+
+
+def _reimbursement_postable(claim: Claim) -> bool:
+    """A reimbursement posts only once a payout is recorded, an expense home is chosen, and a valid
+    destination is set (an open / denied / no-payout claim posts nothing)."""
+    if claim.is_total_loss or not claim.has_payout or claim.loss_expense_account_id is None:
+        return False
+    if claim.payout_destination == PayoutDestination.BANK:
+        return claim.bank_account_id is not None
+    return claim.payout_destination == PayoutDestination.CASH
+
+
+def _reimbursement_lines(claim: Claim) -> list[LineInput]:
+    """Dr the payout destination (1150 for a bank leg, else the cash account / 1110), Cr the loss
+    expense account. Balanced by construction (two lines, equal amount)."""
+    policy = claim.policy
+    cur = policy.currency or base_currency()
+    amount = claim.payout_amount
+    insurer = {"person": policy.insurer_person, "organization": policy.insurer_organization}
+    if claim.payout_destination == PayoutDestination.BANK:
+        cash_leg = TRANSFER_CLEARING
+    else:
+        cash_leg = claim.cash_account or CASH_ON_HAND
+    return [
+        LineInput(cash_leg, debit=amount, currency=cur, **insurer),
+        LineInput(claim.loss_expense_account, credit=amount, currency=cur),
+    ]
+
+
+def _sync_claim_bank_leg(claim: Claim, *, user=None):
+    """For a payout to a tracked bank account, post a native banking TRANSFER_IN (Dr bank gl / Cr
+    1150) so 1150 nets to zero and the register shows the deposit (the disposal-proceeds idiom)."""
+    if claim.payout_destination != PayoutDestination.BANK or claim.bank_account_id is None:
+        return None
+    from apps.banking.models import BankTransaction
+    from apps.banking.models import TxnType as BankTxnType
+    from apps.banking.services import post_transaction as bank_post
+
+    leg = BankTransaction.objects.create(
+        account=claim.bank_account, txn_type=BankTxnType.TRANSFER_IN,
+        date=claim.payout_date or claim.loss_date, amount=claim.payout_amount,
+        counter_external=f"{claim.policy.display} claim payout",
+    )
+    bank_post(leg, user=user)
+    claim.bank_txn = leg
+    return leg
+
+
+def _teardown_claim_bank_leg(claim: Claim, *, user=None):
+    if claim.bank_txn_id is None:
+        return
+    from apps.banking.services import delete_transaction
+
+    leg = claim.bank_txn
+    claim.bank_txn = None
+    claim.save(update_fields=["bank_txn", "updated_at"])
+    delete_transaction(leg, user=user)
+
+
+def _post_reimbursement(claim: Claim, *, user=None):
+    if not _reimbursement_postable(claim):
+        return
+    entry = post_entry(
+        date=claim.payout_date or claim.loss_date,
+        lines=_reimbursement_lines(claim),
+        source=claim,
+        external_key=_claim_key(claim),
+        description=f"{claim.policy.display}: claim payout",
+        memo=claim.notes,
+        user=user,
+    )
+    claim.journal_entry = entry
+    _sync_claim_bank_leg(claim, user=user)
+    claim.save(update_fields=["journal_entry", "bank_txn", "updated_at"])
+
+
+def _unpost_reimbursement(claim: Claim, *, user=None):
+    """Reverse a reimbursement's entry + tear down its bank leg (safe when nothing was posted)."""
+    _teardown_claim_bank_leg(claim, user=user)
+    entry = claim.journal_entry
+    if entry is not None and entry.status == JournalEntry.Status.POSTED:
+        reverse_entry(entry, user=user)
+    if claim.journal_entry_id is not None:
+        claim.journal_entry = None
+        claim.save(update_fields=["journal_entry", "updated_at"])
+
+
+def _disposal_proceeds_account(claim: Claim):
+    return claim.bank_account if claim.payout_destination == PayoutDestination.BANK else None
+
+
+def _post_total_loss(claim: Claim, *, user=None):
+    """Create (or repost, on edit) the auto write-off disposal. The disposal owns the 4930 entry;
+    the claim only links to it. Requires a covered Vehicle with no pre-existing disposal."""
+    from apps.automobile.models import DisposalMethod, VehicleDisposal
+    from apps.automobile.services import post_disposal, repost_disposal
+
+    vehicle = _claim_vehicle(claim)
+    if vehicle is None:
+        raise ValueError("Select the covered vehicle for a total-loss claim.")
+    policy = claim.policy
+    date = claim.payout_date or claim.loss_date
+
+    if claim.disposal_id is None:
+        if hasattr(vehicle, "disposal"):
+            raise ValueError("This vehicle already has a disposal recorded — edit that instead.")
+        disposal = VehicleDisposal(
+            vehicle=vehicle, method=DisposalMethod.TOTAL_LOSS, date=date,
+            proceeds=claim.payout_amount or ZERO,
+            proceeds_account=_disposal_proceeds_account(claim),
+            buyer_person=policy.insurer_person, buyer_organization=policy.insurer_organization,
+            notes=claim.notes,
+        )
+        disposal.save()
+        post_disposal(disposal, user=user)
+        claim.disposal = disposal
+        claim.save(update_fields=["disposal", "updated_at"])
+    else:
+        disposal = claim.disposal
+        disposal.method = DisposalMethod.TOTAL_LOSS
+        disposal.date = date
+        disposal.proceeds = claim.payout_amount or ZERO
+        disposal.proceeds_account = _disposal_proceeds_account(claim)
+        disposal.buyer_person = policy.insurer_person
+        disposal.buyer_organization = policy.insurer_organization
+        disposal.notes = claim.notes
+        disposal.save()
+        repost_disposal(disposal, user=user)
+
+
+@transaction.atomic
+def save_claim(claim: Claim, *, user=None, is_new=True):
+    """Post a saved claim down its settlement path (the caller has saved the row, so it has a pk).
+    On edit (`is_new=False`), the reimbursement path reverses-and-rebuilds (version bump); the
+    total-loss path reposts its disposal in place. `settlement_kind` is fixed after creation."""
+    if claim.is_total_loss:
+        _post_total_loss(claim, user=user)
+        return claim
+    if not is_new:
+        _unpost_reimbursement(claim, user=user)
+        claim.posting_version += 1
+        claim.save(update_fields=["posting_version", "updated_at"])
+    _post_reimbursement(claim, user=user)
+    return claim
+
+
+@transaction.atomic
+def void_claim(claim: Claim, *, user=None):
+    """Reverse the claim's GL impact but keep the record (Void). Total loss → unpost the disposal
+    (restores the vehicle to active); reimbursement → reverse the entry + tear down the bank leg."""
+    if claim.is_total_loss:
+        if claim.disposal_id is not None:
+            from apps.automobile.services import unpost_disposal
+
+            unpost_disposal(claim.disposal, user=user)
+    else:
+        _unpost_reimbursement(claim, user=user)
+
+
+@transaction.atomic
+def delete_claim(claim: Claim, *, user=None):
+    """Hard-erase the claim and everything it created. Total loss → delete the disposal (its entry,
+    legs; restores the vehicle); reimbursement → erase the entry + bank leg."""
+    if claim.is_total_loss:
+        if claim.disposal_id is not None:
+            from apps.automobile.services import delete_disposal
+
+            disposal = claim.disposal
+            claim.disposal = None
+            claim.save(update_fields=["disposal", "updated_at"])
+            delete_disposal(disposal, user=user)
+    else:
+        _teardown_claim_bank_leg(claim, user=user)
+        entry = claim.journal_entry
+        if entry is not None:
+            entry.hard_delete()
+    claim.hard_delete()
+
+
+def set_claim_vehicle(claim: Claim, vehicle) -> None:
+    """Point a claim's `claimed_asset` GFK at a Vehicle (used for auto claims / total loss)."""
+    if vehicle is None:
+        claim.content_type = None
+        claim.object_id = None
+        return
+    from django.contrib.contenttypes.models import ContentType
+
+    claim.content_type = ContentType.objects.get_for_model(vehicle.__class__)
+    claim.object_id = vehicle.pk
+
+
 # --- Covered-person ("insured" P2O) synchronisation ------------------------------------------
 
 def sync_policy_p2o(policy: InsurancePolicy, *, user=None) -> None:
@@ -342,6 +565,18 @@ def annual_premium_total() -> Decimal:
     return sum((p.annualized_premium for p in _active_policies()), ZERO)
 
 
+def open_claims():
+    """Claims still in progress (open / submitted / approved) — drives the dashboard stat + list."""
+    return Claim.objects.filter(status__in=list(OPEN_CLAIM_STATUSES))
+
+
+def claims_overview():
+    """All claims across policies, newest loss first — for the global Claims list."""
+    return Claim.objects.select_related(
+        "policy", "policy__insurer_organization", "policy__insurer_person"
+    ).order_by("-loss_date", "-id")
+
+
 def dashboard_stats() -> dict:
     """Headline figures for the Insurance dashboard."""
     policies = list(
@@ -356,14 +591,15 @@ def dashboard_stats() -> dict:
         "active_count": len(active),
         "annual_premium": sum((p.annualized_premium for p in active), ZERO),
         "renewals": policies_expiring(within_days=90),
+        "open_claims_count": open_claims().count(),
+        "recent_claims": list(claims_overview()[:6]),
     }
 
 
 def launcher_counts() -> list[dict]:
-    """Live counts for the launcher tile: active policies / annual premium / renewals due soon."""
-    due = policies_expiring(within_days=45)
+    """Live counts for the launcher tile: active policies / annual premium / open claims."""
     return [
         {"n": _active_policies().count(), "label": "Active policies"},
         {"n": annual_premium_total(), "label": "Annual premium"},
-        {"n": len(due), "label": "Renewals due"},
+        {"n": open_claims().count(), "label": "Open claims"},
     ]

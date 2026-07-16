@@ -51,6 +51,7 @@
       <button type="button" class="tab" :class="{ active: tab === 'members' }" @click="tab = 'members'"><c-icon name="users" size="sm" /> People {% if members %}<span class="tcount tnum">{{ members|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'assets' }" @click="tab = 'assets'"><c-icon name="car" size="sm" /> Assets {% if assets %}<span class="tcount tnum">{{ assets|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'premiums' }" @click="tab = 'premiums'"><c-icon name="banknote" size="sm" /> Premiums {% if premiums %}<span class="tcount tnum">{{ premiums|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'claims' }" @click="tab = 'claims'"><c-icon name="triangle-alert" size="sm" /> Claims {% if claims %}<span class="tcount tnum">{{ claims|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
     </c-tabs>
 
@@ -183,6 +184,86 @@
             <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/premiums/new/" x-data="{ funding: 'none' }">{% csrf_token %}
               {% include "insurance/partials/premium_fields.html" %}
               <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save premium</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+          {% endif %}
+        </c-empty-state>
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Claims #}
+    <div x-show="tab === 'claims'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="triangle-alert" title="Claims">
+        {% if policy.insurer %}
+        <c-slot name="actions">
+          <c-modal title="Record a claim">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="plus" size="sm" /> Record claim</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/claims/new/" x-data="{ kind: 'reimbursement', dest: 'none' }">{% csrf_token %}
+              {% include "insurance/partials/claim_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save claim</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% endif %}
+        {% if claims %}
+        <c-table>
+          <thead><tr><c-th>Loss date</c-th><c-th>Claim #</c-th><c-th>Settlement</c-th><c-th>Status</c-th><th class="col-num">Deductible</th><th class="col-num">Payout</th><th></th></tr></thead>
+          <tbody>
+            {% for c in claims %}
+            <tr>
+              <td class="tnum">{{ c.loss_date|date:'d M Y' }}</td>
+              <td class="muted">{{ c.claim_number|default:"—" }}</td>
+              <td><c-chip>{{ c.settlement_label }}</c-chip>{% if c.asset_label %} <span class="muted">· {{ c.asset_label }}</span>{% endif %}</td>
+              <td>
+                {% if c.status == 'paid' %}<c-badge variant="success">Paid</c-badge>
+                {% elif c.status == 'denied' %}<c-badge variant="danger">Denied</c-badge>
+                {% elif c.status == 'approved' %}<c-badge variant="accent">Approved</c-badge>
+                {% elif c.status == 'submitted' %}<c-badge variant="info">Submitted</c-badge>
+                {% elif c.status == 'closed' %}<c-chip>Closed</c-chip>
+                {% else %}<c-badge variant="warning">Open</c-badge>{% endif %}
+              </td>
+              <td class="col-num">{% if c.deductible_amount %}<c-money :amount="c.deductible_amount" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+              <td class="col-num">{% if c.payout_amount %}<c-money :amount="c.payout_amount" symbol="{{ base.symbol }}" dp="{{ base.decimal_places }}" grouping="{{ ui_number_format }}" />{% else %}—{% endif %}</td>
+              <td>
+                <div class="cell-actions">
+                  <c-modal title="Edit claim">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="pencil" size="sm" /></c-button></c-slot>
+                    <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/claims/{{ c.pk }}/edit/" x-data="{ kind: '{{ c.settlement_kind }}', dest: '{{ c.payout_destination }}' }">{% csrf_token %}
+                      {% include "insurance/partials/claim_fields.html" with claim=c %}
+                      <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save changes</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+                    </form>
+                  </c-modal>
+                  <c-confirm-dialog title="Void this claim?" message="Reverses the claim's ledger effect but keeps the record. A total-loss claim restores the vehicle to active.">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost" title="Void"><c-icon name="rotate-ccw" size="sm" /></c-button></c-slot>
+                    <c-slot name="confirm">
+                      <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/claims/{{ c.pk }}/void/">{% csrf_token %}
+                        <c-button type="submit" variant="primary"><c-icon name="rotate-ccw" /> Void</c-button>
+                      </form>
+                    </c-slot>
+                  </c-confirm-dialog>
+                  <c-confirm-dialog title="Delete this claim?" message="Erases the claim and any ledger entry / disposal it created.">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                    <c-slot name="confirm">
+                      <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/claims/{{ c.pk }}/delete/">{% csrf_token %}
+                        <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+                      </form>
+                    </c-slot>
+                  </c-confirm-dialog>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="triangle-alert" title="No claims yet" text="Record a claim when you file a loss — a reimbursement offsets the loss expense; an auto total loss books a write-off.">
+          {% if policy.insurer %}
+          <c-modal title="Record a claim">
+            <c-slot name="trigger"><c-button variant="primary"><c-icon name="plus" /> Record claim</c-button></c-slot>
+            <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/claims/new/" x-data="{ kind: 'reimbursement', dest: 'none' }">{% csrf_token %}
+              {% include "insurance/partials/claim_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Save claim</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
             </form>
           </c-modal>
           {% endif %}

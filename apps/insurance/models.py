@@ -414,3 +414,152 @@ class InsurancePremium(SoftDeleteModel):
     @property
     def managed_url(self) -> str:
         return f"insurance/policies/{self.policy_id}/"
+
+
+class ClaimStatus(models.TextChoices):
+    OPEN = "open", "Open"
+    SUBMITTED = "submitted", "Submitted"
+    APPROVED = "approved", "Approved"
+    PAID = "paid", "Paid"
+    DENIED = "denied", "Denied"
+    CLOSED = "closed", "Closed"
+
+
+# Statuses that count as "in progress" for the open-claims stat / launcher count.
+OPEN_CLAIM_STATUSES = frozenset(
+    {ClaimStatus.OPEN, ClaimStatus.SUBMITTED, ClaimStatus.APPROVED}
+)
+
+
+class SettlementKind(models.TextChoices):
+    REIMBURSEMENT = "reimbursement", "Reimbursement"
+    TOTAL_LOSS = "total_loss", "Total loss (auto write-off)"
+
+
+class PayoutDestination(models.TextChoices):
+    """Where a claim payout lands. No `card` (a payout is money IN, not a card charge); NONE = no
+    payout received yet (an open claim posts nothing on the reimbursement path)."""
+
+    BANK = "bank", "Bank account"
+    CASH = "cash", "Cash / other"
+    NONE = "none", "No payout yet"
+
+
+class Claim(SoftDeleteModel):
+    """A claim on a policy — the money event for a covered loss. It posts through one of two paths,
+    never hand-written ledger rows (mirrors `InsurancePremium` / `VehicleDisposal`):
+
+    * **Reimbursement** — a direct finance entry crediting the loss expense account (the payout
+      offsets the already-booked loss; net retained expense = the deductible). Payout to a tracked
+      bank routes via `1150` + a native banking TRANSFER_IN so the register stays truthful; to cash
+      it debits the chosen cash account (else `1110`). Posts only once a payout is recorded.
+    * **Total loss (auto)** — delegates entirely to `automobile.post_disposal`
+      (`DisposalMethod.TOTAL_LOSS`, `proceeds=payout`), booking gain/loss to `4930`; this row posts
+      NOTHING of its own (the disposal owns the entry — double-book guard).
+    """
+
+    policy = models.ForeignKey(InsurancePolicy, on_delete=models.CASCADE, related_name="claims")
+    claim_number = models.CharField(max_length=80, blank=True)
+    loss_date = models.DateField()
+    reported_date = models.DateField(null=True, blank=True)
+    status = models.CharField(
+        max_length=10, choices=ClaimStatus.choices, default=ClaimStatus.OPEN
+    )
+    settlement_kind = models.CharField(
+        max_length=14, choices=SettlementKind.choices, default=SettlementKind.REIMBURSEMENT
+    )
+
+    deductible_amount = _money(default=ZERO)  # informational: retained expense after the payout
+    payout_amount = _money(default=ZERO)      # >= 0; 0 = no payout yet / denied
+    payout_date = models.DateField(null=True, blank=True)
+
+    payout_destination = models.CharField(
+        max_length=6, choices=PayoutDestination.choices, default=PayoutDestination.NONE
+    )
+    bank_account = models.ForeignKey(
+        "banking.BankAccount", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    cash_account = models.ForeignKey(
+        "finance.Account", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    # Reimbursement: the expense account the payout credits (the loss's own expense home).
+    loss_expense_account = models.ForeignKey(
+        "finance.Account", on_delete=models.PROTECT, null=True, blank=True, related_name="+"
+    )
+
+    # The covered asset this claim concerns (GFK, mirrors PolicyAsset). For a total loss it resolves
+    # the Vehicle to dispose; otherwise it's display-only. Real-estate-ready.
+    content_type = models.ForeignKey(
+        "contenttypes.ContentType", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    object_id = models.PositiveBigIntegerField(null=True, blank=True)
+    claimed_asset = GenericForeignKey("content_type", "object_id")
+
+    # Posting handles (exactly one path is used).
+    journal_entry = models.ForeignKey(
+        "finance.JournalEntry", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    bank_txn = models.ForeignKey(
+        "banking.BankTransaction", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    disposal = models.ForeignKey(
+        "automobile.VehicleDisposal", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+",
+    )
+    posting_version = models.PositiveIntegerField(default=1)  # bumped on edit (reverse + rebuild)
+    notes = models.TextField(blank=True)
+
+    history = HistoricalRecords()
+
+    class Meta:
+        ordering = ["-loss_date", "-id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(payout_amount__gte=0), name="claim_payout_nonnegative"
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(bank_account__isnull=False, cash_account__isnull=False),
+                name="claim_one_destination_account",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Claim {self.claim_number or self.pk} on {self.policy_id}"
+
+    # --- labels / helpers ---
+    @property
+    def status_label(self) -> str:
+        return self.get_status_display()
+
+    @property
+    def settlement_label(self) -> str:
+        return self.get_settlement_kind_display()
+
+    @property
+    def is_total_loss(self) -> bool:
+        return self.settlement_kind == SettlementKind.TOTAL_LOSS
+
+    @property
+    def has_payout(self) -> bool:
+        return bool(self.payout_amount and self.payout_amount > ZERO)
+
+    @property
+    def asset_label(self) -> str:
+        asset = self.claimed_asset
+        if asset is None:
+            return ""
+        for attr in ("full_name", "nickname", "display_name", "display", "name"):
+            val = getattr(asset, attr, "")
+            if val:
+                return val
+        return str(asset)
+
+    @property
+    def gain_loss(self):
+        """For a posted total-loss claim, the booked gain/loss read through its disposal; otherwise
+        None (a reimbursement doesn't book a gain/loss)."""
+        if self.disposal_id is not None:
+            return self.disposal.gain_loss
+        return None

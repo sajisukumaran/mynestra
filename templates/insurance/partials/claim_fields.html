@@ -1,0 +1,96 @@
+{% comment %}Claim modal fields, shared by the add + edit forms. Expects the enclosing <form> to
+provide an Alpine scope: { kind, dest }. `claim` (optional) prefills for edit. `can_total_loss`
+gates the total-loss settlement option (a covered vehicle must exist).{% endcomment %}
+<div class="stack-16">
+  <div class="form-grid">
+    <c-field label="Claim number"><c-input name="claim_number" value="{% if claim %}{{ claim.claim_number }}{% endif %}" placeholder="Carrier claim #" /></c-field>
+    <c-field label="Status">
+      <div class="control is-select">
+        <select name="status">
+          {% for val, label in claim_statuses %}<option value="{{ val }}"{% if claim and claim.status == val %} selected{% elif not claim and val == 'open' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+  </div>
+
+  <div class="form-grid">
+    <c-field label="Loss date" required><div class="control"><input type="date" name="loss_date" value="{% if claim %}{{ claim.loss_date|date:'Y-m-d' }}{% else %}{% now 'Y-m-d' %}{% endif %}"></div></c-field>
+    <c-field label="Reported date"><div class="control"><input type="date" name="reported_date" value="{% if claim %}{{ claim.reported_date|date:'Y-m-d' }}{% endif %}"></div></c-field>
+  </div>
+
+  {# Settlement kind — fixed after creation. #}
+  {% if claim %}
+  <c-field label="Settlement"><c-chip>{{ claim.settlement_label }}</c-chip></c-field>
+  {% else %}
+  <c-field label="How is it settled?">
+    <div class="control is-select">
+      <select name="settlement_kind" x-model="kind">
+        {% for val, label in settlement_kinds %}{% if val != 'total_loss' or can_total_loss %}<option value="{{ val }}">{{ label }}</option>{% endif %}{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  {% endif %}
+
+  {# Reimbursement: the expense home the payout credits (net retained = the deductible). #}
+  <c-field label="Loss expense account" help="The payout credits this account — the net retained is your deductible." x-show="kind === 'reimbursement'" x-cloak>
+    <div class="control is-select">
+      <select name="loss_expense_account">
+        <option value="">—</option>
+        {% for a in expense_accounts %}<option value="{{ a.pk }}"{% if claim and claim.loss_expense_account_id == a.pk %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+
+  {# Total loss: the covered vehicle written off (routed into an automobile disposal). #}
+  {% if can_total_loss %}
+  <c-field label="Vehicle written off" help="Books a total-loss disposal — gain/loss to Asset disposal." x-show="kind === 'total_loss'" x-cloak>
+    <div class="control is-select">
+      <select name="claimed_vehicle">
+        <option value="">—</option>
+        {% for v in covered_vehicles %}<option value="{{ v.pk }}"{% if claim and claim.object_id == v.pk %} selected{% endif %}>{{ v.nickname }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  {% endif %}
+
+  <div class="form-grid">
+    <c-field label="Deductible"><div class="control"><input name="deductible_amount" inputmode="decimal" placeholder="0.00" value="{% if claim and claim.deductible_amount %}{{ claim.deductible_amount|floatformat:'-2' }}{% endif %}"></div></c-field>
+    <c-field label="Payout amount"><div class="control"><input name="payout_amount" inputmode="decimal" placeholder="0.00" value="{% if claim and claim.payout_amount %}{{ claim.payout_amount|floatformat:'-2' }}{% endif %}"></div></c-field>
+    <c-field label="Payout date"><div class="control"><input type="date" name="payout_date" value="{% if claim %}{{ claim.payout_date|date:'Y-m-d' }}{% endif %}"></div></c-field>
+  </div>
+
+  <c-field label="Where did the payout land?">
+    <div class="control is-select">
+      <select name="payout_destination" x-model="dest">
+        {% for val, label in payout_destinations %}<option value="{{ val }}"{% if claim and claim.payout_destination == val %} selected{% elif not claim and val == 'none' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <c-icon name="chevron-down" size="sm" class="subtle" />
+    </div>
+  </c-field>
+  <div class="form-grid">
+    <c-field label="Bank account" x-show="dest === 'bank'" x-cloak>
+      <div class="control is-select">
+        <select name="bank_account">
+          <option value="">—</option>
+          {% for a in bank_accounts %}<option value="{{ a.pk }}"{% if claim and claim.bank_account_id == a.pk %} selected{% endif %}>{{ a.nickname }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    <c-field label="Cash account" x-show="dest === 'cash'" x-cloak>
+      <div class="control is-select">
+        <select name="cash_account">
+          <option value="">Cash on hand</option>
+          {% for a in cash_accounts %}<option value="{{ a.pk }}"{% if claim and claim.cash_account_id == a.pk %} selected{% endif %}>{{ a.code }} — {{ a.name }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+  </div>
+
+  <c-field label="Notes"><c-input name="notes" value="{% if claim %}{{ claim.notes }}{% endif %}" placeholder="Optional note" /></c-field>
+</div>

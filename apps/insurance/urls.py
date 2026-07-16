@@ -20,5 +20,10 @@ urlpatterns = [
         views.premium_delete,
         name="premium-delete",
     ),
+    path("claims/", views.claim_list, name="claims"),
+    path("policies/<int:pk>/claims/new/", views.claim_create, name="claim-create"),
+    path("policies/<int:pk>/claims/<int:cid>/edit/", views.claim_edit, name="claim-edit"),
+    path("policies/<int:pk>/claims/<int:cid>/void/", views.claim_void, name="claim-void"),
+    path("policies/<int:pk>/claims/<int:cid>/delete/", views.claim_delete, name="claim-delete"),
     path("insurer-search/", views.insurer_search, name="insurer-search"),
 ]

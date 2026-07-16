@@ -383,18 +383,21 @@ def test_insurance_are_isolated(make_tenant):
     locked payables bills they generate, and the ledger entries must not leak across tenants."""
     from apps.finance.models import Currency
     from apps.insurance.models import (
+        Claim,
         InsurancePolicy,
         InsurancePremium,
         PolicyCoverage,
         PolicyType,
     )
-    from apps.insurance.services import save_premium
+    from apps.insurance.services import save_claim, save_premium
     from apps.payables.models import Bill
 
     a = make_tenant(name="Alpha")
     b = make_tenant(name="Beta")
 
     with schema_context(a.schema_name):
+        from apps.finance.services import LineInput, post_entry, resolve_account
+
         usd = Currency.objects.get(code="USD")
         policy = InsurancePolicy.objects.create(
             policy_type=PolicyType.AUTO, currency=usd, nickname="Alpha Auto",
@@ -406,15 +409,32 @@ def test_insurance_are_isolated(make_tenant):
         )
         prem.save()
         save_premium(prem, is_new=True)
+        # A reimbursement claim (offsets a booked loss) — its ledger entry must not leak either.
+        post_entry(
+            date=datetime.date(2026, 1, 6),
+            lines=[
+                LineInput("5320", debit=Decimal("500")),
+                LineInput("accounts_payable", credit=Decimal("500")),
+            ],
+        )
+        claim = Claim(
+            policy=policy, loss_date=datetime.date(2026, 1, 6), payout_amount=Decimal("400"),
+            payout_date=datetime.date(2026, 1, 6), payout_destination="cash",
+            loss_expense_account=resolve_account("5320"),
+        )
+        claim.save()
+        save_claim(claim, is_new=True)
         assert InsurancePolicy.objects.count() == 1
         assert InsurancePremium.objects.count() == 1
         assert PolicyCoverage.objects.count() == 1
+        assert Claim.objects.count() == 1
         assert Bill.objects.filter(is_locked=True).count() == 1
 
     with schema_context(b.schema_name):
         assert InsurancePolicy.objects.count() == 0
         assert InsurancePremium.objects.count() == 0
         assert PolicyCoverage.objects.count() == 0
+        assert Claim.objects.count() == 0
         assert Bill.objects.count() == 0
         assert not Organization.objects.filter(name="Alpha Insurance").exists()
         assert JournalEntry.objects.count() == 0
