@@ -31,6 +31,7 @@ from apps.insurance.models import (
     Funding,
     InsurancePolicy,
     InsurancePremium,
+    MemberRole,
     PayoutDestination,
     PolicyAsset,
     PolicyStatus,
@@ -484,23 +485,40 @@ def set_claim_vehicle(claim: Claim, vehicle) -> None:
     claim.object_id = vehicle.pk
 
 
+# --- Documents (Phase 3) ---------------------------------------------------------------------
+
+def delete_document(doc) -> None:
+    """Remove a policy document — delete the stored file, then the row (a plain attachment)."""
+    if doc.file:
+        doc.file.delete(save=False)
+    doc.delete()
+
+
 # --- Covered-person ("insured" P2O) synchronisation ------------------------------------------
 
 def sync_policy_p2o(policy: InsurancePolicy, *, user=None) -> None:
     """Ensure each covered member (policyholder / insured / dependent / driver) has an org-level
-    'insured' P2O link to the insurer org. Add-only; no-ops when the type isn't seeded / no insurer
-    org is set. (Beneficiary P2O is Phase 3 — the `beneficiary` type isn't seeded yet.)"""
+    'insured' P2O link to the insurer, and each beneficiary a 'beneficiary' link. Add-only; no-ops
+    per type when it isn't seeded / no insurer org is set."""
     if not policy.insurer_organization_id:
         return
     from apps.relationships.models import PersonOrgRelationship, PersonOrgRelationshipType
 
-    insured = PersonOrgRelationshipType.objects.filter(code="insured").first()
-    if insured is None:
-        return
-    for m in policy.members.filter(role__in=list(COVERED_ROLES)).select_related("person"):
-        PersonOrgRelationship.objects.get_or_create(
-            person=m.person, organization=policy.insurer_organization, type=insured
-        )
+    types = {
+        t.code: t
+        for t in PersonOrgRelationshipType.objects.filter(code__in=["insured", "beneficiary"])
+    }
+
+    def _link(members, rel_type):
+        if rel_type is None:
+            return
+        for m in members.select_related("person"):
+            PersonOrgRelationship.objects.get_or_create(
+                person=m.person, organization=policy.insurer_organization, type=rel_type
+            )
+
+    _link(policy.members.filter(role__in=list(COVERED_ROLES)), types.get("insured"))
+    _link(policy.members.filter(role=MemberRole.BENEFICIARY), types.get("beneficiary"))
 
 
 # --- Covered-asset links (Vehicle now; Real Estate in Plan C) --------------------------------
@@ -570,6 +588,13 @@ def open_claims():
     return Claim.objects.filter(status__in=list(OPEN_CLAIM_STATUSES))
 
 
+def payouts_total() -> Decimal:
+    """Lifetime claim payouts received across all policies (dashboard stat)."""
+    from django.db.models import Sum
+
+    return Claim.objects.aggregate(t=Sum("payout_amount"))["t"] or ZERO
+
+
 def claims_overview():
     """All claims across policies, newest loss first — for the global Claims list."""
     return Claim.objects.select_related(
@@ -593,6 +618,7 @@ def dashboard_stats() -> dict:
         "renewals": policies_expiring(within_days=90),
         "open_claims_count": open_claims().count(),
         "recent_claims": list(claims_overview()[:6]),
+        "payouts_total": payouts_total(),
     }
 
 

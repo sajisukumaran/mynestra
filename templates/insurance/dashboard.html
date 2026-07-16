@@ -24,6 +24,9 @@
     <c-stat-tile icon="triangle-alert" tint="rose" value="{{ open_claims_count }}" label="Open claims">
       <c-slot name="foot"><a href="{{ ui_tenant_url }}insurance/claims/">View all</a></c-slot>
     </c-stat-tile>
+    <c-stat-tile icon="banknote" tint="emerald" value="" label="Payouts received">
+      <c-slot name="foot"><c-money :amount="payouts_total" symbol="{{ base.symbol }}" dp="0" grouping="{{ ui_number_format }}" class="strong" /> lifetime</c-slot>
+    </c-stat-tile>
   </div>
 
   <div class="grid-2">

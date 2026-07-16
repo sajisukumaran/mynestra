@@ -245,6 +245,43 @@ def test_claims_list_renders(make_tenant, make_user, client):
     assert "Claims" in body and "CLM-9" in body and "Family Health" in body
 
 
+# --- documents (Phase 3) ---------------------------------------------------------------------
+
+def test_upload_and_delete_document(make_tenant, make_user, client, settings, tmp_path):
+    settings.MEDIA_ROOT = str(tmp_path)  # keep uploads out of the project media dir
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import InsurancePolicy, PolicyType
+
+        policy = InsurancePolicy.objects.create(
+            policy_type=PolicyType.AUTO, insurer_organization=_org(), currency=_usd()
+        )
+        pid = policy.pk
+    client.force_login(owner)
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    up = SimpleUploadedFile("dec.pdf", b"%PDF-1.4 test", content_type="application/pdf")
+    resp = client.post(
+        f"/t/{tenant.schema_name}/insurance/policies/{pid}/documents/new/",
+        {"title": "Dec page", "doc_type": "declaration_page", "document": up},
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import PolicyDocument
+
+        doc = PolicyDocument.objects.get(policy_id=pid)
+        assert doc.title == "Dec page" and doc.doc_type == "declaration_page"
+        did = doc.pk
+    resp = client.post(
+        f"/t/{tenant.schema_name}/insurance/policies/{pid}/documents/{did}/delete/"
+    )
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        from apps.insurance.models import PolicyDocument
+
+        assert PolicyDocument.objects.count() == 0
+
+
 # --- payables read-only guards (the lock seam) -----------------------------------------------
 
 def test_locked_bill_and_payment_are_readonly_in_payables(make_tenant, make_user, client):

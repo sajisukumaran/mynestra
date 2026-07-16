@@ -52,6 +52,7 @@
       <button type="button" class="tab" :class="{ active: tab === 'assets' }" @click="tab = 'assets'"><c-icon name="car" size="sm" /> Assets {% if assets %}<span class="tcount tnum">{{ assets|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'premiums' }" @click="tab = 'premiums'"><c-icon name="banknote" size="sm" /> Premiums {% if premiums %}<span class="tcount tnum">{{ premiums|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'claims' }" @click="tab = 'claims'"><c-icon name="triangle-alert" size="sm" /> Claims {% if claims %}<span class="tcount tnum">{{ claims|length }}</span>{% endif %}</button>
+      <button type="button" class="tab" :class="{ active: tab === 'documents' }" @click="tab = 'documents'"><c-icon name="file-text" size="sm" /> Documents {% if documents %}<span class="tcount tnum">{{ documents|length }}</span>{% endif %}</button>
       <button type="button" class="tab" :class="{ active: tab === 'history' }" @click="tab = 'history'"><c-icon name="clock" size="sm" /> History</button>
     </c-tabs>
 
@@ -98,7 +99,10 @@
     </div>
 
     {# People #}
-    <div x-show="tab === 'members'" x-cloak style="margin-top:16px;">
+    <div x-show="tab === 'members'" x-cloak class="stack-12" style="margin-top:16px;">
+      {% if beneficiaries %}
+      <c-hint icon="{% if beneficiary_warn %}triangle-alert{% else %}info{% endif %}">{{ beneficiaries|length }} {{ beneficiaries|length|pluralize:'beneficiary,beneficiaries' }} · total {{ beneficiary_total|floatformat:'-2' }}%{% if beneficiary_warn %} — life-policy beneficiary shares usually total 100%.{% endif %}</c-hint>
+      {% endif %}
       <c-card flush>
         {% if members %}
         {% for m in members %}
@@ -267,6 +271,58 @@
             </form>
           </c-modal>
           {% endif %}
+        </c-empty-state>
+        {% endif %}
+      </c-card>
+    </div>
+
+    {# Documents #}
+    <div x-show="tab === 'documents'" x-cloak style="margin-top:16px;">
+      <c-card flush icon="file-text" title="Documents">
+        <c-slot name="actions">
+          <c-modal title="Upload a document">
+            <c-slot name="trigger"><c-button size="sm" variant="primary"><c-icon name="upload" size="sm" /> Upload</c-button></c-slot>
+            <form method="post" enctype="multipart/form-data" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/documents/new/">{% csrf_token %}
+              {% include "insurance/partials/document_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Upload</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
+        </c-slot>
+        {% if documents %}
+        <c-table>
+          <thead><tr><c-th>Title</c-th><c-th>Type</c-th><c-th>Added</c-th><th></th></tr></thead>
+          <tbody>
+            {% for d in documents %}
+            <tr>
+              <td><a href="{{ d.file.url }}" target="_blank" class="strong">{{ d.title }}</a>{% if d.claim_id %} <c-chip tint="rose">Claim</c-chip>{% endif %}{% if d.note %}<div class="muted">{{ d.note }}</div>{% endif %}</td>
+              <td><c-chip>{{ d.type_label }}</c-chip></td>
+              <td class="tnum muted">{{ d.created_at|date:'d M Y' }}</td>
+              <td>
+                <div class="cell-actions">
+                  <c-button icon_only size="sm" variant="ghost" href="{{ d.file.url }}" title="Download"><c-icon name="download" size="sm" /></c-button>
+                  <c-confirm-dialog title="Delete this document?" message="Removes the file and its record. This can't be undone.">
+                    <c-slot name="trigger"><c-button icon_only size="sm" variant="ghost"><c-icon name="trash-2" size="sm" /></c-button></c-slot>
+                    <c-slot name="confirm">
+                      <form method="post" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/documents/{{ d.pk }}/delete/">{% csrf_token %}
+                        <c-button type="submit" variant="danger"><c-icon name="trash-2" /> Delete</c-button>
+                      </form>
+                    </c-slot>
+                  </c-confirm-dialog>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </c-table>
+        {% else %}
+        <c-empty-state icon="file-text" title="No documents" text="Upload the policy contract, declaration page, ID cards or claim paperwork.">
+          <c-modal title="Upload a document">
+            <c-slot name="trigger"><c-button variant="primary"><c-icon name="upload" /> Upload</c-button></c-slot>
+            <form method="post" enctype="multipart/form-data" action="{{ ui_tenant_url }}insurance/policies/{{ policy.pk }}/documents/new/">{% csrf_token %}
+              {% include "insurance/partials/document_fields.html" %}
+              <div class="row" style="margin-top:16px;"><c-button type="submit" variant="primary">Upload</c-button><c-button type="button" variant="ghost" @click="open = false">Cancel</c-button></div>
+            </form>
+          </c-modal>
         </c-empty-state>
         {% endif %}
       </c-card>

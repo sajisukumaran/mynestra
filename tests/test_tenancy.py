@@ -378,15 +378,19 @@ def test_automobile_are_isolated(make_tenant):
         assert JournalEntry.objects.count() == 0
 
 
-def test_insurance_are_isolated(make_tenant):
-    """Insurance (Plan B): policies, coverages, members, covered-asset links and premiums, the
-    locked payables bills they generate, and the ledger entries must not leak across tenants."""
+def test_insurance_are_isolated(make_tenant, settings, tmp_path):
+    """Insurance (Plan B): policies, coverages, members, covered-asset links, premiums, claims and
+    documents, the locked payables bills they generate, and the ledger entries must not leak."""
+    settings.MEDIA_ROOT = str(tmp_path)  # keep the uploaded doc out of the project media dir
+    from django.core.files.base import ContentFile
+
     from apps.finance.models import Currency
     from apps.insurance.models import (
         Claim,
         InsurancePolicy,
         InsurancePremium,
         PolicyCoverage,
+        PolicyDocument,
         PolicyType,
     )
     from apps.insurance.services import save_claim, save_premium
@@ -424,10 +428,15 @@ def test_insurance_are_isolated(make_tenant):
         )
         claim.save()
         save_claim(claim, is_new=True)
+        PolicyDocument.objects.create(
+            policy=policy, title="Alpha declaration",
+            file=ContentFile(b"pdf", name="alpha.pdf"),
+        )
         assert InsurancePolicy.objects.count() == 1
         assert InsurancePremium.objects.count() == 1
         assert PolicyCoverage.objects.count() == 1
         assert Claim.objects.count() == 1
+        assert PolicyDocument.objects.count() == 1
         assert Bill.objects.filter(is_locked=True).count() == 1
 
     with schema_context(b.schema_name):
@@ -435,6 +444,7 @@ def test_insurance_are_isolated(make_tenant):
         assert InsurancePremium.objects.count() == 0
         assert PolicyCoverage.objects.count() == 0
         assert Claim.objects.count() == 0
+        assert PolicyDocument.objects.count() == 0
         assert Bill.objects.count() == 0
         assert not Organization.objects.filter(name="Alpha Insurance").exists()
         assert JournalEntry.objects.count() == 0

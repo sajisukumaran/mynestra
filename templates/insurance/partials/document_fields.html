@@ -1,0 +1,28 @@
+{% comment %}Upload-document modal fields, shared by the Documents-tab header + empty-state forms.
+The enclosing <form> must set method="post" enctype="multipart/form-data".{% endcomment %}
+<div class="stack-16">
+  <c-field label="File" required><div class="control"><input type="file" name="document" required></div></c-field>
+  <c-field label="Title" help="Defaults to the file name."><c-input name="title" placeholder="e.g. 2026 declaration page" /></c-field>
+  <div class="form-grid">
+    <c-field label="Type">
+      <div class="control is-select">
+        <select name="doc_type">
+          {% for val, label in document_types %}<option value="{{ val }}"{% if val == 'other' %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    {% if claims %}
+    <c-field label="Related claim">
+      <div class="control is-select">
+        <select name="claim">
+          <option value="">—</option>
+          {% for c in claims %}<option value="{{ c.pk }}">{{ c.loss_date|date:'d M Y' }} · {{ c.settlement_label }}{% if c.claim_number %} · {{ c.claim_number }}{% endif %}</option>{% endfor %}
+        </select>
+        <c-icon name="chevron-down" size="sm" class="subtle" />
+      </div>
+    </c-field>
+    {% endif %}
+  </div>
+  <c-field label="Note"><c-input name="note" placeholder="Optional note" /></c-field>
+</div>

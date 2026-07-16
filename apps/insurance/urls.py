@@ -25,5 +25,8 @@ urlpatterns = [
     path("policies/<int:pk>/claims/<int:cid>/edit/", views.claim_edit, name="claim-edit"),
     path("policies/<int:pk>/claims/<int:cid>/void/", views.claim_void, name="claim-void"),
     path("policies/<int:pk>/claims/<int:cid>/delete/", views.claim_delete, name="claim-delete"),
+    path("policies/<int:pk>/documents/new/", views.document_upload, name="document-upload"),
+    path("policies/<int:pk>/documents/<int:did>/delete/", views.document_delete,
+         name="document-delete"),
     path("insurer-search/", views.insurer_search, name="insurer-search"),
 ]

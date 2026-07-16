@@ -21,12 +21,14 @@ from apps.insurance.models import (
     POLICY_TYPE_TINT,
     Claim,
     ClaimStatus,
+    DocumentType,
     Funding,
     InsurancePolicy,
     InsurancePremium,
     MemberRole,
     PayoutDestination,
     PolicyCoverage,
+    PolicyDocument,
     PolicyMember,
     PolicyStatus,
     PolicyType,
@@ -37,6 +39,7 @@ from apps.insurance.services import (
     claims_overview,
     dashboard_stats,
     delete_claim,
+    delete_document,
     delete_premium,
     save_claim,
     save_premium,
@@ -353,14 +356,27 @@ def policy_detail(request, pk):
         .order_by("-loss_date", "-id")
     )
     covered_vehicles = list(_covered_vehicles(policy))
+    members = sorted(policy.members.select_related("person").all(), key=lambda m: m.role)
+    beneficiaries = [m for m in members if m.is_beneficiary]
+    beneficiary_total = sum((m.beneficiary_percent or Decimal("0")) for m in beneficiaries)
+    documents = list(policy.documents.select_related("claim").all())
     ctx = insurance_context(
         request, "policies",
         policy=policy, base=base_currency(),
         coverages=list(policy.coverages.all()),
-        members=sorted(policy.members.select_related("person").all(), key=lambda m: m.role),
+        members=members,
+        beneficiaries=beneficiaries,
+        beneficiary_total=beneficiary_total,
+        beneficiary_warn=(
+            policy.policy_type == PolicyType.LIFE
+            and bool(beneficiaries)
+            and beneficiary_total != Decimal("100")
+        ),
         assets=assets,
         premiums=premiums,
         claims=claims,
+        documents=documents,
+        document_types=DocumentType.choices,
         history=policy.history.all()[:60],
         frequencies=PremiumFrequency.choices,
         fundings=Funding.choices,
@@ -552,6 +568,33 @@ def claim_list(request):
         )),
     )
     return render(request, "insurance/claim_list.html", ctx)
+
+
+# --- Documents ------------------------------------------------------------------------------
+
+def document_upload(request, pk):
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    if request.method == "POST" and "document" in request.FILES:
+        dtype = request.POST.get("doc_type") or DocumentType.OTHER
+        claim = policy.claims.filter(pk=request.POST.get("claim") or 0).first()
+        doc = PolicyDocument(
+            policy=policy,
+            claim=claim,
+            title=request.POST.get("title", "").strip() or request.FILES["document"].name,
+            doc_type=dtype if dtype in DocumentType.values else DocumentType.OTHER,
+            note=request.POST.get("note", "").strip(),
+            file=request.FILES["document"],
+        )
+        doc.save()
+    return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
+
+
+def document_delete(request, pk, did):
+    policy = get_object_or_404(InsurancePolicy, pk=pk)
+    doc = get_object_or_404(PolicyDocument, pk=did, policy=policy)
+    if request.method == "POST":
+        delete_document(doc)
+    return redirect(tenant_url(request, f"insurance/policies/{pk}/"))
 
 
 # --- htmx fragments -------------------------------------------------------------------------

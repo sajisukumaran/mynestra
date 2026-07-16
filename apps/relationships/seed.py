@@ -61,6 +61,8 @@ P2O_TYPES = [
     ("service_provider_contact", "Service-Provider Contact"),
     # Automobile (module 8): a driver's link to the insurer org. The dealer link reuses `customer`.
     ("insured", "Insured"),
+    # Insurance (Plan B): a life-policy beneficiary's link to the insurer org.
+    ("beneficiary", "Beneficiary"),
 ]
 
 

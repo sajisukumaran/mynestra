@@ -563,3 +563,49 @@ class Claim(SoftDeleteModel):
         if self.disposal_id is not None:
             return self.disposal.gain_loss
         return None
+
+
+class DocumentType(models.TextChoices):
+    POLICY_CONTRACT = "policy_contract", "Policy contract"
+    DECLARATION = "declaration_page", "Declaration page"
+    ID_CARD = "id_card", "ID card"
+    RECEIPT = "receipt", "Receipt"
+    CORRESPONDENCE = "correspondence", "Correspondence"
+    CLAIM = "claim", "Claim document"
+    OTHER = "other", "Other"
+
+
+class PolicyDocument(TimeStampedModel):
+    """An uploaded file attached to a policy (contract, declaration page, ID card, claim
+    correspondence, ...). No GL effect — a plain attachment, optionally scoped to a claim. Files
+    share MEDIA_ROOT with the rest of the app (vehicle_docs / person_photos); the row is schema-
+    isolated like every tenant record."""
+
+    policy = models.ForeignKey(
+        InsurancePolicy, on_delete=models.CASCADE, related_name="documents"
+    )
+    claim = models.ForeignKey(
+        Claim, on_delete=models.SET_NULL, null=True, blank=True, related_name="documents"
+    )
+    title = models.CharField(max_length=160)
+    doc_type = models.CharField(
+        max_length=16, choices=DocumentType.choices, default=DocumentType.OTHER
+    )
+    file = models.FileField(upload_to="insurance_docs/")
+    note = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return self.title
+
+    @property
+    def type_label(self) -> str:
+        return self.get_doc_type_display()
+
+    @property
+    def filename(self) -> str:
+        import os
+
+        return os.path.basename(self.file.name) if self.file else ""

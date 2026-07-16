@@ -223,6 +223,25 @@ def test_sync_policy_p2o_links_insured_idempotently(make_tenant):
         assert links.count() == 1
 
 
+def test_sync_policy_p2o_links_beneficiary_idempotently(make_tenant):
+    tenant = make_tenant()
+    with schema_context(tenant.schema_name):
+        from apps.relationships.models import PersonOrgRelationship
+
+        policy = _policy(PolicyType.LIFE)
+        person = _person()
+        PolicyMember.objects.create(
+            policy=policy, person=person, role=MemberRole.BENEFICIARY,
+            beneficiary_percent=D("100"),
+        )
+        sync_policy_p2o(policy)
+        sync_policy_p2o(policy)  # idempotent
+        links = PersonOrgRelationship.objects.filter(
+            person=person, organization=policy.insurer_organization, type__code="beneficiary"
+        )
+        assert links.count() == 1
+
+
 # --- Claims (Phase 2) ------------------------------------------------------------------------
 
 def _resolve(code):
