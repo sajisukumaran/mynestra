@@ -34,6 +34,22 @@ def test_dashboard_and_list_render_empty(make_tenant, make_user, client):
     assert "No accounts yet" in body
 
 
+def test_payee_search_lists_household_people_and_organizations_only(make_tenant, make_user, client):
+    """The payee picker offers household members (not external contacts) plus organizations."""
+    from apps.contacts.models import Person
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        Person.objects.create(first_name="Nora", last_name="Payne", is_household_member=True)
+        Person.objects.create(first_name="Owen", last_name="Payne", is_household_member=False)
+        _brokerage(name="Payne Capital")
+    client.force_login(owner)
+    body = client.get(_url(tenant, "payee-search/"), {"q": "Payne"}).content.decode()
+    assert "Nora Payne" in body           # household member is offered
+    assert "Owen Payne" not in body       # external contact is not
+    assert "Payne Capital" in body        # organizations stay selectable
+
+
 def test_non_member_is_denied(make_tenant, make_user, client):
     tenant, _o = _owner(make_tenant, make_user)
     outsider = make_user("outsider@example.com")

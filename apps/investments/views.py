@@ -1325,7 +1325,10 @@ def security_delete(request, pk):
 
 def payee_search(request):
     q = request.GET.get("q", "").strip()
-    people = Person.objects.all()
+    # People on the other side of a transaction are household members only (you, family,
+    # dependents) — not external business contacts. Organizations stay unfiltered, since a
+    # payee here is often a company (dividend/interest/employer contribution).
+    people = Person.objects.filter(is_household_member=True)
     orgs = Organization.objects.all()
     if q:
         people = people.filter(
