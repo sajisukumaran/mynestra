@@ -122,6 +122,13 @@
 
     {# HOLDINGS #}
     <div x-show="tab === 'holdings'">
+      <div class="stack stack-16">
+        {% if holdings %}
+        <div class="between">
+          <span class="eyebrow">Positions</span>
+          <c-button size="sm" href="{{ ui_tenant_url }}investments/securities/mass-prices/?account={{ account.pk }}"><c-icon name="coins" size="sm" /> Mass update prices</c-button>
+        </div>
+        {% endif %}
       <c-card flush>
         {% if holdings %}
         <c-table>
@@ -158,6 +165,7 @@
         <c-empty-state icon="briefcase" title="No holdings yet" text="Record a buy (or an opening / existing holding) in the register to build positions." />
         {% endif %}
       </c-card>
+      </div>
     </div>
 
     {# PERFORMANCE #}

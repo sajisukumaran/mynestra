@@ -8,7 +8,16 @@ from decimal import Decimal
 from django_tenants.utils import schema_context
 
 from apps.finance.models import Currency
-from apps.investments.models import Security, SecurityPrice
+from apps.investments.models import (
+    InvestmentAccount,
+    InvestmentTransaction,
+    InvTxnType,
+    Security,
+    SecurityPrice,
+)
+from apps.investments.services import apply_transaction, ensure_gl_account
+from apps.organizations.models import Organization
+from apps.setup.models import Category
 from apps.tenants.models import Membership, Role
 
 D = Decimal
@@ -146,6 +155,41 @@ def test_mass_price_update_overwrites_existing_mark_on_that_date(make_tenant, ma
         marks = SecurityPrice.objects.filter(security_id=sid, as_of=datetime.date(2026, 1, 15))
         assert marks.count() == 1                       # overwrote, no duplicate
         assert marks.first().price == D("12.50")
+
+
+def test_mass_price_scoped_to_account_lists_only_held_quotables(make_tenant, make_user, client):
+    """?account=<pk> narrows the list to just the quotable instruments that account holds — held
+    stocks appear, un-held stocks and the account's non-quotable positions don't — and a save lands
+    back on the account detail page (not the securities list)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        usd = Currency.objects.get(code="USD")
+        org = Organization.objects.create(name="Fidelity")
+        org.categories.add(Category.objects.get(kind="ORG", name="Brokerage"))
+        acct = InvestmentAccount.objects.create(
+            institution=org, nickname="Taxable", registration="taxable_individual", currency=usd)
+        ensure_gl_account(acct)
+        held = Security.objects.create(symbol="AAA", name="Alpha", currency=usd)
+        unheld = Security.objects.create(symbol="BBB", name="Beta", currency=usd)
+        # Buy the held stock so the account has an open lot in it; leave `unheld` untransacted.
+        buy = InvestmentTransaction.objects.create(
+            account=acct, txn_type=InvTxnType.BUY, date=datetime.date(2026, 1, 2),
+            security=held, quantity=D("10"), price=D("10"), amount=D("100"), fee=D("0"))
+        apply_transaction(buy, is_new=True)
+        aid, bid, apk = held.pk, unheld.pk, acct.pk
+    client.force_login(owner)
+    # GET scoped to the account: the held stock is listed, the un-held one isn't.
+    body = client.get(_url(tenant, f"securities/mass-prices/?account={apk}")).content.decode()
+    assert "AAA" in body and "BBB" not in body
+    assert f'name="account" value="{apk}"' in body  # scope carried into the POST
+    # POST (scoped) records the price and redirects back to the account page.
+    resp = client.post(_url(tenant, "securities/mass-prices/"), {
+        "account": str(apk), "as_of": "2026-01-15", "source": "Yahoo", f"price_{aid}": "42.62"})
+    assert resp.status_code == 302
+    assert resp.url == f"/t/{tenant.schema_name}/investments/accounts/{apk}/"
+    with schema_context(tenant.schema_name):
+        assert SecurityPrice.objects.get(security_id=aid).price == D("42.62")
+        assert not SecurityPrice.objects.filter(security_id=bid).exists()
 
 
 def test_security_detail_renders_price_edit_control(make_tenant, make_user, client):

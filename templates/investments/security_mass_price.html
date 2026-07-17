@@ -5,13 +5,19 @@
 <c-breadcrumb>
   <a href="{{ ui_tenant_url }}">Apps</a><c-icon name="chevron-right" />
   <a href="{{ ui_tenant_url }}investments/">Investments</a><c-icon name="chevron-right" />
+  {% if account %}
+  <a href="{{ ui_tenant_url }}investments/accounts/">Accounts</a><c-icon name="chevron-right" />
+  <a href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/">{{ account.nickname }}</a><c-icon name="chevron-right" />
+  {% else %}
   <a href="{{ ui_tenant_url }}investments/securities/">Securities</a><c-icon name="chevron-right" />
+  {% endif %}
   <span class="strong">Mass update prices</span>
 </c-breadcrumb>
 
-<c-page-header title="Mass update prices" subtitle="{{ total }} quotable instrument{{ total|pluralize }}" />
+<c-page-header title="Mass update prices" subtitle="{% if account %}{{ account.nickname }} · {% endif %}{{ total }} {% if account %}held {% endif %}instrument{{ total|pluralize }}" />
 
 <form method="post" action="{{ ui_tenant_url }}investments/securities/mass-prices/">{% csrf_token %}
+  {% if account %}<input type="hidden" name="account" value="{{ account.pk }}">{% endif %}
   <div class="stack-16">
     {# Date + source apply to every price recorded below #}
     <c-card>
@@ -55,13 +61,15 @@
         </tbody>
       </c-table>
       {% else %}
-      <c-empty-state icon="tag" title="No quotable instruments" text="Add stocks, ETFs, funds or bonds to mass-update their prices (CDs and money-market funds aren't marked to market)." />
+      <c-empty-state icon="tag"
+        title="{% if account %}No marked-to-market holdings{% else %}No quotable instruments{% endif %}"
+        text="{% if account %}This account holds no stocks, ETFs, funds or bonds to price (CDs and money-market funds aren't marked to market).{% else %}Add stocks, ETFs, funds or bonds to mass-update their prices (CDs and money-market funds aren't marked to market).{% endif %}" />
       {% endif %}
     </c-card>
 
     <div class="between">
       <c-button type="submit" variant="primary"><c-icon name="circle-check" /> Save prices</c-button>
-      <c-button href="{{ ui_tenant_url }}investments/securities/">Cancel</c-button>
+      <c-button href="{% if account %}{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/{% else %}{{ ui_tenant_url }}investments/securities/{% endif %}">Cancel</c-button>
     </div>
   </div>
 </form>
