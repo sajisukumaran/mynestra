@@ -5,7 +5,11 @@
 name: mynestra
 
 services:
-  db:
+  # Service key is `mynestra-db`, NOT `db`. Compose advertises the service NAME as a network alias on
+  # every network the service joins. A service named `db` would publish a generic `db` alias on the shared
+  # edge_network and hijack other stacks' DB lookups — this once made lhive-web resolve `db` to mynestra-db
+  # and 500 on every request. Keep DB service names unique on any shared network.
+  mynestra-db:
     image: postgres:17
     container_name: mynestra-db
     restart: unless-stopped
@@ -20,8 +24,13 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
-    # Joins edge_network so pgAdmin + nightly pg_dump on the edge reach it as `mynestra-db`.
-    networks: [mynestra, edge_network]
+    networks:
+      # Private net: keep the `db` hostname the app uses (POSTGRES_HOST=db in .env).
+      mynestra:
+        aliases: [db]
+      # Shared edge net: advertised ONLY as `mynestra-db` (its container_name) so pgAdmin + pg_dump
+      # can reach it. Never a generic `db` alias here.
+      edge_network: {}
 
   web:
     build:
@@ -34,7 +43,7 @@ services:
     env_file:
       - .env
     depends_on:
-      db:
+      mynestra-db:
         condition: service_healthy
     volumes:
       # Runtime-mutable uploads (tenant logos, photos); static is baked into the image.
@@ -60,7 +69,7 @@ services:
     env_file:
       - .env
     depends_on:
-      db:
+      mynestra-db:
         condition: service_healthy
     entrypoint: ["python", "manage.py", "price_cron"]
     command: ["--hour", "23", "--minute", "10"]
