@@ -46,7 +46,11 @@ pipeline {
         }
         stage('Deploy') {
             steps {
-                sh "${COMPOSE} up -d"
+                // --remove-orphans clears containers left by a since-renamed service (e.g. the old
+                // `db` service, whose container was named `mynestra-db` — the same name the renamed
+                // `mynestra-db` service now claims, which would otherwise collide). Named volumes
+                // (mynestra_pgdata, mynestra_media_files) are project-scoped and survive this.
+                sh "${COMPOSE} up -d --remove-orphans"
             }
         }
         stage('Prune') {
