@@ -73,6 +73,11 @@ services:
         condition: service_healthy
     entrypoint: ["python", "manage.py", "price_cron"]
     command: ["--hour", "23", "--minute", "10"]
+    # The image bakes in a HEALTHCHECK that curls http://localhost:8000/health/ (for the web service).
+    # This sidecar runs only the scheduler — no gunicorn on 8000 — so that probe always fails and marks
+    # the container (unhealthy). Disable it: a bare Python loop needs no HTTP health probe.
+    healthcheck:
+      disable: true
     networks: [mynestra]
 
 volumes:
