@@ -553,7 +553,7 @@ def launcher_counts() -> list[dict]:
     props = _active_properties()
     return [
         {"n": props.count(), "label": "Properties"},
-        {"n": portfolio_value(), "label": "Market value"},
+        {"n": portfolio_value(), "label": "Market value", "money": True},
     ]
 
 

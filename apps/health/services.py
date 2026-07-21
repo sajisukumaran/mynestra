@@ -1360,5 +1360,5 @@ def launcher_counts() -> list[dict]:
     return [
         {"n": Encounter.objects.count(), "label": "Visits"},
         {"n": ProviderInvoice.objects.count(), "label": "Invoices"},
-        {"n": total_unpaid(), "label": "You owe"},
+        {"n": total_unpaid(), "label": "You owe", "money": True},
     ]

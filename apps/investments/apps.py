@@ -31,5 +31,5 @@ class InvestmentsConfig(AppConfig):
         return [
             {"n": accounts.count(), "label": "Accounts"},
             {"n": holdings, "label": "Holdings"},
-            {"n": total_portfolio_value(), "label": "Value"},
+            {"n": total_portfolio_value(), "label": "Value", "money": True},
         ]

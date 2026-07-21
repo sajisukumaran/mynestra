@@ -1493,6 +1493,6 @@ def launcher_counts() -> list[dict]:
     due = renewals_due(within_days=45)
     return [
         {"n": len(vehicles), "label": "Vehicles"},
-        {"n": fleet_value(vehicles), "label": "Fleet value"},
+        {"n": fleet_value(vehicles), "label": "Fleet value", "money": True},
         {"n": len(due), "label": "Due soon"},
     ]

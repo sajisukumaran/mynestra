@@ -25,5 +25,5 @@ class CardsConfig(AppConfig):
         return [
             {"n": CreditCard.objects.count(), "label": "Credit cards"},
             {"n": DebitCard.objects.count(), "label": "Debit cards"},
-            {"n": total_owed(), "label": "Owed"},
+            {"n": total_owed(), "label": "Owed", "money": True},
         ]

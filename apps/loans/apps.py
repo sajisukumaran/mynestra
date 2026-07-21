@@ -24,5 +24,5 @@ class LoansConfig(AppConfig):
         stats = dashboard_stats()
         return [
             {"n": stats["loans_count"], "label": "Loans"},
-            {"n": stats["total_owed"], "label": "Owed"},
+            {"n": stats["total_owed"], "label": "Owed", "money": True},
         ]

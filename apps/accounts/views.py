@@ -40,6 +40,7 @@ def tenant_home(request):
     """Launcher (DESIGN §7.4/§9): a live infolet per enabled module + muted 'coming soon' tiles.
     Counts come from each module's AppConfig and run in the current tenant schema."""
     from apps.core.registry import COMING_SOON, enabled_modules
+    from apps.finance.services import base_currency
 
     is_owner = Membership.objects.filter(
         user=request.user, tenant=request.tenant, role=Role.OWNER
@@ -56,6 +57,9 @@ def tenant_home(request):
             "is_owner": is_owner,
             "modules": modules,
             "coming_soon": COMING_SOON,
+            # Symbol for money-valued launcher stats (e.g. Investments "Value"); the tile formats
+            # them via c-money so a real balance stays grouped + compact instead of overflowing.
+            "base_symbol": base_currency().symbol,
         },
     )
 

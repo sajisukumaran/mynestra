@@ -496,8 +496,13 @@ img { max-width:100%; display:block; }
   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tile-go { margin-left:auto; align-self:flex-start; color:var(--text-subtle); }
 .app-tile:hover .tile-go { color:var(--accent-text); }
-.tile-stats { display:flex; gap:16px; margin-top:auto; padding-top:11px; border-top:1px solid var(--border); }
+.tile-stats { display:flex; flex-wrap:wrap; gap:10px 16px; margin-top:auto; padding-top:11px; border-top:1px solid var(--border); }
+.tile-stat { min-width:0; }
 .tile-stat .n { font-size:var(--fs-lg); font-weight:700; letter-spacing:-.01em; color:var(--text-strong); line-height:1; }
+/* Money stats (e.g. Investments "Value") keep the amount on one line but may wrap to their own
+   row — a large balance never forces the tile itself to overflow horizontally. */
+.tile-stat .n-money { white-space:nowrap; }
+.tile-stat .n-money .amount { color:inherit; }
 .tile-stat .l { font-size:var(--fs-xs); color:var(--text-subtle); text-transform:uppercase; letter-spacing:.04em; font-weight:600; margin-top:3px; }
 .app-tile.soon { box-shadow:none; border-style:dashed; }
 .app-tile.soon:hover { transform:none; box-shadow:none; }

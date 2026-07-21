@@ -1,2 +1,2 @@
-<c-vars n="" label="" />
-<div class="tile-stat"><div class="n tnum">{{ n }}</div><div class="l">{{ label }}</div></div>
+<c-vars n="" label="" money="" symbol="" grouping="thousands" />
+<div class="tile-stat"><div class="n tnum{% if money %} n-money{% endif %}">{% if money %}<c-money amount="{{ n }}" symbol="{{ symbol }}" dp="0" grouping="{{ grouping }}" />{% else %}{{ n }}{% endif %}</div><div class="l">{{ label }}</div></div>

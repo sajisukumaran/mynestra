@@ -647,6 +647,6 @@ def launcher_counts() -> list[dict]:
     """Live counts for the launcher tile: active policies / annual premium / open claims."""
     return [
         {"n": _active_policies().count(), "label": "Active policies"},
-        {"n": annual_premium_total(), "label": "Annual premium"},
+        {"n": annual_premium_total(), "label": "Annual premium", "money": True},
         {"n": open_claims().count(), "label": "Open claims"},
     ]

@@ -18,7 +18,7 @@
       <div class="tiles">
         {% for m in modules %}
         <c-app-tile name="{{ m.meta.name }}" description="{{ m.meta.description }}" glyph="{{ m.meta.glyph }}" tint="{{ m.meta.tint }}" href="{{ m.meta.url }}">
-          {% for c in m.counts %}<c-tile-stat n="{{ c.n }}" label="{{ c.label }}" />{% endfor %}
+          {% for c in m.counts %}<c-tile-stat n="{{ c.n }}" label="{{ c.label }}" money="{{ c.money|yesno:'1,' }}" symbol="{{ base_symbol }}" grouping="{{ ui_number_format|default:'thousands' }}" />{% endfor %}
         </c-app-tile>
         {% endfor %}
 
