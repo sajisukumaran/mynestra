@@ -26,6 +26,7 @@ Alpine state (window.txnFormError, held-qty map).{% endcomment %}
           <div class="pc-sub">
             {% if t.security.is_option %}{{ t.option_contracts|floatformat:'-2' }} contracts{% if t.price %} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />/sh{% endif %}{% elif t.quantity %}{{ t.quantity|floatformat:'-4' }}{% if t.price %} @ <c-money :amount="t.price" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}{% endif %}
             {% if t.realized_gain %} · realized <c-money :amount="t.realized_gain" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
+            {% if t.txn_type == 'merger' and t.fee %} · fee <c-money :amount="t.fee" symbol="{{ account.currency.symbol }}" dp="2" grouping="{{ ui_number_format }}" />{% endif %}
             {% if t.counter_investment_account and t.security %} · {% if t.txn_type == 'in_kind_out' %}to{% else %}from{% endif %} {{ t.counter_investment_account.nickname }}{% endif %}
             {% if t.split_ratio_display %}{{ t.split_ratio_display }}{% endif %}
             {% if t.target_security %} · → {{ t.target_security.display }}{% if t.basis_pct %} ({{ t.basis_pct|floatformat:'-2' }}% basis){% endif %}{% endif %}

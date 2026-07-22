@@ -194,6 +194,27 @@ def test_cash_and_stock_merger_loss_recognizes_nothing(make_tenant):
         assert _inv(acct)
 
 
+def test_cash_and_stock_merger_fee_is_expensed_and_nets_cash(make_tenant):
+    """A reorg fee entered on the merger is expensed to investment fees and paid out of the account
+    (boot in − fee out) without changing the recognized boot gain. Invariant holds exactly."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        x, y = _sec("HTS"), _sec("NLY")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=x, qty="10", price="50", amount="500")
+        gl_before = account_balance(acct.gl_account)
+
+        m = _add(acct, InvTxnType.MERGER, MAR, security=x, target_security=y,
+                 split_ratio_new=D("1"), split_ratio_old=D("1"), amount="100", fee="20")
+
+        assert m.realized_gain == D("100")            # boot rule unaffected by the fee
+        assert _open(acct, y)[0].cost_basis == D("500")  # 500 − 100 cash + 100 gain
+        acct.refresh_from_db()
+        assert cash_balance(acct) == D("580")         # 1000 − 500 + 100 boot − 20 fee
+        assert account_balance(acct.gl_account) == gl_before + D("80")  # gl moves by gain − fee
+        assert _inv(acct)
+
+
 # --- Spin-off --------------------------------------------------------------------------------
 
 def test_spinoff_allocates_basis_to_new_security(make_tenant):
@@ -340,6 +361,30 @@ def test_cash_and_stock_merger_via_views_hts_to_nly_statement(make_tenant, make_
         assert abs(cash_balance(acct) - D("1589.17")) <= D("0.01")
         drift = account_balance(acct.gl_account) - (cash_balance(acct) + cost_basis(acct))
         assert abs(drift) <= D("0.01")
+
+
+def test_cash_and_stock_merger_via_views_with_fee(make_tenant, make_user, client):
+    """The reorg fee rides on the merger row itself (no separate Fee transaction): persisted on the
+    merger, expensed, and netted out of the boot cash."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        acct = _account(org=_brokerage())
+        x, y = _sec("HTS"), _sec("NLY")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=x, qty="10", price="50", amount="500")
+        aid, xid, yid = acct.pk, x.pk, y.pk
+    client.force_login(owner)
+    resp = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "merger", "date": "2026-03-02", "security": xid, "target_security": yid,
+        "split_ratio_new": "1", "split_ratio_old": "1", "merger_cash": "100", "fee": "20"})
+    assert resp.status_code == 302
+    with schema_context(tenant.schema_name):
+        m = InvestmentTransaction.objects.get(account_id=aid, txn_type="merger")
+        assert m.fee == D("20") and m.realized_gain == D("100")
+        assert _open(acct, y)[0].cost_basis == D("500")
+        acct.refresh_from_db()
+        assert cash_balance(acct) == D("580")          # 1000 − 500 + 100 boot − 20 fee
+        assert _inv(acct)
 
 
 def test_spinoff_via_views_selecting_existing_target(make_tenant, make_user, client):

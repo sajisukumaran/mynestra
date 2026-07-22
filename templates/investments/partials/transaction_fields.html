@@ -170,9 +170,11 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
     <div class="grid-halves">
       <c-field label="Cash received (boot) — optional" help="Cash you received ALONGSIDE the Y shares in a cash-and-stock merger. Leave blank for a plain stock-for-stock merger. Enter fractional-share cash-in-lieu as a separate Cash-in-lieu transaction, not here.">
         <div class="control"><input name="merger_cash" inputmode="decimal" x-model="mergerCash" value="{% if txn.txn_type == 'merger' and txn.amount %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div></c-field>
-      <c-field label="Market value of shares received — optional" help="Total FMV of the Y shares you received. Used only when there's cash: it caps the taxable gain (recognized = the lesser of the cash and your total gain) and lets a loss recognize $0. Leave blank to treat the whole cash as gain — right when the position has appreciated.">
-        <div class="control"><input name="stock_fmv" inputmode="decimal" x-model="stockFmv" value="{% if txn.stock_fmv %}{{ txn.stock_fmv|floatformat:'-4' }}{% endif %}" placeholder="blank = cash is all gain"></div></c-field>
+      <c-field label="Fee — optional" help="A broker reorg / handling fee charged on the merger (e.g. a mandatory reorg fee). Paid out of the account and expensed to investment fees.">
+        <div class="control"><input name="fee" inputmode="decimal" x-model="fee" value="{% if txn.txn_type == 'merger' and txn.fee %}{{ txn.fee|floatformat:'-4' }}{% endif %}" placeholder="0.00"></div></c-field>
     </div>
+    <c-field label="Market value of shares received — optional" help="Total FMV of the Y shares you received. Used only when there's cash: it caps the taxable gain (recognized = the lesser of the cash and your total gain) and lets a loss recognize $0. Leave blank to treat the whole cash as gain — right when the position has appreciated.">
+      <div class="control"><input name="stock_fmv" inputmode="decimal" x-model="stockFmv" value="{% if txn.stock_fmv %}{{ txn.stock_fmv|floatformat:'-4' }}{% endif %}" placeholder="blank = cash is all gain"></div></c-field>
   </div>
   <div x-show="type === 'spinoff'" x-cloak class="stack-16">
     <c-field label="Basis allocated to Y (%) — optional" help="Percent of your original cost basis to move to the spun-off shares (from the issuer's tax guidance / Form 8937). Leave blank to keep all cost on the parent (Y then has $0 basis) — you can edit it later.">
@@ -180,7 +182,7 @@ income/holding ops), income_accounts, expense_accounts, bank_accounts, investmen
     <c-field label="Cash in lieu of fractional share — optional" help="If the broker paid cash for the leftover fraction (so you received whole Y shares): enter the FULL entitlement in the ratio above (e.g. 16.80278 per 70) and the cash here. The fraction is sold for it, your Y holding rounds down to whole shares, and the small gain/loss posts to Realized Capital Gain/Loss.">
       <div class="control"><input name="cash_in_lieu" inputmode="decimal" value="{% if txn.txn_type == 'spinoff' and txn.amount %}{{ txn.amount|floatformat:'-4' }}{% endif %}" placeholder="e.g. 5.74"></div></c-field>
   </div>
-  <c-hint icon="info"><span x-show="type === 'spinoff'">You keep every X share and receive the Y shares; the holding period carries over. Cost basis is split — X keeps the rest. Nothing posts to the ledger unless you enter cash in lieu (which sells the fraction for a small realized gain/loss).</span><span x-show="type === 'merger'">Your X shares convert to Y at the ratio, carrying the holding period. A plain stock-for-stock merger posts nothing. With cash, the boot comes in and the taxable gain posts to Realized Capital Gain/Loss; the Y basis absorbs the rest.</span></c-hint>
+  <c-hint icon="info"><span x-show="type === 'spinoff'">You keep every X share and receive the Y shares; the holding period carries over. Cost basis is split — X keeps the rest. Nothing posts to the ledger unless you enter cash in lieu (which sells the fraction for a small realized gain/loss).</span><span x-show="type === 'merger'">Your X shares convert to Y at the ratio, carrying the holding period. A plain stock-for-stock merger posts nothing. With cash, the boot comes in and the taxable gain posts to Realized Capital Gain/Loss; the Y basis absorbs the rest. Any fee is paid out of the account and expensed to investment fees.</span></c-hint>
 </div>
 
 {# Sell short — opens a negative position; proceeds come in as cash #}

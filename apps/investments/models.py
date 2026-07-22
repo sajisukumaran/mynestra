@@ -808,10 +808,9 @@ class InvestmentTransaction(SoftDeleteModel):
             return self.amount if self.security_id is None else ZERO
         if t in (InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
                  InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL,
-                 InvTxnType.CASH_MERGER, InvTxnType.MERGER, InvTxnType.SPINOFF):
-            # CASH_MERGER: the buyout check comes in as cash. MERGER: `amount` is the optional cash
-            # boot of a cash-and-stock merger (0 for a plain, cash-neutral stock-for-stock one).
-            # SPINOFF: `amount` is the optional cash-in-lieu of a fractional share (0 = neutral).
+                 InvTxnType.CASH_MERGER, InvTxnType.SPINOFF):
+            # CASH_MERGER: the buyout check comes in as cash. SPINOFF: `amount` is the optional
+            # cash-in-lieu of a fractional share (0 for a plain, cash-neutral spin-off).
             return self.amount
         if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE,
                  InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT):
@@ -819,9 +818,11 @@ class InvestmentTransaction(SoftDeleteModel):
         if t in (InvTxnType.BUY, InvTxnType.BUY_TO_COVER,
                  InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_BUY_CLOSE):
             return -(self.amount + self.fee)  # cash paid to buy / cover / open-long / close-written
-        if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.SELL_SHORT,
+        if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.SELL_SHORT, InvTxnType.MERGER,
                  InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE):
-            return self.net_proceeds  # sale / cash-in-lieu / short / option-write proceeds come in
+            # Sale / cash-in-lieu / short / option-write proceeds come in; MERGER = the cash-and-
+            # stock boot net of any reorg fee (`amount − fee`; both 0 for a plain stock merger).
+            return self.net_proceeds
         if t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
             # Cash = strike × shares (self.amount). Exercising a long PUT or being assigned on a
             # written CALL SELLS the underlying (cash in); the mirror cases BUY it (cash out).
@@ -887,7 +888,7 @@ def signed_cash_sql():
             txn_type__in=(InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
                           InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST,
                           InvTxnType.RETURN_OF_CAPITAL, InvTxnType.CASH_MERGER,
-                          InvTxnType.MERGER, InvTxnType.SPINOFF),
+                          InvTxnType.SPINOFF),
             then=amount,
         ),
         models.When(
@@ -902,8 +903,8 @@ def signed_cash_sql():
         ),
         models.When(
             txn_type__in=(InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.SELL_SHORT,
-                          InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE),
-            then=amount - fee,  # net proceeds
+                          InvTxnType.MERGER, InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE),
+            then=amount - fee,  # net proceeds (MERGER = cash boot net of the reorg fee)
         ),
         models.When(txn_type=InvTxnType.OPT_EXERCISE, security__option_right=OptionRight.PUT,
                     then=amount - fee),

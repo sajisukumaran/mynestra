@@ -1044,7 +1044,7 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(gl, debit=cost), line(contra, credit=cost)]
         return [line(contra, debit=cost), line(gl, credit=cost)]
     if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
-             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.MERGER, InvTxnType.SPINOFF,
+             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.SPINOFF,
              InvTxnType.BUY_TO_COVER,
              InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
              InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
@@ -1053,9 +1053,7 @@ def _lines_for(txn) -> list[LineInput]:
         # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss);
         # buy-to-cover pays cash via `signed_cash`, realizing (short proceeds − buy-back cost). An
         # option exercise/assignment that ACQUIRES the underlying rolls basis in at zero gain → [].
-        # A spin-off with cash-in-lieu realizes the gain on the fraction sold (else gain 0 → []). A
-        # cash-and-stock MERGER recognizes the boot gain (plain stock-for-stock → gain 0 → []); its
-        # cash boot arrives via `signed_cash`, and the Y basis was reduced to keep the invariant.
+        # A spin-off with cash-in-lieu realizes the gain on the fraction sold (else gain 0 → []).
         gain = _q_amount(txn.realized_gain)
         if gain > ZERO:
             return [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
@@ -1063,6 +1061,23 @@ def _lines_for(txn) -> list[LineInput]:
             g = -gain
             return [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
         return []
+    if t == InvTxnType.MERGER:
+        # Cash-and-stock merger: the recognized boot gain posts like a disposition (the Y basis was
+        # already reduced to keep the invariant; the boot cash arrives via `signed_cash`), and an
+        # optional reorg fee is expensed to investment fees — its cash already left via signed_cash
+        # (net_proceeds). A plain stock-for-stock merger (gain 0, fee 0) posts nothing.
+        lines = []
+        gain = _q_amount(txn.realized_gain)
+        if gain > ZERO:
+            lines += [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
+        elif gain < ZERO:
+            g = -gain
+            lines += [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
+        fee = _q_amount(txn.fee)
+        if fee > ZERO:
+            contra = resolve_posting_account(acct, "fee_expense", INVEST_FEES)
+            lines += [line(contra, debit=fee), line(gl, credit=fee)]
+        return lines
     if t in (InvTxnType.BUY, InvTxnType.SELL_SHORT,
              InvTxnType.SPLIT,
              InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_OPEN):

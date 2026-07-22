@@ -884,7 +884,8 @@ def _apply_txn_post(request, txn):
         setattr(txn, f, parse_date(request.POST.get(f) or "") if is_div else None)
     txn.amount = amount
     txn.fee = fee if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.FEE,
-                           InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER) else Decimal("0")
+                           InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER,
+                           InvTxnType.MERGER) else Decimal("0")
     txn.quantity = quantity
     txn.price = price
     txn.security = security
