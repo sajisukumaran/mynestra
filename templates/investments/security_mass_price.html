@@ -19,6 +19,11 @@
 <form method="post" action="{{ ui_tenant_url }}investments/securities/mass-prices/">{% csrf_token %}
   {% if account %}<input type="hidden" name="account" value="{{ account.pk }}">{% endif %}
   <div class="stack-16">
+    {% if messages %}{% for m in messages %}
+    <div x-data="{ show: true }" x-show="show" @click="show = false">
+      <c-toast variant="{% if m.level_tag == 'error' %}danger{% else %}{{ m.level_tag }}{% endif %}" icon="{% if m.level_tag == 'error' %}triangle-alert{% elif m.level_tag == 'success' %}circle-check{% else %}info{% endif %}" message="{{ m }}" />
+    </div>
+    {% endfor %}{% endif %}
     {# Date + source apply to every price recorded below #}
     <c-card>
       <div class="form-grid">

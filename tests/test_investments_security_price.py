@@ -122,6 +122,27 @@ def test_mass_price_update_creates_filled_skips_blank_and_excludes_non_quotable(
         assert not SecurityPrice.objects.filter(security_id=cdid).exists()  # excluded → ignored
 
 
+def test_mass_price_update_requires_as_of_date(make_tenant, make_user, client):
+    """The as-of date is required and does NOT default to today — prices here are usually
+    back-dated, so a missing date must not be silently stamped with the current date. GET renders
+    the field blank; a dateless POST writes nothing and re-renders with an error toast."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        sec = _sec()
+        sid = sec.pk
+    client.force_login(owner)
+    # GET: the as-of field renders empty (no today default) so the correct date must be entered.
+    body = client.get(_url(tenant, "securities/mass-prices/")).content.decode()
+    assert 'name="as_of" value=""' in body.replace("\n", " ")
+    # POST without a date: nothing written, error surfaced, no silent stamp on today.
+    resp = client.post(_url(tenant, "securities/mass-prices/"), {
+        "as_of": "", "source": "Yahoo", f"price_{sid}": "42.62"})
+    assert resp.status_code == 200
+    assert "Enter the as-of date" in resp.content.decode()
+    with schema_context(tenant.schema_name):
+        assert not SecurityPrice.objects.filter(security_id=sid).exists()
+
+
 def test_mass_price_update_tolerates_pasted_formatting(make_tenant, make_user, client):
     """A price copied with a thousands-separator comma / currency symbol (e.g. "$1,234.56") is
     stripped and stored, not silently skipped."""

@@ -1180,28 +1180,34 @@ def security_mass_price(request):
         quotable = quotable.filter(pk__in=held_ids)
 
     if request.method == "POST":
-        as_of = parse_date(request.POST.get("as_of", "") or "") or datetime.date.today()
-        source = request.POST.get("source", "").strip()
-        updated = 0
-        for sec in quotable:
-            price = _decimal(request.POST.get(f"price_{sec.pk}"))
-            if price is None or price < 0:
-                continue  # blank / invalid → leave this instrument untouched on this date
-            SecurityPrice.objects.update_or_create(
-                security=sec, as_of=as_of, defaults={"price": price, "source": source}
+        # The as-of date is required (no default-to-today): prices here are usually back-dated, so
+        # forcing an explicit date avoids silently stamping historical marks with the current date.
+        as_of = parse_date(request.POST.get("as_of", "") or "")
+        if as_of is None:
+            messages.error(request, "Enter the as-of date for these prices.")
+        else:
+            source = request.POST.get("source", "").strip()
+            updated = 0
+            for sec in quotable:
+                price = _decimal(request.POST.get(f"price_{sec.pk}"))
+                if price is None or price < 0:
+                    continue  # blank / invalid → leave this instrument untouched on this date
+                SecurityPrice.objects.update_or_create(
+                    security=sec, as_of=as_of, defaults={"price": price, "source": source}
+                )
+                updated += 1
+            messages.success(
+                request,
+                f"Updated {updated} price{'' if updated == 1 else 's'} as of {as_of:%d %b %Y}."
+                if updated else "No prices entered — nothing was updated.",
             )
-            updated += 1
-        messages.success(
-            request,
-            f"Updated {updated} price{'' if updated == 1 else 's'} as of {as_of:%d %b %Y}."
-            if updated else "No prices entered — nothing was updated.",
-        )
-        return redirect(tenant_url(
-            request,
-            f"investments/accounts/{account.pk}/" if account else "investments/securities/",
-        ))
+            return redirect(tenant_url(
+                request,
+                f"investments/accounts/{account.pk}/" if account else "investments/securities/",
+            ))
 
-    as_of = parse_date(request.GET.get("as_of", "") or "") or datetime.date.today()
+    # No default-to-today: leave the field blank so the correct (often back-dated) date is entered.
+    as_of = parse_date(request.GET.get("as_of", "") or "")
     rows = [{"security": sec, "last": sec.prices.order_by("-as_of").first()} for sec in quotable]
     ctx = inv_context(
         request, "accounts" if account else "securities",
