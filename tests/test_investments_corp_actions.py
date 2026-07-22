@@ -121,6 +121,79 @@ def test_merger_posts_no_gl_entry_and_replays_on_buy_edit(make_tenant):
         assert _inv(acct)
 
 
+# --- Cash-and-stock merger (boot) ------------------------------------------------------------
+
+def test_cash_and_stock_merger_without_fmv_taxes_the_whole_boot(make_tenant):
+    """Cash-and-stock merger, FMV omitted (the common appreciated case): the cash boot is fully
+    recognized as gain, the Y basis carries over unchanged, and the boot lands as cash. Invariant
+    holds exactly (whole shares)."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        x, y = _sec("HTS"), _sec("NLY")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=x, qty="10", price="50", amount="500")
+        gl_before = account_balance(acct.gl_account)
+
+        m = _add(acct, InvTxnType.MERGER, MAR, security=x, target_security=y,
+                 split_ratio_new=D("1"), split_ratio_old=D("1"), amount="100")
+
+        assert not _open(acct, x)                       # X surrendered
+        yl = _open(acct, y)
+        assert len(yl) == 1
+        assert yl[0].remaining_quantity == D("10")      # 10 × 1
+        assert yl[0].cost_basis == D("500")             # 500 − 100 cash + 100 gain → carries
+        assert yl[0].acquired_date == FEB               # holding period tacks
+        assert m.realized_gain == D("100")              # whole boot recognized
+        acct.refresh_from_db()
+        assert cash_balance(acct) == D("600")           # 1000 − 500 + 100 boot
+        assert account_balance(acct.gl_account) == gl_before + D("100")
+        assert _inv(acct)
+
+
+def test_cash_and_stock_merger_fmv_caps_recognized_gain(make_tenant):
+    """When the FMV of the shares received is given, the recognized gain is the LESSER of the cash
+    and the total realized gain — so a modest gain caps the taxable boot below the cash."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        x, y = _sec("HTS"), _sec("NLY")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=x, qty="10", price="50", amount="500")
+
+        m = _add(acct, InvTxnType.MERGER, MAR, security=x, target_security=y,
+                 split_ratio_new=D("1"), split_ratio_old=D("1"), amount="100", stock_fmv=D("450"))
+
+        # realized = 450 FMV + 100 cash − 500 basis = 50 < boot 100 → recognize 50.
+        assert m.realized_gain == D("50")
+        assert _open(acct, y)[0].cost_basis == D("450")  # 500 − 100 + 50
+        acct.refresh_from_db()
+        assert cash_balance(acct) == D("600")
+        assert _inv(acct)
+
+
+def test_cash_and_stock_merger_loss_recognizes_nothing(make_tenant):
+    """An overall-loss cash-and-stock merger recognizes $0 (no loss in a reorganization): the cash
+    simply reduces the carried basis, nothing posts, and the invariant still holds (cash rises,
+    basis falls by the same, so the gl node total is unchanged)."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        x, y = _sec("HTS"), _sec("NLY")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=x, qty="10", price="50", amount="500")
+        gl_before = account_balance(acct.gl_account)
+
+        m = _add(acct, InvTxnType.MERGER, MAR, security=x, target_security=y,
+                 split_ratio_new=D("1"), split_ratio_old=D("1"), amount="100", stock_fmv=D("300"))
+
+        # total consideration 400 < basis 500 → overall loss → recognize $0.
+        assert m.realized_gain == D("0")
+        assert m.journal_entry_id is None                # nothing posts
+        assert _open(acct, y)[0].cost_basis == D("400")  # 500 − 100 cash (basis reduced)
+        acct.refresh_from_db()
+        assert cash_balance(acct) == D("600")
+        assert account_balance(acct.gl_account) == gl_before  # composition shifts, total unchanged
+        assert _inv(acct)
+
+
 # --- Spin-off --------------------------------------------------------------------------------
 
 def test_spinoff_allocates_basis_to_new_security(make_tenant):
@@ -228,6 +301,45 @@ def test_merger_via_views_with_inline_target(make_tenant, make_user, client):
         assert len(y_lots) == 1 and y_lots[0].remaining_quantity == D("20")
         assert y_lots[0].cost_basis == D("500")
         assert _inv(acct)
+
+
+def test_cash_and_stock_merger_via_views_hts_to_nly_statement(make_tenant, make_user, client):
+    """The HTS -> NLY cash-and-stock merger straight off a brokerage statement, entered end-to-end:
+    a merger with a cash boot, then the fractional-share cash-in-lieu and the mandatory reorg fee as
+    their own rows (exactly as the statement lists them). HTS is surrendered, NLY lands on whole
+    shares, the boot is realized, cash nets to the statement's activity, and the invariant holds to
+    the cent (a fractional cash-in-lieu carries sub-cent basis)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        acct = _account(org=_brokerage())
+        hts = _sec("HTS", "Hatteras Financial")
+        nly = _sec("NLY", "Annaly Capital")
+        _add(acct, InvTxnType.OPENING, JAN, amount="2000")
+        _add(acct, InvTxnType.BUY, FEB, security=hts, qty="42", price="15", amount="630")
+        aid, hid, nid = acct.pk, hts.pk, nly.pk
+    client.force_login(owner)
+    # 1) Cash-and-stock merger: 42 HTS -> 41.5548 NLY (0.9894 ratio) + $233.10 cash boot.
+    r1 = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "merger", "date": "2026-08-09", "security": hid, "target_security": nid,
+        "split_ratio_new": "0.9894", "split_ratio_old": "1", "merger_cash": "233.10"})
+    assert r1.status_code == 302
+    # 2) Cash-in-lieu of the 0.5548 fractional NLY share: $6.07.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "cash_in_lieu", "date": "2026-08-16", "security": nid,
+        "quantity": "0.5548", "amount": "6.07"})
+    # 3) The mandatory reorg fee: $20.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "fee", "date": "2026-08-09", "amount": "20"})
+    with schema_context(tenant.schema_name):
+        assert not _open(acct, hts)                        # HTS surrendered
+        assert next(h for h in holdings(acct) if h.security.id == nid).quantity == D("41")
+        merger = InvestmentTransaction.objects.get(account_id=aid, txn_type="merger")
+        assert merger.realized_gain == D("233.10")         # whole boot recognized (no FMV given)
+        acct.refresh_from_db()
+        # 2000 − 630 buy + 233.10 boot + 6.07 cash-in-lieu − 20 fee = 1589.17
+        assert abs(cash_balance(acct) - D("1589.17")) <= D("0.01")
+        drift = account_balance(acct.gl_account) - (cash_balance(acct) + cost_basis(acct))
+        assert abs(drift) <= D("0.01")
 
 
 def test_spinoff_via_views_selecting_existing_target(make_tenant, make_user, client):

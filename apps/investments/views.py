@@ -849,6 +849,13 @@ def _apply_txn_post(request, txn):
         )
         if security is None or not (rn and ro and rn > 0 and ro > 0) or not has_target:
             return None
+        if t == InvTxnType.MERGER:
+            # Optional cash boot + FMV of a cash-and-stock merger — neither is ever negative.
+            if (_decimal(request.POST.get("merger_cash")) or Decimal("0")) < 0:
+                return None
+            fmv = _decimal(request.POST.get("stock_fmv"))
+            if fmv is not None and fmv < 0:
+                return None
         if t == InvTxnType.SPINOFF:
             # Optional: blank / 0 keeps all cost basis on the parent (the spun-off shares get $0
             # basis — a valid, conservative choice when the issuer's allocation isn't known yet).
@@ -888,6 +895,7 @@ def _apply_txn_post(request, txn):
     txn.split_ratio_new = txn.split_ratio_old = None
     txn.target_security = None
     txn.basis_pct = None
+    txn.stock_fmv = None
     if t == InvTxnType.SPLIT:
         txn.split_ratio_new = _decimal(request.POST.get("split_ratio_new"))
         txn.split_ratio_old = _decimal(request.POST.get("split_ratio_old"))
@@ -895,8 +903,9 @@ def _apply_txn_post(request, txn):
                 and txn.split_ratio_new > 0 and txn.split_ratio_old > 0):
             return None
     elif t in (InvTxnType.MERGER, InvTxnType.SPINOFF):
-        # Cash-neutral corporate action: X (`security`) → Y (`target_security`) at a share ratio.
-        # (A spin-off may also bring in cash-in-lieu of a fractional share — stored in `amount`.)
+        # Corporate action: X (`security`) → Y (`target_security`) at a share ratio. Cash-neutral
+        # unless cash comes in: a spin-off's cash-in-lieu of a fractional Y share, or a merger's
+        # cash boot — both stored in `amount` (see signed_cash / _apply_merger / _apply_spinoff).
         txn.split_ratio_new = _decimal(request.POST.get("split_ratio_new"))
         txn.split_ratio_old = _decimal(request.POST.get("split_ratio_old"))
         txn.target_security = _resolve_target_security(request, security)
@@ -908,6 +917,9 @@ def _apply_txn_post(request, txn):
             # Cash received in lieu of the fractional Y share; the engine sells that fraction for it
             # so the entitlement lands on whole shares + cash. Blank / 0 = keep the fraction.
             txn.amount = _decimal(request.POST.get("cash_in_lieu")) or Decimal("0")
+        else:  # MERGER — optional cash-and-stock boot + the FMV that caps its recognized gain.
+            txn.amount = _decimal(request.POST.get("merger_cash")) or Decimal("0")
+            txn.stock_fmv = _decimal(request.POST.get("stock_fmv"))  # None = boot fully taxable
 
     # Options: expand contracts → shares-equivalent once (quantity = contracts × multiplier) and
     # derive the cash amount. Open/close use the premium/share; exercise/assignment use the strike.

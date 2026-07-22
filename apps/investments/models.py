@@ -541,7 +541,7 @@ class InvTxnType(models.TextChoices):
     IN_KIND_OUT = "in_kind_out", "Securities transfer out (in-kind)"
     WORTHLESS = "worthless", "Worthless write-off"      # bankruptcy: whole position → capital loss
     CASH_MERGER = "cash_merger", "Cash buyout / merger"  # going private: cash check for the shares
-    MERGER = "merger", "Merger (stock-for-stock)"        # X → Y shares at a ratio; basis carries
+    MERGER = "merger", "Merger (stock / cash & stock)"   # X → Y at a ratio; +optional cash boot
     SPINOFF = "spinoff", "Spin-off"                      # allocate part of X's basis to a new Y
     # Leverage (IP5): a short is a negative-quantity lot with credit basis; margin is negative
     # settlement cash. No new liability accounts — the invariant absorbs both (see the docstring).
@@ -675,6 +675,13 @@ class InvestmentTransaction(SoftDeleteModel):
     )
     basis_pct = models.DecimalField(max_digits=7, decimal_places=4, null=True, blank=True)
 
+    # Cash-and-stock merger only: total fair-market value of the acquirer (Y) shares received.
+    # Caps the recognized "boot" gain (recognized = the lesser of the cash and the realized gain)
+    # and lets an overall-loss merger recognize $0. Optional — omitted, the cash boot is assumed
+    # fully taxable (the common appreciated case). Module input; never posted directly. The cash
+    # boot itself rides on `amount` (like a cash-merger). See services._apply_merger.
+    stock_fmv = _amount(null=True, blank=True)
+
     # Contra override: for CONTRIBUTION a revenue account marks it as income (e.g. employer match);
     # for FEE an alternate expense account. Null → the service's default contra for the type.
     category_account = models.ForeignKey(
@@ -801,9 +808,10 @@ class InvestmentTransaction(SoftDeleteModel):
             return self.amount if self.security_id is None else ZERO
         if t in (InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
                  InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST, InvTxnType.RETURN_OF_CAPITAL,
-                 InvTxnType.CASH_MERGER, InvTxnType.SPINOFF):
-            # CASH_MERGER: the buyout check comes in as cash. SPINOFF: `amount` is the optional
-            # cash-in-lieu of a fractional share (0 for a plain, cash-neutral spin-off).
+                 InvTxnType.CASH_MERGER, InvTxnType.MERGER, InvTxnType.SPINOFF):
+            # CASH_MERGER: the buyout check comes in as cash. MERGER: `amount` is the optional cash
+            # boot of a cash-and-stock merger (0 for a plain, cash-neutral stock-for-stock one).
+            # SPINOFF: `amount` is the optional cash-in-lieu of a fractional share (0 = neutral).
             return self.amount
         if t in (InvTxnType.WITHDRAWAL, InvTxnType.TRANSFER_OUT, InvTxnType.FEE,
                  InvTxnType.MARGIN_INTEREST, InvTxnType.DIV_PAID_SHORT):
@@ -823,7 +831,7 @@ class InvestmentTransaction(SoftDeleteModel):
                 or (t == InvTxnType.OPT_ASSIGN and right == OptionRight.CALL)
             )
             return self.net_proceeds if cash_in else -(self.amount + self.fee)
-        # DIVIDEND_REINVEST, SPLIT, MERGER, in-kind, WORTHLESS and OPT_EXPIRE are cash-neutral.
+        # DIVIDEND_REINVEST, SPLIT, in-kind, WORTHLESS and OPT_EXPIRE are cash-neutral.
         return ZERO
 
     @property
@@ -879,7 +887,7 @@ def signed_cash_sql():
             txn_type__in=(InvTxnType.CONTRIBUTION, InvTxnType.TRANSFER_IN, InvTxnType.DIVIDEND,
                           InvTxnType.INTEREST, InvTxnType.CAP_GAIN_DIST,
                           InvTxnType.RETURN_OF_CAPITAL, InvTxnType.CASH_MERGER,
-                          InvTxnType.SPINOFF),
+                          InvTxnType.MERGER, InvTxnType.SPINOFF),
             then=amount,
         ),
         models.When(
@@ -903,7 +911,7 @@ def signed_cash_sql():
                     then=amount - fee),
         models.When(txn_type__in=(InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN),
                     then=-(amount + fee)),
-        # DIVIDEND_REINVEST, SPLIT, MERGER, in-kind, WORTHLESS, OPT_EXPIRE — cash-neutral.
+        # DIVIDEND_REINVEST, SPLIT, in-kind, WORTHLESS, OPT_EXPIRE — cash-neutral.
         default=models.Value(ZERO),
         output_field=models.DecimalField(
             max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS

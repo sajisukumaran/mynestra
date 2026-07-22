@@ -504,29 +504,67 @@ def _apply_split(txn, store) -> None:
         store.save(lot, ["remaining_quantity", "original_quantity"])
 
 
-def _apply_merger(txn, store) -> None:
-    """Stock-for-stock merger: each open lot of the original security (`txn.security` = X) becomes a
-    lot of `txn.target_security` (Y) at the exchange ratio (Y shares per X share), carrying cost
-    basis and acquisition date over unchanged. Nothing is realized; total basis is preserved."""
+def _apply_merger(txn, store) -> Decimal:
+    """Stock (or cash-and-stock) merger: each open X lot (`txn.security`) becomes a Y lot
+    (`txn.target_security`) at the exchange ratio (Y shares per X share), keeping X's acquisition
+    date so the holding period tacks. Returns the total recognized gain (0 for a plain merger).
+
+    A plain stock-for-stock merger carries basis over unchanged and realizes nothing — cash-neutral.
+    A cash-and-stock merger also pays a cash boot (`txn.amount`) and applies the tax "boot" rule per
+    lot: recognized gain = the lesser of the cash and the realized gain (a loss recognizes $0), and
+    the new Y basis = old basis − cash + recognized gain. That identity keeps the account's
+    (cash + Σ cost) consistent for ANY recognized amount, so the invariant holds by construction.
+    `txn.stock_fmv` (total FMV of the Y shares received) caps the gain and enables the $0-loss
+    case; omitted, the boot is assumed fully taxable (the common case where the position has
+    appreciated). Cash and FMV are split across lots pro-rata by share count (last lot rounds)."""
     if not (txn.split_ratio_new and txn.split_ratio_old and txn.target_security_id):
-        return
+        return ZERO
     ratio = txn.split_ratio_new / txn.split_ratio_old
-    for lot in store.open_lots(txn.security):
-        qty = _q_qty(lot.remaining_quantity * ratio)
+    lots = [lot for lot in store.open_lots(txn.security) if lot.remaining_quantity > ZERO]
+    total_qty = _q_qty(sum((lot.remaining_quantity for lot in lots), ZERO))
+    cash = _q_amount(txn.amount)                                   # boot; 0 for a plain merger
+    fmv_total = _q_amount(txn.stock_fmv) if txn.stock_fmv is not None else None
+    total_gain = allocated_cash = allocated_fmv = ZERO
+    n = len(lots)
+    for i, lot in enumerate(lots):
+        q = lot.remaining_quantity
+        if i == n - 1:                                             # last lot absorbs rounding
+            c_i = _q_amount(cash - allocated_cash)
+            f_i = _q_amount(fmv_total - allocated_fmv) if fmv_total is not None else None
+        else:
+            c_i = _q_amount(cash * (q / total_qty)) if total_qty else ZERO
+            f_i = _q_amount(fmv_total * (q / total_qty)) if (fmv_total is not None and total_qty) \
+                else (ZERO if fmv_total is not None else None)
+        allocated_cash = _q_amount(allocated_cash + c_i)
+        if f_i is not None:
+            allocated_fmv = _q_amount(allocated_fmv + f_i)
+        # Recognized gain (boot rule): lesser of the cash and the realized gain; a loss recognizes
+        # nothing. FMV unknown → assume the boot is fully taxable (position assumed to have a gain).
+        if c_i <= ZERO:
+            g_i = ZERO
+        elif f_i is None:
+            g_i = c_i
+        else:
+            realized = _q_amount((f_i + c_i) - lot.cost_basis)
+            g_i = min(c_i, realized) if realized > ZERO else ZERO
+        new_basis = _q_amount(lot.cost_basis - c_i + g_i)
+        y_qty = _q_qty(q * ratio)
         store.add_lot(
             security_id=txn.target_security_id,
             acquired_date=lot.acquired_date,
-            original_quantity=qty,
-            remaining_quantity=qty,
-            original_cost=lot.cost_basis,
-            cost_basis=lot.cost_basis,  # basis carries over entirely
-            open=lot.cost_basis > ZERO or qty > ZERO,
+            original_quantity=y_qty,
+            remaining_quantity=y_qty,
+            original_cost=new_basis,
+            cost_basis=new_basis,
+            open=new_basis > ZERO or y_qty > ZERO,
             source_txn=txn,
         )
         lot.remaining_quantity = ZERO
         lot.cost_basis = ZERO
         lot.open = False
         store.save(lot, ["remaining_quantity", "cost_basis", "open"])
+        total_gain = _q_amount(total_gain + g_i)
+    return total_gain
 
 
 def _sell_fractional_remainder(txn, store, security, cash) -> Decimal:
@@ -847,8 +885,7 @@ def _apply_lot_effect(txn, store) -> Decimal:
     if t == InvTxnType.CASH_MERGER:
         return _apply_cash_merger(txn, store)
     if t == InvTxnType.MERGER:
-        _apply_merger(txn, store)
-        return ZERO
+        return _apply_merger(txn, store)
     if t == InvTxnType.SPINOFF:
         return _apply_spinoff(txn, store)
     if t == InvTxnType.OPT_BUY_OPEN:
@@ -883,7 +920,7 @@ class RebuildResult:
 # Types whose realized gain, if it shifts on replay, requires re-posting their GL entry.
 _GAIN_TYPES = frozenset({
     InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
-    InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.SPINOFF,
+    InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.MERGER, InvTxnType.SPINOFF,
     InvTxnType.BUY_TO_COVER,
     InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
     InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN,
@@ -1007,7 +1044,7 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(gl, debit=cost), line(contra, credit=cost)]
         return [line(contra, debit=cost), line(gl, credit=cost)]
     if t in (InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.RETURN_OF_CAPITAL,
-             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.SPINOFF,
+             InvTxnType.WORTHLESS, InvTxnType.CASH_MERGER, InvTxnType.MERGER, InvTxnType.SPINOFF,
              InvTxnType.BUY_TO_COVER,
              InvTxnType.OPT_SELL_CLOSE, InvTxnType.OPT_BUY_CLOSE, InvTxnType.OPT_EXPIRE,
              InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
@@ -1016,7 +1053,9 @@ def _lines_for(txn) -> list[LineInput]:
         # in via `signed_cash`; worthless has no cash (a pure basis write-off → capital loss);
         # buy-to-cover pays cash via `signed_cash`, realizing (short proceeds − buy-back cost). An
         # option exercise/assignment that ACQUIRES the underlying rolls basis in at zero gain → [].
-        # A spin-off with cash-in-lieu realizes the gain on the fraction sold (else gain 0 → []).
+        # A spin-off with cash-in-lieu realizes the gain on the fraction sold (else gain 0 → []). A
+        # cash-and-stock MERGER recognizes the boot gain (plain stock-for-stock → gain 0 → []); its
+        # cash boot arrives via `signed_cash`, and the Y basis was reduced to keep the invariant.
         gain = _q_amount(txn.realized_gain)
         if gain > ZERO:
             return [line(gl, debit=gain), line(REALIZED_GAIN, credit=gain)]
@@ -1025,7 +1064,7 @@ def _lines_for(txn) -> list[LineInput]:
             return [line(REALIZED_GAIN, debit=g), line(gl, credit=g)]
         return []
     if t in (InvTxnType.BUY, InvTxnType.SELL_SHORT,
-             InvTxnType.SPLIT, InvTxnType.MERGER,
+             InvTxnType.SPLIT,
              InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_OPEN):
         # Cost-neutral: cash and total cost basis move equal-and-opposite, so nothing posts.
         # SELL_SHORT / OPT_SELL_OPEN mirror BUY — proceeds in via `signed_cash`, offset by a
@@ -1661,7 +1700,9 @@ _PERF_ACQUIRE = frozenset({
     InvTxnType.BUY, InvTxnType.DIVIDEND_REINVEST, InvTxnType.OPENING, InvTxnType.IN_KIND_IN,
 })
 _PERF_DISPOSE_QTY = frozenset({InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.IN_KIND_OUT})
-_PERF_SOLD_AMOUNT = frozenset({InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.CASH_MERGER})
+_PERF_SOLD_AMOUNT = frozenset({
+    InvTxnType.SELL, InvTxnType.CASH_IN_LIEU, InvTxnType.CASH_MERGER, InvTxnType.MERGER,
+})  # MERGER's amount is the cash-and-stock boot (0 for a plain stock-for-stock merger)
 _PERF_DIVIDEND = frozenset({
     InvTxnType.DIVIDEND, InvTxnType.DIVIDEND_REINVEST, InvTxnType.CAP_GAIN_DIST,
 })
