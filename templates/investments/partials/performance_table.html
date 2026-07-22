@@ -4,7 +4,7 @@ Performance tabs. Pass `sortable=True headers=<perf_headers>` for click-to-sort 
 (the account tab); omit both for plain headers (the institution tab, grouped by account). Wide by
 design — c-table scrolls horizontally.{% endcomment %}
 {% if rows %}
-<c-table>
+<c-table class="perf-table">
   <thead><tr>
     {% if sortable %}
     {% for h in headers %}
@@ -32,7 +32,7 @@ design — c-table scrolls horizontally.{% endcomment %}
       <td>
         <a class="person-cell" href="{{ ui_tenant_url }}investments/accounts/{{ acct.pk }}/holdings/{{ r.security.id }}/">
           <c-avatar tint="{{ r.security.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar>
-          <div><div class="pc-name">{{ r.security.display }}</div><div class="pc-sub">{{ r.security.asset_class_label }}</div></div>
+          <div><div class="pc-name" title="{{ r.security.display }}">{{ r.security.display }}</div><div class="pc-sub">{{ r.security.asset_class_label }}</div></div>
         </a>
       </td>
       <td class="col-num tnum">{% if r.qty_bought %}{{ r.qty_bought|floatformat:'-4' }}{% else %}<span class="subtle">—</span>{% endif %}</td>
