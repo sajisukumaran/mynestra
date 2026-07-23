@@ -579,3 +579,48 @@ def test_cash_balance_and_register_page_queries_flat_with_register_size(make_ten
         cash_large, reg_large = _counts(200, "QFB")
     assert cash_small == cash_large == 1
     assert reg_large <= reg_small
+
+
+def test_register_csv_export_returns_full_register(make_tenant, make_user, client):
+    """The Register tab's CSV export downloads EVERY transaction (not just the visible page) as a
+    text/csv attachment, with a header row and each row's chronological running cash balance."""
+    import csv
+    import io
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        from apps.finance.models import Currency
+        from apps.investments.services import ensure_gl_account
+        acct = InvestmentAccount.objects.create(
+            institution=_brokerage(), nickname="Taxable Brokerage",
+            registration="taxable_individual", currency=Currency.objects.get(code="USD"))
+        ensure_gl_account(acct)
+        sec = Security.objects.create(symbol="ACME", name="Acme",
+                                      currency=Currency.objects.get(code="USD"))
+        aid, sid = acct.pk, sec.pk
+    client.force_login(owner)
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "opening", "date": "2026-01-02", "amount": "10000"})
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "buy", "date": "2026-01-05", "security": sid,
+        "quantity": "10", "price": "50", "amount": "500", "fee": "0"})
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "sell", "date": "2026-03-01", "security": sid,
+        "quantity": "4", "price": "70", "amount": "280", "fee": "0"})
+
+    resp = client.get(_url(tenant, f"accounts/{aid}/register.csv"))
+    assert resp.status_code == 200
+    assert resp["Content-Type"].startswith("text/csv")
+    assert 'filename="taxable-brokerage-register.csv"' in resp["Content-Disposition"]
+
+    body = resp.content.decode("utf-8-sig")  # utf-8-sig strips the Excel BOM
+    reader = list(csv.DictReader(io.StringIO(body)))
+    assert len(reader) == 3  # all three transactions, not just a page
+    by_type = {r["Type"]: r for r in reader}
+    assert set(by_type) == {"Opening balance", "Buy", "Sell"}
+    assert by_type["Sell"]["Symbol"] == "ACME"
+    assert by_type["Sell"]["Realized gain"] == "80"     # 280 proceeds − 200 cost
+    assert by_type["Sell"]["Cash"] == "280"             # net proceeds in
+    assert by_type["Buy"]["Cash"] == "-500"             # cash out
+    assert by_type["Sell"]["Balance"] == "9780"         # 10000 − 500 + 280 (chronological)
+    assert by_type["Opening balance"]["Balance"] == "10000"

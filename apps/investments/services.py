@@ -1624,12 +1624,12 @@ def _type_order_sql():
     )
 
 
-def register_page(account, *, sort="date", direction="desc", page=1, per_page=REGISTER_PER_PAGE):
-    """One PAGE of the account register, each transaction with its chronological running
-    settlement-cash balance — sorted, balanced and paginated IN THE DATABASE. The balance is a
-    window SUM over (date, id) (the balance AFTER each transaction), computed independently of the
-    display sort, so sorting by any column keeps each row's own balance. Read-only; only the
-    page's rows are ever materialized."""
+def _register_qs(account, sort, direction):
+    """The account's transactions annotated with per-row cash effect + chronological running
+    balance and ordered by the requested display sort. Shared by the paginated register page and
+    the full CSV export so the two never drift. The balance is a window SUM over (date, id) — the
+    balance AFTER each transaction — independent of the display sort, so any sort keeps each row's
+    own balance. Returns (queryset, normalized_sort, reverse)."""
     sort = sort if sort in _REGISTER_SORTS else "date"
     reverse = direction != "asc"
     txns = account.transactions.select_related(
@@ -1642,7 +1642,14 @@ def register_page(account, *, sort="date", direction="desc", page=1, per_page=RE
     if sort == "type":
         txns = txns.annotate(type_order=_type_order_sql())
     prefix = "-" if reverse else ""
-    txns = txns.order_by(*(f"{prefix}{field}" for field in _REGISTER_SORTS[sort]))
+    return txns.order_by(*(f"{prefix}{field}" for field in _REGISTER_SORTS[sort])), sort, reverse
+
+
+def register_page(account, *, sort="date", direction="desc", page=1, per_page=REGISTER_PER_PAGE):
+    """One PAGE of the account register, each transaction with its chronological running
+    settlement-cash balance — sorted, balanced and paginated IN THE DATABASE. Read-only; only the
+    page's rows are ever materialized."""
+    txns, sort, reverse = _register_qs(account, sort, direction)
     page_obj = Paginator(txns, per_page).get_page(page)
     rows = [{"txn": t, "balance": _q_amount(t.balance_after)} for t in page_obj.object_list]
     return {
@@ -1652,6 +1659,14 @@ def register_page(account, *, sort="date", direction="desc", page=1, per_page=RE
         "direction": "asc" if not reverse else "desc",
         "total": page_obj.paginator.count,
     }
+
+
+def register_export_rows(account, *, sort="date", direction="desc"):
+    """EVERY register row (no pagination) in the requested display order, each with its running
+    settlement-cash balance — for the CSV export. Same query as `register_page`, materialized
+    whole."""
+    txns, _sort, _reverse = _register_qs(account, sort, direction)
+    return [{"txn": t, "balance": _q_amount(t.balance_after)} for t in txns]
 
 
 def contribution_summary(account) -> list[dict]:

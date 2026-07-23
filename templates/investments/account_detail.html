@@ -182,6 +182,8 @@
       <div class="stack stack-20">
         <div class="between">
           <span class="eyebrow">Transactions</span>
+          <span class="row">
+          {% if register.total %}<c-button href="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/register.csv?sort={{ register.sort }}&dir={{ register.direction }}" size="sm" variant="ghost"><c-icon name="download" size="sm" /> Export CSV</c-button>{% endif %}
           <c-modal title="Add transaction" class="modal-wide">
             <c-slot name="trigger"><c-button variant="primary" size="sm"><c-icon name="plus" size="sm" /> Add transaction</c-button></c-slot>
             <form method="post" action="{{ ui_tenant_url }}investments/accounts/{{ account.pk }}/txns/new/"
@@ -194,6 +196,7 @@
               </div>
             </form>
           </c-modal>
+          </span>
         </div>
 
         {% if limit_status %}

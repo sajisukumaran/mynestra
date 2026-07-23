@@ -4,6 +4,7 @@ Holdings / Register / Holders / History tab set, a holding drill-down (open lots
 master, and popup (c-modal) forms. Every money movement posts to the ledger through
 apps.investments.services; this layer only reads POST, calls the service, and redirects."""
 
+import csv
 import datetime
 import json
 from decimal import Decimal, InvalidOperation
@@ -11,8 +12,10 @@ from decimal import Decimal, InvalidOperation
 from django.contrib import messages
 from django.core.paginator import Paginator
 from django.db.models import Q
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.dateparse import parse_date
+from django.utils.text import slugify
 
 from apps.contacts.models import Address, Person
 from apps.finance.models import Account, Currency
@@ -61,6 +64,7 @@ from apps.investments.services import (
     institution_row,
     institution_summary,
     line_chart_points,
+    register_export_rows,
     register_page,
     remove_transaction,
     repool_security,
@@ -616,6 +620,78 @@ def account_detail(request, pk):
         perf_headers=perf_headers,
     )
     return render(request, "investments/account_detail.html", ctx)
+
+
+def _csv_num(value, *, blank_zero=True) -> str:
+    """A decimal for a CSV cell: fixed-point (never scientific), trailing zeros trimmed.
+    `blank_zero` (default) leaves detail columns (quantity/price) empty when zero; money columns
+    pass False so a real 0 shows."""
+    if value is None:
+        return ""
+    d = Decimal(value)
+    if blank_zero and d == 0:
+        return ""
+    s = f"{d:f}"
+    return s.rstrip("0").rstrip(".") if "." in s else s
+
+
+def _register_counterparty(txn) -> str:
+    """The 'other side' of a register row for the export — the tracked bank / investment account,
+    an external label, or the payee — mirroring the register's Details line."""
+    if txn.counter_account_id:
+        return txn.counter_account.nickname
+    if txn.counter_investment_account_id:
+        return txn.counter_investment_account.nickname
+    if txn.counter_external:
+        return txn.counter_external
+    if txn.payee:
+        return str(txn.payee)
+    return ""
+
+
+def account_register_csv(request, pk):
+    """Download the account's full register (every transaction, not just the visible page) as CSV,
+    in the same display order the Register tab is currently sorted by. Read-only; each row carries
+    its chronological running cash balance."""
+    account = get_object_or_404(
+        InvestmentAccount.objects.select_related("currency"), pk=pk
+    )
+    rows = register_export_rows(
+        account,
+        sort=request.GET.get("sort", "date"),
+        direction=request.GET.get("dir", "desc"),
+    )
+    filename = f"{slugify(account.nickname) or f'account-{pk}'}-register.csv"
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    response.write("\ufeff")  # UTF-8 BOM so Excel opens it correctly
+    writer = csv.writer(response)
+    writer.writerow([
+        "Date", "Type", "Security", "Symbol", "Counterparty", "Quantity", "Price",
+        "Amount", "Fee", "Realized gain", "Cash", "Balance", "Cleared", "Settlement date",
+        "Memo", "Reference",
+    ])
+    for r in rows:
+        t = r["txn"]
+        writer.writerow([
+            t.date.isoformat(),
+            t.type_label,
+            t.security.display if t.security_id else "",
+            t.security.symbol if t.security_id else "",
+            _register_counterparty(t),
+            _csv_num(t.quantity),
+            _csv_num(t.price),
+            _csv_num(t.amount, blank_zero=False),
+            _csv_num(t.fee),
+            _csv_num(t.realized_gain),
+            _csv_num(t.signed_cash, blank_zero=False),
+            _csv_num(r["balance"], blank_zero=False),
+            "Yes" if t.cleared else "No",
+            t.settlement_date.isoformat() if t.settlement_date else "",
+            t.memo,
+            t.reference,
+        ])
+    return response
 
 
 def _bank_accounts():

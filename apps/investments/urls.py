@@ -15,6 +15,7 @@ urlpatterns = [
     path("accounts/<int:pk>/edit/", views.account_edit, name="account-edit"),
     path("accounts/<int:pk>/delete/", views.account_delete, name="account-delete"),
     path("accounts/<int:pk>/holdings/<int:sec>/", views.holding_detail, name="holding-detail"),
+    path("accounts/<int:pk>/register.csv", views.account_register_csv, name="register-csv"),
     path("accounts/<int:pk>/txns/new/", views.txn_create, name="txn-create"),
     path("accounts/<int:pk>/txns/<int:tx>/edit/", views.txn_edit, name="txn-edit"),
     path("accounts/<int:pk>/txns/<int:tx>/delete/", views.txn_delete, name="txn-delete"),
