@@ -43,6 +43,7 @@
     } else if (t === 'split') {
       if (!s.security) return 'Pick a security.';
       if (num(s.ratioNew) <= 0 || num(s.ratioOld) <= 0) return 'Enter the split ratio — both sides above 0.';
+      if (num(s.fee) < 0) return 'Fee cannot be negative.';
     } else if (t === 'merger' || t === 'spinoff') {
       if (!s.security) return 'Pick the original security (X).';
       if (num(s.ratioNew) <= 0 || num(s.ratioOld) <= 0) return 'Enter the share ratio — both sides above 0.';

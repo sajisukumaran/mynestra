@@ -1078,8 +1078,15 @@ def _lines_for(txn) -> list[LineInput]:
             contra = resolve_posting_account(acct, "fee_expense", INVEST_FEES)
             lines += [line(contra, debit=fee), line(gl, credit=fee)]
         return lines
+    if t == InvTxnType.SPLIT:
+        # Cash-neutral (quantities change, basis unchanged) except an optional reorg fee, which is
+        # expensed to investment fees — its cash already left via signed_cash.
+        fee = _q_amount(txn.fee)
+        if fee > ZERO:
+            contra = resolve_posting_account(acct, "fee_expense", INVEST_FEES)
+            return [line(contra, debit=fee), line(gl, credit=fee)]
+        return []
     if t in (InvTxnType.BUY, InvTxnType.SELL_SHORT,
-             InvTxnType.SPLIT,
              InvTxnType.OPT_BUY_OPEN, InvTxnType.OPT_SELL_OPEN):
         # Cost-neutral: cash and total cost basis move equal-and-opposite, so nothing posts.
         # SELL_SHORT / OPT_SELL_OPEN mirror BUY — proceeds in via `signed_cash`, offset by a

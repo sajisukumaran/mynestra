@@ -215,6 +215,33 @@ def test_cash_and_stock_merger_fee_is_expensed_and_nets_cash(make_tenant):
         assert _inv(acct)
 
 
+# --- Split with a reorg fee ------------------------------------------------------------------
+
+def test_split_with_fee_expenses_fee_and_is_otherwise_cash_neutral(make_tenant):
+    """A reorg fee entered on a split is expensed to investment fees and paid out of the account;
+    the split itself stays cash-neutral (quantities change by the ratio, basis unchanged). Invariant
+    holds exactly."""
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        s = _sec("FTR")
+        _add(acct, InvTxnType.OPENING, JAN, amount="1000")
+        _add(acct, InvTxnType.BUY, FEB, security=s, qty="30", price="20", amount="600")
+        gl_before = account_balance(acct.gl_account)
+
+        # 1-for-15 reverse split + a $12 reorg fee, in one transaction.
+        sp = _add(acct, InvTxnType.SPLIT, MAR, security=s,
+                  split_ratio_new=D("1"), split_ratio_old=D("15"), fee="12")
+
+        lot = _open(acct, s)[0]
+        assert lot.remaining_quantity == D("2")       # 30 × 1/15
+        assert lot.cost_basis == D("600")             # basis unchanged
+        assert sp.realized_gain == D("0")
+        acct.refresh_from_db()
+        assert cash_balance(acct) == D("388")         # 1000 − 600 buy − 12 fee
+        assert account_balance(acct.gl_account) == gl_before - D("12")  # gl moves by the fee only
+        assert _inv(acct)
+
+
 # --- Spin-off --------------------------------------------------------------------------------
 
 def test_spinoff_allocates_basis_to_new_security(make_tenant):
@@ -359,6 +386,42 @@ def test_cash_and_stock_merger_via_views_hts_to_nly_statement(make_tenant, make_
         acct.refresh_from_db()
         # 2000 − 630 buy + 233.10 boot + 6.07 cash-in-lieu − 20 fee = 1589.17
         assert abs(cash_balance(acct) - D("1589.17")) <= D("0.01")
+        drift = account_balance(acct.gl_account) - (cash_balance(acct) + cost_basis(acct))
+        assert abs(drift) <= D("0.01")
+
+
+def test_reverse_split_with_fee_via_views_ftr_statement(make_tenant, make_user, client):
+    """The FTR 1-for-15 reverse split from a statement: the reverse split AND the mandatory reorg
+    fee in ONE split transaction (all the same-day lines), then the fractional cash-in-lieu as its
+    own later-dated row. Lands on whole shares, the fee is expensed, and the invariant holds to the
+    cent (a fractional cash-in-lieu carries sub-cent basis)."""
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        acct = _account(org=_brokerage())
+        ftr = _sec("FTR", "Frontier Communications")
+        # Opening + buy dated before the 2017-07-10 reorg so the split acts on held shares.
+        _add(acct, InvTxnType.OPENING, datetime.date(2017, 1, 2), amount="2000")
+        _add(acct, InvTxnType.BUY, datetime.date(2017, 2, 2), security=ftr,
+             qty="16", price="50", amount="800")
+        aid, fid = acct.pk, ftr.pk
+    client.force_login(owner)
+    # Reverse split 1-for-15 + the $38 mandatory reorg fee — one transaction.
+    r1 = client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "split", "date": "2017-07-10", "security": fid,
+        "split_ratio_new": "1", "split_ratio_old": "15", "fee": "38"})
+    assert r1.status_code == 302
+    # Fractional-share cash-in-lieu (0.06666 share) for $0.90, a week later.
+    client.post(_url(tenant, f"accounts/{aid}/txns/new/"), {
+        "txn_type": "cash_in_lieu", "date": "2017-07-17", "security": fid,
+        "quantity": "0.06666", "amount": "0.90"})
+    with schema_context(tenant.schema_name):
+        sp = InvestmentTransaction.objects.get(account_id=aid, txn_type="split")
+        assert sp.fee == D("38") and sp.realized_gain == D("0")
+        held = next(h.quantity for h in holdings(acct) if h.security.id == fid)
+        assert abs(held - D("1")) <= D("0.0001")       # 16/15 = 1.0667, less the 0.06666 fraction
+        acct.refresh_from_db()
+        # 2000 − 800 buy − 38 fee + 0.90 cash-in-lieu = 1162.90
+        assert abs(cash_balance(acct) - D("1162.90")) <= D("0.01")
         drift = account_balance(acct.gl_account) - (cash_balance(acct) + cost_basis(acct))
         assert abs(drift) <= D("0.01")
 

@@ -823,6 +823,8 @@ class InvestmentTransaction(SoftDeleteModel):
             # Sale / cash-in-lieu / short / option-write proceeds come in; MERGER = the cash-and-
             # stock boot net of any reorg fee (`amount − fee`; both 0 for a plain stock merger).
             return self.net_proceeds
+        if t == InvTxnType.SPLIT:
+            return -self.fee  # cash-neutral but for an optional reorg fee paid out of the account
         if t in (InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN):
             # Cash = strike × shares (self.amount). Exercising a long PUT or being assigned on a
             # written CALL SELLS the underlying (cash in); the mirror cases BUY it (cash out).
@@ -832,7 +834,7 @@ class InvestmentTransaction(SoftDeleteModel):
                 or (t == InvTxnType.OPT_ASSIGN and right == OptionRight.CALL)
             )
             return self.net_proceeds if cash_in else -(self.amount + self.fee)
-        # DIVIDEND_REINVEST, SPLIT, in-kind, WORTHLESS and OPT_EXPIRE are cash-neutral.
+        # DIVIDEND_REINVEST, in-kind, WORTHLESS and OPT_EXPIRE are cash-neutral.
         return ZERO
 
     @property
@@ -906,13 +908,14 @@ def signed_cash_sql():
                           InvTxnType.MERGER, InvTxnType.OPT_SELL_OPEN, InvTxnType.OPT_SELL_CLOSE),
             then=amount - fee,  # net proceeds (MERGER = cash boot net of the reorg fee)
         ),
+        models.When(txn_type=InvTxnType.SPLIT, then=-fee),  # only an optional reorg fee moves cash
         models.When(txn_type=InvTxnType.OPT_EXERCISE, security__option_right=OptionRight.PUT,
                     then=amount - fee),
         models.When(txn_type=InvTxnType.OPT_ASSIGN, security__option_right=OptionRight.CALL,
                     then=amount - fee),
         models.When(txn_type__in=(InvTxnType.OPT_EXERCISE, InvTxnType.OPT_ASSIGN),
                     then=-(amount + fee)),
-        # DIVIDEND_REINVEST, SPLIT, in-kind, WORTHLESS, OPT_EXPIRE — cash-neutral.
+        # DIVIDEND_REINVEST, in-kind, WORTHLESS, OPT_EXPIRE — cash-neutral.
         default=models.Value(ZERO),
         output_field=models.DecimalField(
             max_digits=AMOUNT_MAX_DIGITS, decimal_places=AMOUNT_DECIMALS

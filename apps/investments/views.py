@@ -885,7 +885,7 @@ def _apply_txn_post(request, txn):
     txn.amount = amount
     txn.fee = fee if t in (InvTxnType.BUY, InvTxnType.SELL, InvTxnType.FEE,
                            InvTxnType.SELL_SHORT, InvTxnType.BUY_TO_COVER,
-                           InvTxnType.MERGER) else Decimal("0")
+                           InvTxnType.MERGER, InvTxnType.SPLIT) else Decimal("0")
     txn.quantity = quantity
     txn.price = price
     txn.security = security
@@ -900,6 +900,7 @@ def _apply_txn_post(request, txn):
     if t == InvTxnType.SPLIT:
         txn.split_ratio_new = _decimal(request.POST.get("split_ratio_new"))
         txn.split_ratio_old = _decimal(request.POST.get("split_ratio_old"))
+        txn.amount = txn.quantity = txn.price = Decimal("0")  # a split has no cash amount, only fee
         if not (txn.split_ratio_new and txn.split_ratio_old
                 and txn.split_ratio_new > 0 and txn.split_ratio_old > 0):
             return None
