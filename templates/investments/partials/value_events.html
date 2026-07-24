@@ -1,0 +1,41 @@
+{% load money %}
+{% comment %}Click-to-drill panel for a value-chart point: the clicked date's transactions (across all
+accounts) + security price marks recorded that day, biggest $ impact first. Loaded via htmx into
+#value-events. `events` = services.value_events_on(date). Read-only — surfaces the cause of a spike.{% endcomment %}
+<div class="value-events-panel">
+  <div class="row items-center" style="justify-content:space-between; gap:8px;">
+    <h4 class="strong">Activity on {{ events.date|date:"j M Y" }}</h4>
+    <c-button variant="ghost" size="sm" @click="document.getElementById('value-events').innerHTML=''"><c-icon name="x" size="sm" /> Close</c-button>
+  </div>
+  {% if events.txns or events.prices %}
+  <div class="grid-2">
+    <div class="stack stack-8">
+      <p class="subtle">Transactions</p>
+      {% for t in events.txns %}
+      <c-rel-row name="{{ t.account.nickname }}" role="{{ t.type_label }}{% if t.security %} · {{ t.security.symbol }}{% endif %}" href="{{ ui_tenant_url }}investments/accounts/{{ t.account_id }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ t.account.group_tint }}" size="sm"><c-icon name="{{ t.type_glyph }}" size="sm" /></c-avatar></c-slot>
+        <c-slot name="tail">
+          <span class="{% if t.direction == 'in' %}amount-pos{% elif t.direction == 'out' %}amount-neg{% endif %}"><c-money :amount="t.amount" symbol="{{ t.account.currency.symbol }}" dp="{{ t.account.currency.decimal_places }}" grouping="{{ ui_number_format }}" /></span>
+        </c-slot>
+      </c-rel-row>
+      {% empty %}
+      <p class="muted">No transactions.</p>
+      {% endfor %}
+    </div>
+    <div class="stack stack-8">
+      <p class="subtle">Price updates <span class="subtle">(held securities)</span></p>
+      {% for p in events.prices %}
+      <c-rel-row name="{{ p.security.display }}"
+                 role="{% if p.prev != None %}{{ base.symbol }}{{ p.prev|moneyfmt:'2' }} → {% endif %}{{ base.symbol }}{{ p.price|moneyfmt:'2' }}{% if p.impact != None %} · impact {{ base.symbol }}{{ p.impact|moneyfmt:'0' }}{% endif %}"
+                 href="{{ ui_tenant_url }}investments/securities/{{ p.security.pk }}/">
+        <c-slot name="avatar"><c-avatar tint="{{ p.security.tint }}" size="sm" square><c-icon name="tag" size="sm" /></c-avatar></c-slot>
+      </c-rel-row>
+      {% empty %}
+      <p class="muted">No price changes for held securities.</p>
+      {% endfor %}
+    </div>
+  </div>
+  {% else %}
+  <c-empty-state icon="calendar-days" title="Nothing recorded" text="No transactions or price updates moved the portfolio value on this date." />
+  {% endif %}
+</div>

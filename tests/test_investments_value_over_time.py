@@ -30,6 +30,7 @@ from apps.investments.services import (
     line_chart_points,
     positions_as_of,
     price_as_of,
+    value_events_on,
     value_over_time,
 )
 from apps.organizations.models import Organization
@@ -280,6 +281,111 @@ def test_geometry_is_well_formed(make_tenant):
         assert len(geo["y_ticks"]) == 3 and len(geo["x_ticks"]) == 3
 
 
+# --- Range windows: new presets + custom from/to ---------------------------------------------
+
+def test_named_range_windows_anchor_at_the_right_start(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        a = _sec("AAA")
+        _add(acct, InvTxnType.OPENING, datetime.date(2019, 1, 2), amount="10000")
+        _add(acct, InvTxnType.BUY, datetime.date(2019, 2, 2), security=a,
+             qty="10", price="50", amount="500")
+
+        expected = {
+            "3M": TODAY - datetime.timedelta(days=90),
+            "6M": TODAY - datetime.timedelta(days=182),
+            "1Y": TODAY - datetime.timedelta(days=365),
+            "3Y": TODAY - datetime.timedelta(days=1096),
+            "5Y": TODAY - datetime.timedelta(days=1826),
+            "YTD": datetime.date(TODAY.year, 1, 1),
+        }
+        for key, start in expected.items():
+            vot = value_over_time(key, today=TODAY)
+            assert vot["start"] == start, key
+            assert vot["end"] == TODAY, key
+            assert vot["series"][0][0] == start, key       # anchored at the window start
+            assert vot["series"][-1][0] == TODAY, key
+
+
+def test_invalid_range_falls_back_to_1y(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        _add(acct, InvTxnType.OPENING, datetime.date(2020, 1, 2), amount="10000")
+        vot = value_over_time("BOGUS", today=TODAY)
+        assert vot["range"] == "1Y"
+        assert vot["start"] == TODAY - datetime.timedelta(days=365)
+
+
+def test_custom_window_is_honored(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        a = _sec("AAA")
+        _add(acct, InvTxnType.OPENING, datetime.date(2025, 1, 2), amount="10000")
+        _add(acct, InvTxnType.BUY, datetime.date(2025, 3, 2), security=a,
+             qty="10", price="50", amount="500")
+        _price(a, datetime.date(2025, 4, 2), "70")
+
+        start, end = datetime.date(2025, 2, 1), datetime.date(2025, 5, 1)  # end < TODAY on purpose
+        vot = value_over_time("1Y", today=TODAY, window_start=start, window_end=end)
+        assert vot["start"] == start
+        assert vot["end"] == end
+        assert vot["series"][0][0] == start
+        assert vot["series"][-1][0] == end                 # ends at the custom end, not today
+
+
+def test_custom_end_before_start_collapses_cleanly(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        _add(acct, InvTxnType.OPENING, datetime.date(2025, 1, 2), amount="10000")
+        vot = value_over_time("ALL", today=TODAY,
+                              window_start=datetime.date(2025, 6, 1),
+                              window_end=datetime.date(2025, 3, 1))
+        assert vot["start"] == vot["end"] == datetime.date(2025, 3, 1)
+        assert len(vot["series"]) == 1                      # no crash, single clean point
+
+
+# --- Click-to-drill events (value_events_on) -------------------------------------------------
+
+def test_value_events_on_returns_txns_and_priced_impact(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        a = _sec("AAA")
+        _add(acct, InvTxnType.OPENING, JAN, amount="10000")
+        _add(acct, InvTxnType.BUY, FEB, security=a, qty="10", price="50", amount="500")
+        _price(a, FEB, "50")                                 # prior mark
+        _price(a, MAR, "200")                                # spike: 10 × (200 − 50) = +1500
+        div = _add(acct, InvTxnType.DIVIDEND, MAR, security=a, amount="12")
+
+        ev = value_events_on(MAR)
+        assert ev["date"] == MAR
+        assert div in ev["txns"]
+        assert len(ev["prices"]) == 1
+        row = ev["prices"][0]
+        assert row["security"] == a
+        assert row["price"] == D("200")
+        assert row["prev"] == D("50")
+        assert row["delta"] == D("150")
+        assert row["impact"] == D("1500")
+
+
+def test_value_events_on_skips_unheld_and_posts_nothing(make_tenant):
+    with schema_context(make_tenant().schema_name):
+        acct = _account()
+        a, b = _sec("AAA"), _sec("BBB")                      # b is never held
+        _add(acct, InvTxnType.OPENING, JAN, amount="10000")
+        _add(acct, InvTxnType.BUY, FEB, security=a, qty="10", price="50", amount="500")
+        _price(b, MAR, "99")                                 # a mark for an unheld security
+        gl_before = account_balance(acct.gl_account)
+        entries_before = JournalEntry.objects.count()
+        lots_before = Lot.objects.count()
+
+        ev = value_events_on(MAR)
+        assert ev["prices"] == []                            # b isn't held → not shown
+        assert account_balance(acct.gl_account) == gl_before
+        assert JournalEntry.objects.count() == entries_before
+        assert Lot.objects.count() == lots_before
+
+
 # --- Dashboard card + htmx range fragment (the view uses the real clock) ----------------------
 
 def _owner(make_tenant, make_user, name="Bourse", email="owner@example.com"):
@@ -329,7 +435,66 @@ def test_value_over_time_fragment_switches_range(make_tenant, make_user, client)
     with schema_context(tenant.schema_name):
         _seed_history(_brokerage())
     client.force_login(owner)
-    for rng in ("3M", "1Y", "ALL"):
+    for rng in ("3M", "6M", "YTD", "1Y", "3Y", "5Y", "ALL"):
         resp = client.get(_url(tenant, "value-over-time/") + f"?range={rng}")
         assert resp.status_code == 200
         assert 'id="value-chart"' in resp.content.decode()
+
+
+def test_value_over_time_fragment_custom_window(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _seed_history(_brokerage())
+    client.force_login(owner)
+    t = datetime.date.today()
+    start = (t - datetime.timedelta(days=120)).isoformat()
+    end = (t - datetime.timedelta(days=10)).isoformat()
+    resp = client.get(_url(tenant, "value-over-time/") + f"?start={start}&end={end}")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert 'id="value-chart"' in body
+    assert start in body and end in body                 # custom inputs prefilled via x-data
+
+
+def test_dashboard_chart_carries_hover_payload(make_tenant, make_user, client):
+    import html as html_
+    import json as json_
+    import re
+
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _seed_history(_brokerage())
+    client.force_login(owner)
+    body = client.get(_url(tenant, "")).content.decode()
+    assert "chart-plot" in body                          # interactive overlay is present
+    m = re.search(r'data-points="([^"]*)"', body)
+    assert m
+    pts = json_.loads(html_.unescape(m.group(1)))
+    assert len(pts) >= 2
+    assert [p["x"] for p in pts] == sorted(p["x"] for p in pts)   # x ascending
+    for p in pts:
+        assert set(p) >= {"x", "ym", "yi", "iso", "d", "m", "i", "g"}
+    assert pts[0]["m"].startswith("$")                   # preformatted money string
+
+
+def test_value_events_fragment_lists_the_day(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _seed_history(_brokerage())
+    client.force_login(owner)
+    buy_date = (datetime.date.today() - datetime.timedelta(days=150)).isoformat()
+    resp = client.get(_url(tenant, "value-events/") + f"?on={buy_date}")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+    assert "Activity on" in body
+    assert "AAA" in body                                 # the buy of AAA that day
+
+
+def test_value_events_fragment_blank_without_a_date(make_tenant, make_user, client):
+    tenant, owner = _owner(make_tenant, make_user)
+    with schema_context(tenant.schema_name):
+        _seed_history(_brokerage())
+    client.force_login(owner)
+    resp = client.get(_url(tenant, "value-events/"))
+    assert resp.status_code == 200
+    assert resp.content.decode().strip() == ""

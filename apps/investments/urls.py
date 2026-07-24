@@ -59,6 +59,7 @@ urlpatterns = [
     path("securities/<int:pk>/delete/", views.security_delete, name="security-delete"),
     # htmx fragments
     path("value-over-time/", views.value_over_time_fragment, name="value-over-time"),
+    path("value-events/", views.value_events, name="value-events"),
     path("payee-search/", views.payee_search, name="payee-search"),
     path("accounts/holder-search/", views.holder_search, name="holder-search"),
     path("branch-options/", views.branch_options, name="branch-options"),

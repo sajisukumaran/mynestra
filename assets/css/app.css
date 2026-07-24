@@ -467,6 +467,31 @@ img { max-width:100%; display:block; }
 .chart-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
 .chart-market { stroke:var(--accent); }
 .chart-invested { stroke:var(--text-subtle); stroke-dasharray:4 3; }
+/* Value chart interactivity (opt-in overlay on c-line-chart): a cursor guide + markers + tooltip,
+   and a from/to custom-range control. Positions map viewBox units 1:1 to the fixed 200px plot. */
+.chart-plot { position:relative; }
+.chart-plot.is-clickable { cursor:pointer; }
+.chart-guide { position:absolute; top:0; bottom:0; width:1px; background:var(--border-strong);
+  transform:translateX(-.5px); pointer-events:none; }
+.chart-marker { position:absolute; width:9px; height:9px; border-radius:50%;
+  transform:translate(-50%,-50%); pointer-events:none; box-shadow:0 0 0 2px var(--surface); }
+.chart-marker-market { background:var(--accent); }
+.chart-marker-invested { background:var(--text-subtle); }
+.chart-tip { position:absolute; top:2px; z-index:3; pointer-events:none; min-width:150px;
+  display:flex; flex-direction:column; gap:3px; padding:8px 10px; transform:translateX(8px);
+  border-radius:var(--radius-sm); background:var(--surface); border:1px solid var(--border);
+  box-shadow:var(--shadow); font-size:var(--fs-xs); color:var(--text-muted); }
+.chart-tip.is-left { transform:translateX(-100%) translateX(-8px); }
+.chart-tip-date { font-weight:600; color:var(--text); }
+.chart-tip-row { display:flex; align-items:center; gap:6px; }
+.chart-tip-row b { margin-left:auto; color:var(--text); font-variant-numeric:tabular-nums; }
+.chart-tip-gain { text-align:right; font-variant-numeric:tabular-nums; }
+.chart-range-custom { display:inline-flex; align-items:center; gap:6px; }
+.chart-date { height:30px; padding:0 8px; }
+.chart-date input { font-size:var(--fs-sm); color:var(--text); }
+.value-events:empty { display:none; }
+.value-events-panel { display:flex; flex-direction:column; gap:10px; padding:12px 14px;
+  border:1px solid var(--border); border-radius:var(--radius-md); background:var(--surface-2); }
 /* Loan paydown chart: a single balance line (solid = to date, dashed = projected payoff). */
 .chart-dot-actual { background:var(--accent); }
 .chart-dot-projected { background:var(--accent); opacity:.55; }

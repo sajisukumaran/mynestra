@@ -1,11 +1,16 @@
 <c-vars geo="" market="" invested="" gain="" symbol="" dp="0" grouping="thousands"
-        market_label="Market" invested_label="Invested"
+        market_label="Market" invested_label="Invested" points="" events_url=""
         empty_text="Not enough history yet" class="" />
 {% comment %}Server-rendered SVG value-over-time chart. `geo` = services.line_chart_points(...):
 precomputed polyline point strings, a closed gain-band path, gridline/axis ticks and a viewBox.
-`market`/`invested`/`gain` are the latest figures for the legend. No JS — all geometry is
-precomputed; strokes use non-scaling-stroke so the line width stays even when the SVG stretches to
-the card width. Colours: market = --accent, invested = --text-subtle, gain band = --accent-soft.
+`market`/`invested`/`gain` are the latest figures for the legend. Geometry is precomputed; strokes
+use non-scaling-stroke so the line width stays even when the SVG stretches to the card width.
+Colours: market = --accent, invested = --text-subtle, gain band = --accent-soft.
+
+Interactivity is OPT-IN and adds no cost for callers that skip it: pass `points` (a json.dumps'd
+hover payload — see views._hover_points) to overlay a cursor tooltip; additionally pass `events_url`
+to make points clickable (htmx-loads that date's events into #value-events). Omit `points` and the
+markup is exactly the static chart (automobile / realestate / styleguide callers are unaffected).
 {% endcomment %}
 <div class="chart{% if class %} {{ class }}{% endif %}" {{ attrs }}>
   {% if geo.points|length > 1 %}
@@ -17,12 +22,34 @@ the card width. Colours: market = --accent, invested = --text-subtle, gain band 
     <span class="chart-key ml-auto {% if gain >= 0 %}amount-pos{% else %}amount-neg{% endif %}">
       <c-money :amount="gain" symbol="{{ symbol }}" dp="{{ dp }}" grouping="{{ grouping }}" /></span>
   </div>
+  {% if points %}
+  <div class="chart-plot{% if events_url %} is-clickable{% endif %}" x-data="votChart"
+       data-points="{{ points }}" data-vbw="{{ geo.width }}" data-events-url="{{ events_url }}"
+       @mousemove="move($event)" @mouseleave="hide()"{% if events_url %} @click="drill()"{% endif %}>
+    <svg class="chart-svg" viewBox="{{ geo.view_box }}" preserveAspectRatio="none" aria-hidden="true">
+      {% for t in geo.y_ticks %}<line class="chart-grid" x1="0" y1="{{ t.y }}" x2="{{ geo.width }}" y2="{{ t.y }}" vector-effect="non-scaling-stroke" />{% endfor %}
+      <path class="chart-area" d="{{ geo.gain_area_d }}" />
+      <polyline class="chart-line chart-invested" points="{{ geo.invested_points }}" vector-effect="non-scaling-stroke" />
+      <polyline class="chart-line chart-market" points="{{ geo.market_points }}" vector-effect="non-scaling-stroke" />
+    </svg>
+    <div class="chart-guide" x-show="hovered" :style="`left:${pct}%`" x-cloak></div>
+    <div class="chart-marker chart-marker-invested" x-show="hovered" :style="`left:${pct}%;top:${pt.yi}px`" x-cloak></div>
+    <div class="chart-marker chart-marker-market" x-show="hovered" :style="`left:${pct}%;top:${pt.ym}px`" x-cloak></div>
+    <div class="chart-tip" x-show="hovered" :class="{ 'is-left': pct > 55 }" :style="`left:${pct}%`" x-cloak>
+      <div class="chart-tip-date" x-text="pt.d"></div>
+      <div class="chart-tip-row"><span class="chart-dot chart-dot-market"></span>{{ market_label }}<b x-text="pt.m"></b></div>
+      <div class="chart-tip-row"><span class="chart-dot chart-dot-invested"></span>{{ invested_label }}<b x-text="pt.i"></b></div>
+      <div class="chart-tip-gain" x-text="pt.g"></div>
+    </div>
+  </div>
+  {% else %}
   <svg class="chart-svg" viewBox="{{ geo.view_box }}" preserveAspectRatio="none" aria-hidden="true">
     {% for t in geo.y_ticks %}<line class="chart-grid" x1="0" y1="{{ t.y }}" x2="{{ geo.width }}" y2="{{ t.y }}" vector-effect="non-scaling-stroke" />{% endfor %}
     <path class="chart-area" d="{{ geo.gain_area_d }}" />
     <polyline class="chart-line chart-invested" points="{{ geo.invested_points }}" vector-effect="non-scaling-stroke" />
     <polyline class="chart-line chart-market" points="{{ geo.market_points }}" vector-effect="non-scaling-stroke" />
   </svg>
+  {% endif %}
   <div class="chart-axis">
     {% for t in geo.x_ticks %}<span>{{ t.date|date:"M Y" }}</span>{% endfor %}
   </div>

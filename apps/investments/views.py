@@ -18,6 +18,7 @@ from django.utils.dateparse import parse_date
 from django.utils.text import slugify
 
 from apps.contacts.models import Address, Person
+from apps.core.templatetags.money import moneyfmt
 from apps.finance.models import Account, Currency
 from apps.finance.models import AccountType as GLType
 from apps.finance.services import (
@@ -73,6 +74,7 @@ from apps.investments.services import (
     transfer_totals,
     unvested_at_risk_total,
     upcoming_vesting,
+    value_events_on,
     value_over_time,
     vesting_summary,
 )
@@ -177,27 +179,75 @@ def _decimal(raw):
 
 # --- Dashboard ------------------------------------------------------------------------------
 
-VALUE_RANGES = [("3M", "3M"), ("1Y", "1Y"), ("ALL", "All")]
+VALUE_RANGES = [
+    ("3M", "3M"), ("6M", "6M"), ("YTD", "YTD"),
+    ("1Y", "1Y"), ("3Y", "3Y"), ("5Y", "5Y"), ("ALL", "All"),
+]
 
 
-def _value_chart_ctx(request, range_key):
+def _hover_points(request, geo):
+    """Compact per-point payload for the chart's hover overlay: SVG x + the two y's, the ISO date
+    (for the click-to-drill request), a display date, and preformatted money strings so the tooltip
+    reads like the rest of the chart. json.dumps-ready."""
+    sym = base_currency().symbol
+    grouping = getattr(getattr(request, "tenant", None), "number_format", "") or "thousands"
+
+    def money(v):
+        return f"{sym}{moneyfmt(v, f'0:{grouping}')}"
+
+    def signed(v):
+        return f"{'-' if v < 0 else '+'}{sym}{moneyfmt(abs(v), f'0:{grouping}')}"
+
+    rows = []
+    for p in geo["points"]:
+        rows.append({
+            "x": p["x"], "ym": p["y_mkt"], "yi": p["y_inv"],
+            "iso": p["date"].isoformat(),
+            "d": f"{p['date'].day} {p['date'].strftime('%b %Y')}",
+            "m": money(p["market"]), "i": money(p["invested"]),
+            "g": signed(p["market"] - p["invested"]),
+        })
+    return rows
+
+
+def _value_chart_ctx(request, range_key, *, window_start=None, window_end=None):
     """Context for the value-over-time chart (shared by the dashboard + the htmx range fragment)."""
-    vot = value_over_time(range_key)
+    vot = value_over_time(range_key, window_start=window_start, window_end=window_end)
     geo = line_chart_points(
         vot["series"], min_v=vot["min"], max_v=vot["max"], start=vot["start"], end=vot["end"]
     )
+    is_custom = window_start is not None or window_end is not None
     return {
-        "ranges": VALUE_RANGES, "range": vot["range"], "line_geo": geo,
+        "ranges": VALUE_RANGES, "range": "" if is_custom else vot["range"], "line_geo": geo,
         "line_market": vot["last_market"], "line_invested": vot["last_invested"],
         "line_gain": vot["gain"], "base": base_currency(),
+        "hover_json": json.dumps(_hover_points(request, geo)),
+        "is_custom": is_custom,
+        "custom_start": vot["start"].isoformat() if is_custom else "",
+        "custom_end": vot["end"].isoformat() if is_custom else "",
     }
 
 
 def value_over_time_fragment(request):
-    """htmx fragment: the value chart re-rendered for the chosen range (3M / 1Y / All)."""
-    range_key = request.GET.get("range", "1Y")
-    return render(request, "investments/partials/value_chart.html",
-                  _value_chart_ctx(request, range_key))
+    """htmx fragment: the value chart re-rendered for the chosen preset range, or a custom from/to
+    window when both `start` and `end` parse as valid dates (with start ≤ end)."""
+    start = parse_date(request.GET.get("start", "") or "")
+    end = parse_date(request.GET.get("end", "") or "")
+    if start and end and start <= end:
+        ctx = _value_chart_ctx(request, "ALL", window_start=start, window_end=end)
+    else:
+        ctx = _value_chart_ctx(request, request.GET.get("range", "1Y"))
+    return render(request, "investments/partials/value_chart.html", ctx)
+
+
+def value_events(request):
+    """htmx fragment: the drill panel for a clicked chart point — that date's transactions and
+    security-price changes. Read-only."""
+    on = parse_date(request.GET.get("on", "") or "")
+    if on is None:
+        return HttpResponse("")
+    return render(request, "investments/partials/value_events.html",
+                  {"events": value_events_on(on), "base": base_currency()})
 
 
 def dashboard(request):

@@ -2186,19 +2186,24 @@ def positions_as_of(account, on_date) -> tuple:
     return position_snapshots(account, [on_date])[on_date]
 
 
-_RANGE_DAYS = {"3M": 90, "1Y": 365}
+_RANGE_DAYS = {"3M": 90, "6M": 182, "1Y": 365, "3Y": 1096, "5Y": 1826}
+_VALID_RANGES = frozenset({"3M", "6M", "YTD", "1Y", "3Y", "5Y", "ALL"})
 
 
-def value_over_time(range_key: str = "1Y", *, accounts=None, today=None) -> dict:
-    """Portfolio value time series over a range (3M / 1Y / ALL), summed across `accounts`. Returns
-    two lines evaluated at each event date (txn or price change): INVESTED = cash + Σ open-lot cost,
+def value_over_time(range_key: str = "1Y", *, accounts=None, today=None,
+                    window_start=None, window_end=None) -> dict:
+    """Portfolio value time series over a range, summed across `accounts`. Returns two lines
+    evaluated at each event date (txn or price change): INVESTED = cash + Σ open-lot cost,
     MARKET = cash + Σ (qty × carry-forward price, or cost when unpriced). Both share the same cash,
     so their gap is unrealized gain. Base==native currency assumed (as elsewhere in the module).
+
+    The window is either a named `range_key` (3M / 6M / YTD / 1Y / 3Y / 5Y / ALL) ending at `today`,
+    or an explicit `window_start` / `window_end` custom range (the end defaults to `today`).
 
     Purely computed and read-only — reconstructs holdings via the MemLotStore replay; posts nothing.
     """
     today = today or datetime.date.today()
-    range_key = range_key if range_key in ("3M", "1Y", "ALL") else "1Y"
+    range_key = range_key if range_key in _VALID_RANGES else "1Y"
     if accounts is None:
         accounts = list(InvestmentAccount.objects.all())
 
@@ -2211,33 +2216,40 @@ def value_over_time(range_key: str = "1Y", *, accounts=None, today=None) -> dict
                 held.add(sid)
             earliest = d if earliest is None or d < earliest else earliest
 
-    if earliest is None:  # empty portfolio — a single flat point at today
+    end = window_end or today
+
+    if earliest is None:  # empty portfolio — a single flat point at the window end
         return {
-            "range": range_key, "start": today, "end": today,
-            "series": [(today, ZERO, ZERO)], "min": ZERO, "max": ZERO,
+            "range": range_key, "start": end, "end": end,
+            "series": [(end, ZERO, ZERO)], "min": ZERO, "max": ZERO,
             "last_invested": ZERO, "last_market": ZERO, "gain": ZERO,
         }
 
-    if range_key == "ALL":
+    if window_start is not None:
+        start = window_start
+    elif range_key == "ALL":
         start = earliest
+    elif range_key == "YTD":
+        start = datetime.date(end.year, 1, 1)
     else:
-        start = today - datetime.timedelta(days=_RANGE_DAYS[range_key])
+        start = end - datetime.timedelta(days=_RANGE_DAYS[range_key])
+    start = min(start, end)  # a custom end before the start (or before any activity) collapses cleanly
 
-    # Event dates = txn dates + price-change dates within [start, today], + start anchor + today.
-    dates: set[datetime.date] = {start, today}
+    # Event dates = txn dates + price-change dates within [start, end], + start anchor + end.
+    dates: set[datetime.date] = {start, end}
     for acct in accounts:
         for d in acct.transactions.filter(
-            date__gte=start, date__lte=today
+            date__gte=start, date__lte=end
         ).values_list("date", flat=True):
             dates.add(d)
     if held:
         for d in SecurityPrice.objects.filter(
-            security_id__in=held, as_of__gte=start, as_of__lte=today
+            security_id__in=held, as_of__gte=start, as_of__lte=end
         ).values_list("as_of", flat=True):
             dates.add(d)
-    event_dates = sorted(d for d in dates if start <= d <= today)
+    event_dates = sorted(d for d in dates if start <= d <= end)
 
-    carry = PriceCarry(held, up_to=today)
+    carry = PriceCarry(held, up_to=end)
     per_account = [position_snapshots(acct, event_dates) for acct in accounts]
 
     series: list[tuple] = []
@@ -2258,11 +2270,56 @@ def value_over_time(range_key: str = "1Y", *, accounts=None, today=None) -> dict
     vals = [v for _, inv, mkt in series for v in (inv, mkt)]
     last = series[-1]
     return {
-        "range": range_key, "start": start, "end": today, "series": series,
+        "range": range_key, "start": start, "end": end, "series": series,
         "min": min(vals), "max": max(vals),
         "last_invested": last[1], "last_market": last[2],
         "gain": _q_amount(last[2] - last[1]),
     }
+
+
+def value_events_on(on, *, accounts=None) -> dict:
+    """Read-only drill: what happened on `on` that could move the value lines — every transaction
+    across `accounts` that date, plus each price mark recorded that date for a security held that
+    day, with its prior mark and $ impact (held qty × price delta) so the biggest mover sorts first.
+    Reconstructs holdings via the MemLotStore replay; posts nothing."""
+    if accounts is None:
+        accounts = list(InvestmentAccount.objects.all())
+
+    txns = list(
+        InvestmentTransaction.objects.filter(date=on)
+        .select_related("account", "security")
+        .order_by("account__nickname", "id")
+    )
+
+    # Net held quantity per security across all accounts, as of `on` (same replay as the series).
+    held_qty: dict[int, Decimal] = {}
+    for acct in accounts:
+        _cash, positions = positions_as_of(acct, on)
+        for sid, (qty, _cost) in positions.items():
+            held_qty[sid] = held_qty.get(sid, ZERO) + qty
+
+    prices = []
+    price_rows = list(
+        SecurityPrice.objects.filter(as_of=on).select_related("security")
+    )
+    if price_rows:
+        prev_day = on - datetime.timedelta(days=1)
+        carry = PriceCarry([p.security_id for p in price_rows], up_to=prev_day)
+        for p in price_rows:
+            qty = held_qty.get(p.security_id, ZERO)
+            if qty == 0:
+                continue  # a mark for something not held that day never moved the line
+            prev = carry.price_at(p.security_id, prev_day)
+            delta = (p.price - prev) if prev is not None else None
+            prices.append({
+                "security": p.security, "price": p.price, "prev": prev, "delta": delta,
+                "impact": _q_amount(qty * delta) if delta is not None else None,
+            })
+        prices.sort(
+            key=lambda r: abs(r["impact"]) if r["impact"] is not None else ZERO, reverse=True
+        )
+
+    return {"date": on, "txns": txns, "prices": prices}
 
 
 # Chart geometry (fixed viewBox; templates can't do arithmetic — precompute here, like the donut).

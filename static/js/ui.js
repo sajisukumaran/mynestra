@@ -42,4 +42,58 @@ document.addEventListener("alpine:init", () => {
       this.collapsed = !this.collapsed;
     },
   });
+
+  // Value-over-time chart hover overlay (opt-in via c-line-chart `points`). Presentation only:
+  // tracks the nearest series point to the cursor to drive a tooltip/markers, and (when an
+  // events_url is wired) htmx-loads that date's drill panel on click. Reads its data from the
+  // element's data-* attributes, mirroring the window.__* JSON hand-off used elsewhere.
+  Alpine.data("votChart", () => ({
+    points: [],
+    vbw: 640,
+    eventsUrl: "",
+    hovered: false,
+    i: null,
+    pct: 0,
+    pt: { x: 0, ym: 0, yi: 0, iso: "", d: "", m: "", i: "", g: "" },
+    init() {
+      try {
+        this.points = JSON.parse(this.$el.dataset.points || "[]");
+      } catch (e) {
+        this.points = [];
+      }
+      this.vbw = parseFloat(this.$el.dataset.vbw) || 640;
+      this.eventsUrl = this.$el.dataset.eventsUrl || "";
+    },
+    move(e) {
+      if (!this.points.length) return;
+      const rect = this.$el.getBoundingClientRect();
+      if (!rect.width) return;
+      const vbx = ((e.clientX - rect.left) / rect.width) * this.vbw;
+      // Nearest point by x (points are x-ascending) via binary search — O(log n), so this scales
+      // to long daily-priced histories without a DOM node per point.
+      let lo = 0;
+      let hi = this.points.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (this.points[mid].x < vbx) lo = mid + 1;
+        else hi = mid;
+      }
+      if (lo > 0 && Math.abs(this.points[lo - 1].x - vbx) <= Math.abs(this.points[lo].x - vbx)) {
+        lo -= 1;
+      }
+      this.i = lo;
+      this.pt = this.points[lo];
+      this.pct = (this.pt.x / this.vbw) * 100;
+      this.hovered = true;
+    },
+    hide() {
+      this.hovered = false;
+      this.i = null;
+    },
+    drill() {
+      if (this.i === null || !this.eventsUrl || !window.htmx) return;
+      const url = this.eventsUrl + "?on=" + encodeURIComponent(this.pt.iso);
+      window.htmx.ajax("GET", url, { target: "#value-events" });
+    },
+  }));
 });
